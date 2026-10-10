@@ -4,8 +4,20 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `frontends/cli.py`; Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.1.0 — 2026-10-11
 
+- The GPU of any host is read from the standard DRM class and the NPU from the accel class, with one
+  short reader per driver: `i915` reports the share of the window the GPU was not idle with its clock
+  and ceiling, `amdgpu` the busy share it publishes itself, and `intel_vpu` the share the NPU worked.
+  A board module is still asked first, so a Jetson keeps its own source. A card whose driver publishes
+  no load is reported by name without numbers, and a host without one says `not_detected`.
+- `/api/stats` gains an `npu` object and a `npu` collector entry beside `gpu`; `gpu/usage` and
+  `npu/usage` join the history. `schema_version` stays 1 and every existing key is unchanged, so an
+  older client ignores the additions. A GPU without a load reading is now possible, and both viewers
+  handle it.
+- The web page's Recent history draws every series the endpoint gives it, instead of the first twelve
+  with a dropdown for the rest. A row of buttons names the kinds of series the view holds so a viewer
+  can take one out, and each kind gets its own labelled section.
 - `platmon` live view shows one view at a time, the same six the web page has as tabs: Overview,
   Resources, Network, Storage, Temp & power and System. `1`-`6`, Tab and the arrow keys switch them,
   `--view` picks the first one, and a tab bar in the header names them. Switching makes no request.
@@ -21,6 +33,12 @@ API schema versions are independent of release versions.
 - The detail beside each Overview reading takes the width the terminal has free, instead of a fixed 16
   columns that cut `x86_pkg_temp · hottest of 38` to `x86_pkg_temp · h`.
 - `--once`, pipes, Windows and `/text` are unchanged: the plain screen with every section.
+- Five fixes from running 1.0.0's package on an x86_64 PC (22 logical CPUs, 31 temperature channels, an
+  `acpi_fan` without a tachometer): Storage reports the filesystem's read-only state rather than this
+  process's mount; history keeps every core's series inside its 64-series limit; a fan speed the
+  firmware withholds is reported as `no_data` instead of failing the group; the live view draws no more
+  lines than the terminal has rows; and the service integration tests no longer read the host's sensors.
+- The README says what to check when another machine cannot reach the service.
 
 ## 1.0.0 — 2026-10-10
 
