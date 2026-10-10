@@ -1,5 +1,43 @@
 # Release readiness
 
+## 1.1.0 release gate (2026-10-11)
+
+Changes since 1.0.0: generic GPU and NPU collectors (#63), the web page's history sections (#62), the
+live view's six views with scrolling (#64, #65) and five fixes found by running 1.0.0 on a PC (#61).
+`/api/stats` gains `npu` within `schema_version` 1; no `platmon.ini` key, endpoint or packaging layout
+changes, and `--view` is the only new command option.
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| `pytest` at the release commit, locally | 859 passed, 2 skipped (the Python 3.14 profile modes) |
+| CI on Python 3.9 and 3.13, plus the package job | pass on #61, #62, #63, #64, #65 and this change |
+| `scripts/package.py` then `scripts/check_package.py` | `platmon_1.1.0-1_all.deb` smoke pass (server, CLI, API, web, SVG) |
+| `SHA256SUMS` of the built files | `sha256sum -c` OK for the `.deb`, the archive and `BUILD.json` |
+| dpkg lifecycle, 1.0.0-1 → 1.1.0-1 in a disposable Ubuntu 24.04 container | install, config-preserving upgrade **and downgrade**, disabled/masked state, remove/purge, source-unit refusal and invalid-config recovery all pass |
+| x86_64 PC (Ubuntu 26.04, 22 cores, 38 thermal zones, 4 interfaces) | the new live view driven through a pty against the installed 1.0.0 service: six views, every switching and scrolling key, resize 30–119 columns, `NO_COLOR`/`PLATMON_ASCII`, the offline banner over cached data, `q` restoring the terminal |
+| GPU and NPU readers (#63), on that PC | Intel Arc (`i915`) 4.7 % idle / 43.7 % under a VA-API load; Intel AI Boost (`intel_vpu`) 0 % idle with a 1400 MHz ceiling; service CPU 0.83 % of one core, measured against 0.96 % before |
+
+Not verified, and therefore the gates still open before this draft is published:
+
+- **No ARM device acceptance for 1.1.0.** The 1.0.0 package was installed, run as the real systemd
+  service and purged on an Orin Nano and a Raspberry Pi 4 (below); none of that was repeated for this
+  version, because neither board was available to the change. The service's sandboxing, startup and the
+  boards' own readings are unverified at 1.1.0.
+- **No ARM CPU re-measurement.** #63 adds two collectors that run on every collection. Their cost was
+  measured only on the PC above, where the whole process fell from 0.96 % to 0.83 % of one core. The
+  2.0 % target was last measured on the boards at 1.0.0, before those collectors existed, so the ARM
+  result does not carry over. A Jetson keeps its own GPU source and has no accel class, so its added
+  path is a `not_detected` check rather than a reader, but that is reasoning, not a measurement.
+- The new live view has not been run on a Jetson or a Raspberry Pi: its Jetson-specific rows (L4T,
+  power rails, `MAXN_SUPER`, the 85/95 °C levels) are covered by fixtures only.
+- The web page's history sections (#62) were checked in the harness and a real Chromium during #62, not
+  again at this release commit.
+
+Publishing the draft therefore needs the ARM package acceptance and a CPU window per board, recorded
+here as 1.0.0's were. The draft release and its artifacts are the review point, not a release decision.
+
 ## 1.0.0 release gate (2026-10-10)
 
 The default configuration since the enablement policy (every feature on; Probe idle without targets;
