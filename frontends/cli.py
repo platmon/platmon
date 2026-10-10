@@ -500,12 +500,14 @@ def observed_text(o):
     return f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
 
 
-def detail_widths(width, columns):
-    """Column widths for a detail table: the value columns a narrow terminal has no room for fall off the
-    right, and the name column keeps what the rest leave it (at most 28)."""
-    while columns and 14 + sum(columns) > width:
+def detail_widths(width, items, columns):
+    """Column widths for a detail table: the name column holds the longest name (interfaces like
+    enx80691aa55882 are long), the value columns a narrow terminal cannot hold fall off the right, and
+    where even one value column leaves the names less than they need, the names are the ones cut."""
+    names = 4 + max([len(i["name"]) for i in items] + [6]) + 2
+    while len(columns) > 1 and names + sum(columns) > width:
         columns = columns[:-1]
-    return [min(28, max(14, width - sum(columns)))] + columns
+    return [max(8, min(width - sum(columns), max(names, 28)))] + columns
 
 
 def joined(width, parts):
@@ -537,8 +539,9 @@ class View:
         return self.st(f"  {label:<10}", "muted", "bold") + text
 
     def row(self, widths, cells, tones):
-        """One table line; cells and tones past the widths a narrow terminal kept are left out."""
-        return "".join(self.st(pad(c, w, i > 0), *(t or "").split())
+        """One table line; cells and tones past the widths a narrow terminal kept are left out, and a cell
+        too long for its column is cut there rather than at the edge of the screen."""
+        return "".join(self.st(pad(c[:w], w, i > 0), *(t or "").split())
                        for i, (c, w, t) in enumerate(zip(cells, widths, tones)))
 
     def no_rate(self, widths, name, item):
@@ -756,7 +759,7 @@ def body_network(v):
     body = []
     if ifaces:
         shown = ifaces[:MAX_ROWS]
-        widths = detail_widths(v.width, [13, 13, 17, 12])
+        widths = detail_widths(v.width, shown, [13, 13, 17, 12])
         body.append(v.row(widths, ["  INTERFACES", "↓ RX", "↑ TX", "PKT/S rx · tx", "ERR · DROP"],
                           ["muted bold"] + ["muted"] * 4))
         for i in shown:
@@ -848,7 +851,7 @@ def body_storage(v):
                         + f"{len(items)} partition{'s' if len(items) != 1 else ''}, {mounted} mounted")
 
     if disks:
-        widths = detail_widths(v.width, [13, 13, 17, 12])
+        widths = detail_widths(v.width, disks, [13, 13, 17, 12])
         body += ["", v.row(widths, ["  DISK I/O", "READ", "WRITE", "OPS/S r · w", "I/O TIME"],
                            ["muted bold"] + ["muted"] * 4)]
         for d in disks[:MAX_ROWS]:

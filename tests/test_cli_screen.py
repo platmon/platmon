@@ -215,6 +215,25 @@ def test_a_view_with_nothing_to_show_says_so(view, text):
     assert any(text in line for line in lines)
 
 
+@pytest.mark.parametrize("width", [119, 79, 60, 44, 30])
+def test_a_long_name_never_cuts_a_value_off_a_table(width):
+    """An interface like enx80691aa55882 used to push the rate columns past the right edge, so the last
+    one ended mid-number ("0 B"). The name column holds the longest name; where it cannot, the name is
+    what gets cut, and a value column drops whole before that."""
+    items = [dict(RICH["network"]["interfaces"][0], name=name) for name in ("lo", "enx80691aa55882")]
+    lines = plain(screen(dict(RICH, network={"interfaces": items}), OBSERVED, width, 30, Style(), LIVE,
+                         {}, "network"))
+    rows = [line for line in lines if line.strip().startswith(("lo", "enx"))]
+    assert len(rows) == 2
+    values = ["2.0 KiB/s", "1.0 KiB/s", "8 · 4", "0 · 3"]  # rx, tx, packets, errors · dropped of RATES
+    for row in rows:
+        assert vlen(row) <= width
+        assert any(value in row for value in values), row  # at least the first value column survives
+        for value in values:  # and each one is either there in full or dropped, never cut
+            for cut in (value[:-1], value[:-2]):
+                assert cut not in row or value in row, (row, cut)
+
+
 def test_offline_dims_every_view():
     down = dict(LIVE, state="offline", age=47, error="cannot reach platmon at x:9797 (timed out)")
     lines = screen(RICH, OBSERVED, 119, 40, Style(), down, {}, "thermal")
