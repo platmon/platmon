@@ -19,6 +19,7 @@ import select
 import shutil
 import signal
 import sys
+import textwrap
 import time
 import urllib.error
 import urllib.request
@@ -327,10 +328,11 @@ class Style:
     def __init__(self, color=True, utf8=True):
         self.color = color
         (self.full, self.track, self.tick, self.rule, self.dot, self.cross, self.up, self.gap,
-         self.larr, self.rarr, self.sparks) = (("█", "░", "╎", "─", "●", "✕", "▲", "·", "←", "→",
-                                                "▁▂▃▄▅▆▇█") if utf8 else
-                                               ("#", "-", "|", "-", "*", "x", "!", ".", "<", ">",
-                                                "_.-:=+*#"))
+         self.larr, self.rarr, self.uarr, self.darr,
+         self.sparks) = (("█", "░", "╎", "─", "●", "✕", "▲", "·", "←", "→", "↑", "↓",
+                          "▁▂▃▄▅▆▇█") if utf8 else
+                         ("#", "-", "|", "-", "*", "x", "!", ".", "<", ">", "^", "v",
+                          "_.-:=+*#"))
 
     def __call__(self, text, *names):
         codes = ";".join(self.CODES[n] for n in names if n)
@@ -465,6 +467,31 @@ def next_view(keys, view):
     return view
 
 
+KEYS = re.compile(r"\033(?:\[([0-9;?]*)([A-Za-z~])|O([A-Za-z]))")  # CSI and SS3: the arrows and PgUp/PgDn
+BOTTOM = 1 << 30  # End: further down than any body, which screen() clamps to the last line
+
+
+def next_offset(keys, offset, page):
+    """Where the body is scrolled to after a key press: the up and down arrows a line, PgUp and PgDn a
+    page, Home and End its two ends. Other keys leave it alone; screen() clamps what comes back, so a
+    key held down cannot run the offset away past the end."""
+    for params, final, ss3 in KEYS.findall(keys):
+        key = final or ss3
+        if key == "A":
+            offset -= 1
+        elif key == "B":
+            offset += 1
+        elif key == "~" and params == "5":
+            offset -= page
+        elif key == "~" and params == "6":
+            offset += page
+        elif key in ("H", "h") or (key == "~" and params == "1"):
+            offset = 0
+        elif key in ("F", "f") or (key == "~" and params == "4"):
+            offset = BOTTOM
+    return max(0, offset)
+
+
 def tabbar(st, width, view):
     """The views on one line, the active one marked, in the header's rule line: the widest label set that
     fits, and the position alone when even the shortest does not. Without color the active label is
@@ -577,6 +604,11 @@ def body_overview(v):
         body += [st(f"  {note}", "warn"), ""]
 
     bw, dw, sw = (20, 22, SPARK_POINTS) if wide else (10, 16, 12 if width >= 62 else 0)
+    # The detail says which sensor is the hottest and of how many; at 16 columns "x86_pkg_temp · hottest
+    # of 38" became "x86_pkg_temp · h" while 22 columns of the terminal went unused. The column grows to
+    # what the details need, no further, so a board with short ones keeps the layout it had.
+    needed = max((len(detail) for *_, detail in metrics(s)), default=0) + 2  # +2: a gap before the spark
+    dw = max(dw, min(needed, width - (2 + 6 + 7 + 1 + bw + 2 + sw)))
     if wide:
         body.append(pad(v.title("OVERVIEW"), 2 + 6 + 7 + 1 + bw + 2 + dw) + st(f"last {SPARK_POINTS} updates", "muted"))
     for label, value, unit, lim, detail in metrics(s):
@@ -925,11 +957,13 @@ BODIES = {"overview": body_overview, "resources": body_resources, "network": bod
           "storage": body_storage, "thermal": body_thermal, "system": body_system}
 
 
-def screen(s, obs, width, height, st, status, history, view="overview"):
+def screen(s, obs, width, height, st, status, history, view="overview", offset=0):
     """The live view as lines of at most width columns and at most height lines.
     status: state (live, partial, offline), age (seconds), error (explain() text or None), addr, interval.
     history: label -> the latest values of that Overview reading (None for a missed answer).
-    view: which of VIEWS to draw; the tab bar names the others."""
+    view: which of VIEWS to draw; the tab bar names the others.
+    offset: how far down the view's body to start, clamped here to what there is to show. The clamped
+    offset and the page size go back in status["scroll"], so the caller scrolls by what was drawn."""
     wide = width >= WIDE
     sys_ = s.get("system") or {}
     up = int(s["uptime"])
@@ -951,9 +985,17 @@ def screen(s, obs, width, height, st, status, history, view="overview"):
 
     banner = []
     if status.get("error"):
+        # Why the data is old and what to do about it are the whole point of the banner, so it wraps:
+        # a cut line loses the errno, the retry interval or the name of the script to run.
         first, *rest = status["error"].split("\n")
-        banner.append(st(pad(f"  {st.cross} NOT CURRENT  {first} · retrying every {status['interval']:g} s", width), "crit_bg"))
-        banner += [st("                 " + r.strip(), "crit") for r in rest]
+        lead = f"  {st.cross} NOT CURRENT  "
+        indent = " " * len(lead)
+        room = max(16, width - len(lead))
+        said = textwrap.wrap(f"{first} · retrying every {status['interval']:g} s", room) or [""]
+        banner.append(st(pad(lead + said[0], width), "crit_bg"))
+        banner += [st(pad(indent + line, width), "crit_bg") for line in said[1:]]
+        for r in rest:
+            banner += [st(indent + line, "crit") for line in textwrap.wrap(r.strip(), room)]
 
     body = BODIES[view](View(s, obs, width, st, history))
     while body and not body[-1]:
@@ -962,14 +1004,23 @@ def screen(s, obs, width, height, st, status, history, view="overview"):
         body = [st(ANSI.sub("", line), "dim") for line in body]
 
     keys = (st("  ") + st("q", "bold") + st(" quit", "muted")
-            + (st(" · ", "muted") + st(f"1-6 {st.larr}/{st.rarr}", "bold") + st(" view", "muted") if width >= 60 else ""))
+            + (st(" · ", "muted") + st(f"1-6 {st.larr}/{st.rarr}", "bold") + st(" view", "muted") if width >= 60 else "")
+            + (st(" · ", "muted") + st(f"{st.uarr}/{st.darr}", "bold") + st(" scroll", "muted") if width >= 80 else ""))
     foot = [st(st.rule * width, "muted"),
             spread(keys, st((f"platmon {VERSION} · {status['addr']} · every {status['interval']:g} s" if wide
                              else f"{VERSION} · {status['addr']} · {status['interval']:g} s") + " ", "muted"), width)]
     room = max(1, height - len(head) - len(banner) - len(foot))
-    if len(body) > room:
-        hidden = len(body) - room + 1
-        body = body[:room - 1] + [st(f"  +{hidden} more lines · enlarge the terminal", "muted")]
+    status["scroll"] = (0, max(1, room - 1))
+    if len(body) > room:  # the last line says what is out of sight and how to reach it
+        page = room - 1
+        last = len(body) - page
+        offset = max(0, min(offset, last))
+        above, below = offset, last - offset
+        status["scroll"] = (offset, max(1, page))
+        shown = [f"{st.uarr} {above} above" if above else "", f"{st.darr} {below} below" if below else ""]
+        body = body[offset:offset + page] + [
+            joined(width, [st("  " + " · ".join(x for x in shown if x), "muted"),
+                           st(f"  ·  {st.uarr}{st.darr} PgUp/PgDn Home/End scroll", "muted")])]
     # A terminal too short for the header, one line and the footer still gets only the lines it has:
     # drawing past the last row scrolls the screen and leaves the frame in pieces.
     return [fit(line, width) for line in (head + banner + body + foot)[:max(height, 1)]]
@@ -1067,6 +1118,7 @@ def live(addr, interval, fetch, first, view="overview"):
             history[label].append(None)
 
     (s, obs), got, error = first, time.monotonic(), None
+    offset, page = 0, 1
     remember(s)
     with Terminal() as term:
         deadline = time.monotonic() + interval
@@ -1075,14 +1127,16 @@ def live(addr, interval, fetch, first, view="overview"):
             state = "offline" if error else "partial" if collection_note(s) else "live"
             status = {"state": state, "age": data_age(s, got, time.monotonic()), "error": error, "addr": addr,
                       "interval": interval}
-            term.draw(screen(s, obs, cols - 1, rows, st, status, history, view))  # cols - 1: never wraps the last column
+            term.draw(screen(s, obs, cols - 1, rows, st, status, history, view, offset))  # cols - 1: never wraps the last column
+            offset, page = status["scroll"]  # what was drawn, so scrolling starts from what is on screen
             event = term.wait(deadline - time.monotonic())
             if event == "resize":
                 continue
             if event != "tick":
                 if "q" in event.lower():
                     return
-                view = next_view(event, view)  # redrawn from the data in hand, no request
+                moved = next_view(event, view)
+                view, offset = moved, 0 if moved != view else next_offset(event, offset, page)
                 continue
             try:
                 s, obs = fetch()
