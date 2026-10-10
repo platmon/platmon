@@ -38,6 +38,12 @@ def test_series_ids_follow_identities_and_gaps_are_none():
     assert points_of(stats(1, disk_rates=False), {})["disk_io/8:0/sda/write_bytes_per_s"] is None
 
 
+def test_the_gpu_is_one_series_and_a_card_without_a_load_is_a_gap():
+    assert points_of({"gpu": {"usage": 12.5}}, {})["gpu/usage"] == 12.5
+    assert points_of({"gpu": {"usage": None}}, {})["gpu/usage"] is None  # a card that publishes no load
+    assert "gpu/usage" not in points_of({"gpu": None}, {})  # no graphics device: no series to keep
+
+
 def test_a_new_namespace_or_index_is_a_new_series():
     a, b = points_of(stats(1), {}), points_of(stats(1, ns="netns1:b", ifindex=9), {})
     assert not {k for k in a if k.startswith("network/")} & {k for k in b if k.startswith("network/")}

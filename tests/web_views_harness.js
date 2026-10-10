@@ -12,7 +12,8 @@ const stats = {model: 'Fixture', platform: 'Linux', uptime: 12, system: {}, powe
   temperature: {'<b>hot</b>': 60, cool: 40}, power: {}, fans: [],
   network: {interfaces: [{name: 'lo', rx: {}, tx: {}, rates: {rx_bytes_per_s: 999999, tx_bytes_per_s: 0, rx_packets_per_s: 0, tx_packets_per_s: 0}},
     {name: 'eth0', rx: {}, tx: {}, rates: {rx_bytes_per_s: 1024, tx_bytes_per_s: 2048, rx_packets_per_s: 1, tx_packets_per_s: 2}}]}};
-const history = {retention_s: 600, series: {'cpu/0/usage': [[1, 2000, 20]], 'memory/used_bytes': [[1, 1000, 2e9]],
+const history = {retention_s: 600, series: {'cpu/0/usage': [[1, 2000, 20]], 'gpu/usage': [[1, 1500, 30]],
+  'memory/used_bytes': [[1, 1000, 2e9]],
   'network/ns/1/eth0/rx_bytes_per_s': [[1, 3000, 1024]], 'temperature/name:cool': [[1, 1000, 40]]}};
 const context = vm.createContext({AbortController, console, performance: {now: () => now},
   location: {hash: ''}, history: {replaceState(_, __, hash) { context.location.hash = hash; }},
@@ -85,7 +86,9 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   assert.equal(label('temperature/src1:abc'), 'temp cpu/a');
   assert.equal(label('temperature/name:board'), 'temp board');
   assert.equal(el('cpu-cap').textContent, 'mean 30.0% · 2 of 2 measured');
-  clickGroup('cpu/');  // the CPU cores button off leaves the other kind of this view
+  assert.deepEqual(el('hist').innerHTML.match(/<h3>[^<]+<\/h3>/g), ['<h3>CPU cores</h3>', '<h3>GPU</h3>', '<h3>RAM</h3>'],
+    'the GPU is a kind of its own, between the cores and RAM');
+  clickGroup('cpu/');  // the CPU cores button off leaves the other kinds of this view
   assert(el('hist').innerHTML.includes('RAM used') && !el('hist').innerHTML.includes('CPU0'));
   const graph = el('hist').innerHTML;
   stats.cpu[0].usage = 80; await run('tick()');

@@ -56,7 +56,7 @@ PASSIVE = (("network", "interfaces"), ("disk_io", "disks"), ("pressure", "resour
 
 def sensor_values(stats):
     """(JSON Pointer, kind, key, value) of every value of recorded stats that needs a read record:
-    temperature and power values, fan rpm/percent, CPU freq, GPU usage/freq/max_freq. The collector attaches
+    temperature and power values, fan rpm/percent, CPU freq, GPU and NPU usage/freq/max_freq. The collector attaches
     its records by these, and the Sampler checks that none is missing, so both use the same list."""
     for table in ("temperature", "power"):
         values = stats.get(table)
@@ -71,10 +71,11 @@ def sensor_values(stats):
     for i, c in enumerate(cpus if isinstance(cpus, list) else ()):  # i is the row, c["id"] the CPU
         if isinstance(c, dict) and "freq" in c:
             yield pointer("cpu", i, "freq"), "cpu", c.get("id"), c["freq"]
-    gpu = stats.get("gpu")
-    for field in ("usage", "freq", "max_freq"):
-        if isinstance(gpu, dict) and field in gpu:
-            yield pointer("gpu", field), "gpu", field, gpu[field]
+    for kind in ("gpu", "npu"):  # one accelerator each, with the same three values
+        values = stats.get(kind)
+        for field in ("usage", "freq", "max_freq"):
+            if isinstance(values, dict) and field in values:
+                yield pointer(kind, field), kind, field, values[field]
 
 
 def _number(value):

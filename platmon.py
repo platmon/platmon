@@ -15,6 +15,8 @@ import sys
 from collector import BOARD, PLATFORM, collect_recorded
 from collector.common import CpuCounters
 from collector.disk_io import DiskCounters
+from collector.gpu import Gpu
+from collector.npu import Npu
 from collector.history import History
 from collector.network import NetworkCounters
 from collector.probe import Probe, parse_targets
@@ -157,10 +159,14 @@ def main(argv=None):
     disk_io = DiskCounters(clock[0], max_gap=max(3 * interval, 5.0)) if cfg["disk_io"].getboolean("enabled") else None
     # pressure stall information, where the kernel provides it (see docs/pressure.md)
     pressure = Pressure(clock[0]) if cfg["pressure"].getboolean("enabled") else None
+    # the GPU of the standard DRM class, kept between collections because i915 publishes idle time
+    graphics = Gpu(clock[0], max_gap=max(3 * interval, 5.0))
+    # the NPU of the standard accel class, kept the same way: its busy time is a counter too
+    accelerator = Npu(clock[0], max_gap=max(3 * interval, 5.0))
     # {} keeps what was logged about unreadable optional sensors, so a lasting failure is logged once.
     # The same clock times the CPU readings, every sensor read and the Sampler's collections.
-    sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io, pressure), interval,
-                      clock=clock)
+    sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io, pressure,
+                                        graphics, accelerator), interval, clock=clock)
     # Low-frequency groups, each on its own thread and cadence. With no configured targets,
     # Probe stays idle: no worker, observation group or connection is created.
     slow = [Slow(name, observe(), cfg[name].getfloat("interval"), clock[0])

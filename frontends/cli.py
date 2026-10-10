@@ -252,8 +252,15 @@ def render(s, obs=None):
         lines.append(note)
     g = s["gpu"]
     if g:
-        freq = f"  {g['freq'] / 1e6:4.0f} MHz" if g.get("freq") else ""  # None: clock not readable
-        lines.append(f"GPU   {bar(g['usage'])} {g['usage']:5.1f}%{freq}")
+        freq = f"  {g['freq'] / 1e6:4.0f} MHz" if g.get("freq") else ""  # None or 0: clock not readable
+        # a card whose driver publishes no load, or the first reading of a counter: a clock, no share
+        load = f"{bar(g['usage'])} {g['usage']:5.1f}%" if g.get("usage") is not None else f"{bar(0)}    n/a"
+        lines.append(f"GPU   {load}{freq}")
+    n = s.get("npu")
+    if n:
+        freq = f"  {n['freq'] / 1e6:4.0f} MHz" if n.get("freq") else ""
+        load = f"{bar(n['usage'])} {n['usage']:5.1f}%" if n.get("usage") is not None else f"{bar(0)}    n/a"
+        lines.append(f"NPU   {load}{freq}")
     m = s["memory"]
     lines.append(f"RAM   {bar(100 * m['used'] / m['total'])} {gib(m['used'])}/{gib(m['total'])}")
     if m["swap_total"]:
@@ -302,7 +309,8 @@ def use_levels(levels):
 
 
 def level(v, limits):
-    return "crit" if v >= limits[1] else "warn" if v >= limits[0] else "ok"
+    """Without limits (a reading [thresholds] does not set levels for) nothing is a warning."""
+    return "ok" if not limits else "crit" if v >= limits[1] else "warn" if v >= limits[0] else "ok"
 
 
 def tone(lv):
@@ -371,10 +379,12 @@ def spark(st, values, width, lv="ok"):
 def metrics(s):
     """The web Overview's readings: (label, value or None, unit, limits, detail)."""
     cpus = [c["usage"] for c in s["cpu"] if isinstance(c.get("usage"), (int, float))]
-    m, d, g = s["memory"], s["disk"], s.get("gpu")
+    m, d, g, n = s["memory"], s["disk"], s.get("gpu"), s.get("npu")
     out = [("CPU", sum(cpus) / len(cpus) if cpus else None, "%", LIMITS["cpu"], f"mean of {len(cpus)} cores")]
     if g:
         out.append(("GPU", g["usage"], "%", LIMITS["gpu"], f"{g['freq'] / 1e6:.0f} MHz" if g.get("freq") else ""))
+    if n:  # no [thresholds] entry sets levels for an NPU, so it is shown without one
+        out.append(("NPU", n["usage"], "%", None, f"{n['freq'] / 1e6:.0f} MHz" if n.get("freq") else ""))
     out.append(("RAM", 100 * m["used"] / m["total"] if m["total"] else None, "%", LIMITS["memory"],
                 f"{gib(m['used'])} / {gib(m['total'])}"))
     out.append(("DISK", 100 * d["used"] / d["total"] if d["total"] else None, "%", LIMITS["filesystem"],
