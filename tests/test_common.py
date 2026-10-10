@@ -214,15 +214,16 @@ def test_detect(compatible, has_dmi, expected):
     assert detect(compatible, has_dmi) == expected
 
 
-def without_host_gpu(monkeypatch, tmp_path):
-    """Read the GPU from an empty DRM tree, so the card of the machine running the tests does not decide
-    what the collector reports."""
+def without_host_accelerators(monkeypatch, tmp_path):
+    """Read the GPU and the NPU from empty trees, so the hardware of the machine running the tests does
+    not decide what the collector reports."""
     import functools
 
     import collector
-    empty = tmp_path / "no-drm"
+    empty = tmp_path / "no-accelerators"
     empty.mkdir(exist_ok=True)
     monkeypatch.setattr(collector, "Gpu", functools.partial(collector.Gpu, root=str(empty)))
+    monkeypatch.setattr(collector, "Npu", functools.partial(collector.Npu, root=str(empty)))
     return empty
 
 
@@ -235,7 +236,7 @@ def without_host_sensors(monkeypatch, tmp_path):
     empty.mkdir(exist_ok=True)
     monkeypatch.setattr(common, "thermal_zones", functools.partial(common.thermal_zones, root=str(empty)))
     monkeypatch.setattr(common, "hwmon_sensors", functools.partial(common.hwmon_sensors, root=str(empty)))
-    without_host_gpu(monkeypatch, tmp_path)
+    without_host_accelerators(monkeypatch, tmp_path)
     return empty
 
 

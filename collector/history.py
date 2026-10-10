@@ -18,7 +18,7 @@ MAX_DROPPED_IDS = 256  # distinct dropped ids remembered; dropped_series stops g
 # shows comes first; temperature is last because boards expose dozens of nearly identical channels (one
 # per core, plus the package and its thermal zone twin), while every CPU core, interface and disk is a
 # reading of its own. An id with none of these prefixes ranks with temperature.
-PRIORITY = ("memory/", "cpu/", "gpu/", "network/", "disk_io/", "observation/", "temperature/")
+PRIORITY = ("memory/", "cpu/", "gpu/", "npu/", "network/", "disk_io/", "observation/", "temperature/")
 
 
 def priority(sid):
@@ -39,9 +39,10 @@ def points_of(stats, sensor_meta):
     m = stats.get("memory") or {}
     if "used" in m:
         out["memory/used_bytes"] = m["used"]
-    g = stats.get("gpu")
-    if isinstance(g, dict) and "usage" in g:  # one GPU is reported, so the id needs nothing to tell it apart
-        out["gpu/usage"] = g["usage"]
+    for kind in ("gpu", "npu"):  # one of each is reported, so the id needs nothing to tell them apart
+        values = stats.get(kind)
+        if isinstance(values, dict) and "usage" in values:
+            out[f"{kind}/usage"] = values["usage"]
     meta = sensor_meta or {}
     for key, value in (stats.get("temperature") or {}).items():
         sid = (meta.get(pointer("temperature", key)) or {}).get("id")

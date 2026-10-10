@@ -531,9 +531,9 @@ def test_all_optional_failing_still_publishes_then_required_failure_keeps_last_g
 
     import collector
     from collector import common, sysfs
-    from test_common import Proc, fail_reads, fake_hwmon, idle_busy, without_host_gpu
+    from test_common import Proc, fail_reads, fake_hwmon, idle_busy, without_host_accelerators
 
-    without_host_gpu(monkeypatch, tmp_path)  # this host's card would answer where the fake tree has none
+    without_host_accelerators(monkeypatch, tmp_path)  # this host's own devices would answer otherwise
     root = fake_hwmon(tmp_path, [{"name": "chip", "temp1_input": 1, "power1_input": 1, "fan1_input": 1}])
     monkeypatch.setattr(common, "hwmon_chips", lambda r, *groups: [(f"{root}/hwmon0", "chip")])
     monkeypatch.setattr(common, "thermal_zones", lambda group=None: ({}, set()))
@@ -551,7 +551,8 @@ def test_all_optional_failing_still_publishes_then_required_failure_keeps_last_g
     stats, status = s.read()
     assert stats is not None and stats["cpu"] == [{"id": 0, "usage": 50.0, "freq": None}]
     assert {k: v["state"] for k, v in stats["collectors"].items()} == {
-        "core": "ok", "cpu_frequency": "error", "gpu": "unavailable", "temperature": "error", "power": "error",
+        "core": "ok", "cpu_frequency": "error", "gpu": "unavailable", "npu": "unavailable",
+        "temperature": "error", "power": "error",
         "fans": "error", "power_mode": "unavailable", "board_info": "unavailable"}
     assert stats["fans"] == [{"name": "chip fan1", "rpm": None, "percent": None}]
     assert (status["state"], status["ready"], status["last_attempt"]["state"]) == ("degraded", True, "ok")

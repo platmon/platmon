@@ -225,7 +225,7 @@
   <div id="panel-resources" role="tabpanel" aria-labelledby="tab-resources" tabindex="0" hidden>
     <section class="card" data-card hidden><div class="card-head"><h2>CPU cores</h2><span class="cap" id="cpu-cap"></span></div><div id="cpu"></div></section>
     <div class="grid">
-      <section class="card" data-card hidden><div class="card-head"><h2>GPU &amp; memory</h2></div><div id="res"></div></section>
+      <section class="card" data-card hidden><div class="card-head"><h2>Accelerators &amp; memory</h2></div><div id="res"></div></section>
       <section class="card" data-card hidden><div class="card-head"><h2>Resource pressure</h2><span class="cap">Share of time stalled · avg10</span></div><div id="psi"></div></section>
     </div>
   </div>
@@ -450,11 +450,11 @@ function storageRows() {
 // One bounded history cache shared across detail views, fetched at most every 10 s.
 // Overview does not fetch history. A null is a gap in the line, never 0.
 let hist = null, histAt = 0, histAsked = -Infinity, histSupported = true, histRequest = null;
-const HIST_PREFIXES = {resources: ['cpu/', 'gpu/', 'memory/'], network: ['network/', 'observation/wifi/', 'observation/probe/'],
+const HIST_PREFIXES = {resources: ['cpu/', 'gpu/', 'npu/', 'memory/'], network: ['network/', 'observation/wifi/', 'observation/probe/'],
   storage: ['disk_io/', 'observation/storage/'], thermal: ['temperature/']};
 // One button per kind of series a view can draw, in this order, labelled with how many it covers. A
 // viewer turns a kind off to take its graphs out of the list; single series are not picked one at a time.
-const HIST_GROUPS = [['cpu/', 'CPU cores'], ['gpu/', 'GPU'], ['memory/', 'RAM'], ['network/', 'Interfaces'],
+const HIST_GROUPS = [['cpu/', 'CPU cores'], ['gpu/', 'GPU'], ['npu/', 'NPU'], ['memory/', 'RAM'], ['network/', 'Interfaces'],
   ['observation/wifi/', 'Wi-Fi'], ['observation/probe/', 'TCP connect'], ['disk_io/', 'Disk I/O'],
   ['observation/storage/', 'Filesystems'], ['temperature/', 'Temperature']];
 const histOff = new Set();  // kinds a viewer turned off; every kind of a view starts on
@@ -462,6 +462,7 @@ const wantsHistory = () => !!HIST_PREFIXES[activeTab];
 const historyMatches = id => (HIST_PREFIXES[activeTab] || []).some(prefix => id.startsWith(prefix));
 const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^gpu\/usage$/, () => 'GPU'],
+  [/^npu\/usage$/, () => 'NPU'],
   [/^observation\/storage\/([^/]+)\/[^/]+\/(used_bytes|available_bytes)$/, m => `FS ${m[1]} ${m[2] === 'used_bytes' ? 'used' : 'free'}`],
   [/^observation\/wifi\/[^/]+\/\d+\/([^/]+)\/signal_dbm$/, m => `${m[1]} signal`],
   [/^observation\/probe\/([^/]+)\/connect_ms$/, m => `TCP ${m[1]}`],
@@ -477,7 +478,7 @@ function sensorName(group, sid) {
   return ptr ? ptr.slice(group.length + 2).replace(/~1/g, '/').replace(/~0/g, '~') : sid;
 }
 const histValue = (id, v) => id.startsWith('temperature') ? v.toFixed(1) + ' °C'
-  : id.startsWith('cpu/') || id.startsWith('gpu/') ? v.toFixed(1) + '%'
+  : id.startsWith('cpu/') || id.startsWith('gpu/') || id.startsWith('npu/') ? v.toFixed(1) + '%'
   : id.includes('/wifi/') ? v.toFixed(1) + ' dBm' : id.includes('/probe/') ? v.toFixed(1) + ' ms'
   : id.startsWith('memory') || id.includes('/storage/') ? gib(v) : perS(v);
 // x of a point on the 0–200 chart: spaced by its age, so irregular intervals stay irregular
@@ -660,10 +661,12 @@ function renderResources(s) {
     `<strong class="${textLevel(level(c.usage, LIMITS.cpu))}">${c.usage.toFixed(1)}%</strong>` +
     bar(c.usage, LIMITS.cpu, false) + `<span>${mhz(c.freq) || '&nbsp;'}</span></div>`).join('') + '</div>' : '') +
     (note ? `<div class="muted">${esc(note)}</div>` : '');
-  const m = s.memory, g = s.gpu;
+  const m = s.memory, g = s.gpu, n = s.npu;
+  // the NPU has no levels in [thresholds], so its bar carries none either
+  const load = (a, label) => meter(label, (a.usage == null ? 'no load reading' : a.usage.toFixed(1) + '%') +
+    (a.freq ? ' · ' + mhz(a.freq) : ''), a.usage == null ? 0 : a.usage, label === 'GPU' ? LIMITS.gpu : null);
   $('res').innerHTML = '<div class="meters">' +
-    (g ? meter('GPU', (g.usage == null ? 'no load reading' : g.usage.toFixed(1) + '%') + (g.freq ? ' · ' + mhz(g.freq) : ''),
-      g.usage == null ? 0 : g.usage, LIMITS.gpu) : '') +
+    (g ? load(g, 'GPU') : '') + (n ? load(n, 'NPU') : '') +
     meter('RAM', `${gib(m.used)} / ${gib(m.total)}`, pctOf(m.used, m.total), LIMITS.memory) +
     (m.swap_total ? meter('Swap', `${gib(m.swap_used)} / ${gib(m.swap_total)}`, pctOf(m.swap_used, m.swap_total), LIMITS.memory) : '') + '</div>';
   $('psi').innerHTML = psiRows(s);

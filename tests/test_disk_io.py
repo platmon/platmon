@@ -260,7 +260,7 @@ def test_is_physical_follows_the_sysfs_link(tmp_path):
 @pytest.mark.parametrize("text", [None, "[core]\ninterval = 1\n", "[disk_io]\n", "[disk_io]\nenabled = yes\n"])
 def test_on_unless_disabled(monkeypatch, tmp_path, text):
     collect = started(monkeypatch, None if text is None else ini_file(tmp_path, text))
-    cpu, _, clock, _, disk_io, _, _ = collect.args
+    cpu, _, clock, _, disk_io, *_ = collect.args
     assert isinstance(disk_io, DiskCounters) and disk_io.clock is clock is cpu._clock and disk_io._max_gap == 5 * S
 
 

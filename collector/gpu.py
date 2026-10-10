@@ -8,7 +8,7 @@ import re
 import time
 
 from . import sysfs
-from .sysfs import entries
+from .sysfs import driver_of, entries
 
 CARD = re.compile(r"card\d+")
 RC6 = "gt/gt0/rc6_residency_ms"   # i915: cumulative ms the GPU spent in its RC6 idle state
@@ -33,7 +33,7 @@ class Gpu:
         if not cards:
             group.note("gpu", "not_detected")
             return None
-        drivers = [(name, self._driver(f"{drm}/{name}", group)) for name in cards]
+        drivers = [(name, driver_of(f"{drm}/{name}", group)) for name in cards]
         # The first card this module can read; with none, the first card is still named, so a host with a
         # GPU platmon cannot measure says so instead of looking like a host without one.
         name, driver = next(((n, d) for n, d in drivers if d in READERS), drivers[0])
@@ -72,14 +72,6 @@ class Gpu:
         group.sensor("usage", self._source("percent", f"{card}/{BUSY}", group), group.span)
         return {"usage": None if busy is None else group.got(float(busy)), "freq": None, "max_freq": None,
                 "driver": driver, "provider": "gpu_busy_percent"}
-
-    def _driver(self, card, group):
-        """The driver name from the device's uevent (DRIVER=i915); None where there is none to read."""
-        text = group.read(f"{card}/device/uevent", "uevent", parse=str, found=card)
-        for line in (text or "").split("\n"):
-            if line.startswith("DRIVER="):
-                return line[len("DRIVER="):].strip()
-        return None
 
     def _clock(self, card, attr, key, group):
         """A clock attribute in MHz as Hz, with the record of its read."""

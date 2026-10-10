@@ -107,7 +107,7 @@ instead of being served as new data.
 ```
 
 Covered: every value in `temperature` and `power`, `rpm` and `percent` of every fan, `freq` of every CPU
-(CPU usage has `cpu_sampling`), and the GPU's `usage`, `freq` and `max_freq`. A pointer names a position in
+(CPU usage has `cpu_sampling`), and the GPU's and NPU's `usage`, `freq` and `max_freq`. A pointer names a position in
 this snapshot only: labels and the order of `fans` and `cpu` can change (the index in `/cpu/1/freq` is the
 row, not the CPU id). A value left out has no pointer; a `null` value can have one, with `read: null`.
 
@@ -219,6 +219,26 @@ sets neither.
 - One card is reported: the first, by card number, with a reader. Reading these attributes does not wake
   the GPU (measured on Meteor Lake: the same RC6 share at 0, 1 and 100 reads per second).
 
+### NPU
+
+`npu` is one object, or `null` where the host has no compute accelerator:
+
+```json
+{"npu": {"usage": 0.0, "freq": 0, "max_freq": 1400000000, "driver": "intel_vpu", "provider": "npu_busy_time"}}
+```
+
+The fields are the GPU's, read the same way from the accel class the kernel gives compute accelerators
+(`/sys/class/accel/accelN`, DRM accel). `intel_vpu` publishes a cumulative busy time, so `usage` is the
+share of the time between two collections the NPU worked, with the same first-collection `null`, gap
+limit and counter-reset rule as the GPU. An accelerator whose driver has no reader here is reported with
+its `driver` and no numbers (`unavailable` / `not_exposed`); a host without one is `unavailable` /
+`not_detected`. No board module fills this group.
+
+An NPU that has never run reads `0`, which is an idle NPU, not a missing one: a device that is suspended
+also reports its clock as `0`. Reading these attributes does not resume it (measured on Meteor Lake: it
+stays in D3hot through repeated reads). `[thresholds]` sets no levels for an NPU, so viewers show it
+without warning colors.
+
 ### Optional metrics
 
 Required for a snapshot: the CPU counters (`/proc/stat`), memory, the root filesystem's disk usage and the
@@ -233,7 +253,7 @@ stays listed with `rpm` or `percent` `null`; a CPU's `freq` and the GPU's `usage
 `null`; `gpu` itself is `null` only without a graphics device; `power_mode` is `null`; `system.l4t` is
 missing. A measured `0` is `0`.
 
-`collectors` has one entry per optional group: `cpu_frequency`, `gpu`, `temperature`, `power`, `fans`,
+`collectors` has one entry per optional group: `cpu_frequency`, `gpu`, `npu`, `temperature`, `power`, `fans`,
 `power_mode`, `board_info` (the L4T release), and `network` / `disk_io` while enabled ([network.md](network.md),
 [disk-io.md](disk-io.md)):
 

@@ -49,6 +49,16 @@ def entries(path, *groups, listed=False):
         return []
 
 
+def driver_of(device, group, target="uevent"):
+    """The driver bound to a device, from the DRIVER= line of its uevent (DRIVER=i915); None where there
+    is none to read. device: the class entry (…/class/drm/card0), whose device/ holds the uevent."""
+    text = group.read(f"{device}/device/uevent", target, parse=str, found=device)
+    for line in (text or "").split("\n"):
+        if line.startswith("DRIVER="):
+            return line[len("DRIVER="):].strip()
+    return None
+
+
 def numbered(names, prefix, suffix):
     """Sorted channel numbers N of names like prefix{N}suffix (temp{N}_input) among a directory's names."""
     return sorted(int(m.group(1)) for n in names if (m := re.fullmatch(rf"{prefix}(\d+){suffix}", n)))
@@ -72,7 +82,7 @@ def hwmon_chips(root="/sys/class/hwmon", *groups):
 # most serious first; ABSENT ones say why there is no value without calling it an error, most specific first.
 PROBLEMS = ("internal_error", "permission_denied", "io_error", "disappeared", "mount_changed", "invalid_data")
 ABSENT = ("no_data", "not_exposed", "not_detected", "unsupported_platform")
-OPTIONAL = ("cpu_frequency", "gpu", "temperature", "power", "fans", "power_mode", "board_info")
+OPTIONAL = ("cpu_frequency", "gpu", "npu", "temperature", "power", "fans", "power_mode", "board_info")
 MAX_ISSUES, MAX_TARGET = 32, 64
 
 
