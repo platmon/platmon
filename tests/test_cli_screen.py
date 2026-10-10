@@ -234,6 +234,21 @@ def test_a_long_name_never_cuts_a_value_off_a_table(width):
                 assert cut not in row or value in row, (row, cut)
 
 
+def test_the_offline_banner_wraps_instead_of_losing_the_advice():
+    """A cut banner loses the errno, the retry interval or the name of the script to run — the whole
+    point of it. It needs 111 columns, so on anything narrower it wraps."""
+    error = cli.explain("localhost:9797", type("E", (OSError,), {"reason": "[Errno 111] refused"})())
+    down = dict(LIVE, state="offline", age=47, error=error)
+    for width in (119, 79, 60, 44):
+        lines = plain(screen(FULL, None, width, 24, Style(), down, {}, "system"))
+        assert all(vlen(line) <= width for line in lines)
+        banner = " ".join(line.strip() for line in lines if "NOT CURRENT" in line
+                          or line.startswith(" " * 17))
+        for word in ("[Errno 111] refused", "retrying every 1 s", "scripts/systemd/install.sh",
+                     "scripts/docker/start.sh"):
+            assert word in " ".join(banner.split()), (width, word, banner)
+
+
 def test_offline_dims_every_view():
     down = dict(LIVE, state="offline", age=47, error="cannot reach platmon at x:9797 (timed out)")
     lines = screen(RICH, OBSERVED, 119, 40, Style(), down, {}, "thermal")

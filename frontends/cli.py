@@ -19,6 +19,7 @@ import select
 import shutil
 import signal
 import sys
+import textwrap
 import time
 import urllib.error
 import urllib.request
@@ -951,9 +952,17 @@ def screen(s, obs, width, height, st, status, history, view="overview"):
 
     banner = []
     if status.get("error"):
+        # Why the data is old and what to do about it are the whole point of the banner, so it wraps:
+        # a cut line loses the errno, the retry interval or the name of the script to run.
         first, *rest = status["error"].split("\n")
-        banner.append(st(pad(f"  {st.cross} NOT CURRENT  {first} · retrying every {status['interval']:g} s", width), "crit_bg"))
-        banner += [st("                 " + r.strip(), "crit") for r in rest]
+        lead = f"  {st.cross} NOT CURRENT  "
+        indent = " " * len(lead)
+        room = max(16, width - len(lead))
+        said = textwrap.wrap(f"{first} · retrying every {status['interval']:g} s", room) or [""]
+        banner.append(st(pad(lead + said[0], width), "crit_bg"))
+        banner += [st(pad(indent + line, width), "crit_bg") for line in said[1:]]
+        for r in rest:
+            banner += [st(indent + line, "crit") for line in textwrap.wrap(r.strip(), room)]
 
     body = BODIES[view](View(s, obs, width, st, history))
     while body and not body[-1]:
