@@ -110,7 +110,8 @@ def test_each_value_carries_where_it_was_read(tmp_path):
 def test_the_collector_reports_it_as_its_own_group(tmp_path, monkeypatch):
     import collector
     from test_common import without_host_accelerators
-    without_host_accelerators(monkeypatch, tmp_path)  # the GPU of the machine running this stays out
+    monkeypatch.setattr(collector, "BOARD", None)  # a plain Linux host, whatever board runs the tests
+    without_host_accelerators(monkeypatch, tmp_path)  # and its own devices stay out
     stats = collector.collect(npu=Npu(clock=Clock(), root=vpu(tmp_path, busy=1)))
     assert stats["npu"]["driver"] == "intel_vpu" and stats["npu"]["max_freq"] == 1400 * 10**6
     assert stats["collectors"]["npu"]["state"] == "ok"

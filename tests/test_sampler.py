@@ -533,6 +533,7 @@ def test_all_optional_failing_still_publishes_then_required_failure_keeps_last_g
     from collector import common, sysfs
     from test_common import Proc, fail_reads, fake_hwmon, idle_busy, without_host_accelerators
 
+    monkeypatch.setattr(collector, "BOARD", None)  # a plain Linux host: a board module fills groups of its own
     without_host_accelerators(monkeypatch, tmp_path)  # this host's own devices would answer otherwise
     root = fake_hwmon(tmp_path, [{"name": "chip", "temp1_input": 1, "power1_input": 1, "fan1_input": 1}])
     monkeypatch.setattr(common, "hwmon_chips", lambda r, *groups: [(f"{root}/hwmon0", "chip")])
