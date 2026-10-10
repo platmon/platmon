@@ -53,8 +53,10 @@ On an interactive terminal (Linux, macOS) the live view fits the terminal and co
 web page's warning and critical levels (the service's `[thresholds]`), with a Needs attention line,
 sparklines of the last 24 updates, and a banner over the last data while the service cannot be reached.
 It shows one view at a time, the same six the web page has as tabs: Overview, Resources, Network,
-Storage, Temp & power and System. `1`-`6`, Tab and the arrow keys switch them, `q` quits, and the tab bar
-in the header names them (shorter labels on a narrow terminal). Overview is the whole screen as before:
+Storage, Temp & power and System. `1`-`6`, Tab and the left and right arrows switch them, the up and down
+arrows, PgUp/PgDn and Home/End scroll a view longer than the terminal, `q` quits, and the tab bar in the
+header names the views (shorter labels on a narrow terminal). When a view does not fit, its last line
+says how much is out of sight above and below. Overview is the whole screen as before:
 the web Overview's readings, the cores, and as much of each detail kind as the terminal has room for.
 The detail views show their own kind in full instead, so a narrow terminal reaches every reading —
 disk I/O, temperatures, power rails, fans, pressure, Wi-Fi, TCP connect times and swap among them — by

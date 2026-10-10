@@ -13,6 +13,13 @@ API schema versions are independent of release versions.
   a narrow terminal no longer loses disk I/O, temperatures, power rails, fans, pressure, Wi-Fi or TCP
   connect times; swap, partition counts and the GPU's maximum clock reach the live view for the first
   time. Long sensor, rail and path names keep their column; the bars give up the room instead.
+- A view longer than the terminal scrolls: the up and down arrows move a line, PgUp/PgDn a page, Home
+  and End its ends, and the last line says how much is out of sight. Before, a host with many sensors
+  or cores ended in `+N more lines · enlarge the terminal` with no way to reach the rest.
+- The offline banner wraps instead of being cut, so the errno, the retry interval and the name of the
+  script to start survive on a terminal narrower than the 111 columns it needs.
+- The detail beside each Overview reading takes the width the terminal has free, instead of a fixed 16
+  columns that cut `x86_pkg_temp · hottest of 38` to `x86_pkg_temp · h`.
 - `--once`, pipes, Windows and `/text` are unchanged: the plain screen with every section.
 
 ## 1.0.0 — 2026-10-10

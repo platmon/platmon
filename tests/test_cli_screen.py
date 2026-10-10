@@ -5,8 +5,8 @@ from collections import deque
 import pytest
 
 from frontends import cli
-from frontends.cli import (ANSI, LIMITS, VIEWS, Style, attention, busiest_first, data_age, fit, make_style,
-                           next_view, render, screen, tabbar, use_levels, vlen)
+from frontends.cli import (ANSI, BOTTOM, LIMITS, VIEWS, Style, attention, busiest_first, data_age, fit,
+                           make_style, next_offset, next_view, render, screen, tabbar, use_levels, vlen)
 from test_cli import FULL
 
 HOT = dict(FULL, cpu=[{"id": 0, "usage": 12.5, "freq": 1728000000}, {"id": 7, "usage": 91.4, "freq": 1728000000}],
@@ -51,9 +51,10 @@ def test_offline_keeps_the_last_data():
     assert any(line.lstrip().startswith("RAM") for line in out)  # still there, dimmed
 
 
-def test_too_short_says_what_was_left_out():
+def test_too_short_says_what_was_left_out_and_how_to_reach_it():
     out = plain(screen(HOT, None, 119, 14, Style(), LIVE, {}))
-    assert len(out) == 14 and "more lines" in out[-3]
+    assert len(out) == 14
+    assert "6 below" in out[-3] and "PgUp/PgDn" in out[-3]  # what is out of sight, and the keys for it
 
 
 def test_fit_keeps_escapes_and_resets():
@@ -232,6 +233,41 @@ def test_a_long_name_never_cuts_a_value_off_a_table(width):
         for value in values:  # and each one is either there in full or dropped, never cut
             for cut in (value[:-1], value[:-2]):
                 assert cut not in row or value in row, (row, cut)
+
+
+def test_a_view_longer_than_the_terminal_scrolls():
+    """A board with 38 sensors could not be read past the seventeenth: the view ended in "+N more lines ·
+    enlarge the terminal" and no key moved it."""
+    many = dict(HOT, temperature={f"sensor{i:02}": 40.0 + i for i in range(38)})
+    offset, page, seen = 0, 1, set()
+    for keys in (None, "\033[B", "\033[6~", "\033[F", "\033[1~"):
+        if keys is not None:
+            offset = next_offset(keys, offset, page)
+        status = dict(LIVE)
+        lines = plain(screen(many, None, 79, 18, Style(), status, {}, "thermal", offset))
+        offset, page = status["scroll"]
+        assert len(lines) <= 18 and all(vlen(line) <= 79 for line in lines)
+        seen.add(offset)
+        body = "\n".join(lines)
+        if offset:
+            assert f"{offset} above" in body
+    assert seen == {0, 1, 13, 32}  # top, a line, a page, the end, back to the top
+    # the end shows the last sensor and the section below it, which "+N more lines" never reached
+    status = dict(LIVE)
+    end = "\n".join(plain(screen(many, None, 79, 18, Style(), status, {}, "thermal", BOTTOM)))
+    assert "sensor00" in end and "POWER & FANS" in end and "32 above" in end
+
+
+def test_scroll_keys_and_clamping():
+    assert next_offset("\033[B", 0, 10) == 1 and next_offset("\033[A", 5, 10) == 4
+    assert next_offset("\033[A", 0, 10) == 0  # never above the top
+    assert next_offset("\033[6~", 2, 10) == 12 and next_offset("\033[5~", 12, 10) == 2
+    assert next_offset("\033[1~", 9, 10) == 0 and next_offset("\033OF", 0, 10) == BOTTOM
+    assert next_offset("x", 4, 10) == 4 and next_offset("3", 4, 10) == 4  # a view key does not scroll
+    # a view that fits is never scrolled, and switching views starts at the top again
+    status = dict(LIVE)
+    screen(HOT, None, 119, 40, Style(), status, {}, "system", 7)
+    assert status["scroll"][0] == 0
 
 
 def test_the_overview_detail_takes_the_width_that_is_free():
