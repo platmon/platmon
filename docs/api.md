@@ -186,6 +186,39 @@ read the CPUs and then failed on another sensor, the first published one already
 Limits: CPUs that go offline and come back between two readings are not noticed (their counters continue
 or are caught as `counter_regressed`); the lines of `/proc/stat` are not read at one instant.
 
+### GPU
+
+`gpu` is one object, or `null` where the host has no graphics device at all:
+
+```json
+{"gpu": {"usage": 12.5, "freq": 700000000, "max_freq": 2250000000, "driver": "i915", "provider": "rc6_residency"}}
+```
+
+`usage` is a percentage with one decimal, `freq` and `max_freq` are hertz; each is `null` where that
+driver or that moment has no value, and a measured `0` is `0` (an idle Intel GPU has its clock gated
+off). `driver` and `provider` are there when the entry came from the DRM class; a board's own source
+sets neither.
+
+| Source | `provider` | What `usage` is |
+| --- | --- | --- |
+| the board's own (Jetson GPU devfreq) | absent | the load the board reports |
+| `i915` (Intel, `/sys/class/drm/cardN`) | `rc6_residency` | the share of the time between two collections the GPU was not in its RC6 idle state |
+| `amdgpu` | `gpu_busy_percent` | the busy share the driver publishes, as it is |
+
+- The board module is asked first and the DRM class is read where it gave nothing, so a Jetson keeps its
+  own numbers and every other host gets what its driver publishes.
+- An `i915` card has no `usage` in the first collection (`null`): RC6 is a counter, so a share needs two
+  readings, like a CPU warming up. A break longer than `max(3 × interval, 5 s)` is not averaged over, and
+  a counter that went backwards starts again instead of reporting the jump.
+- RC6 residency is idle time, not engine occupancy: a GPU that is awake with nothing to do counts as
+  busy. The per-engine numbers that would separate the two come from `perf` events or per-process
+  `fdinfo`, neither of which an unprivileged service can read for the whole host.
+- A card whose driver has no reader here is still reported, with its `driver` and no numbers, so a host
+  with a GPU platmon cannot measure does not look like a host without one: the group is `unavailable` /
+  `not_exposed`. With no card at all it is `unavailable` / `not_detected`.
+- One card is reported: the first, by card number, with a reader. Reading these attributes does not wake
+  the GPU (measured on Meteor Lake: the same RC6 share at 0, 1 and 100 reads per second).
+
 ### Optional metrics
 
 Required for a snapshot: the CPU counters (`/proc/stat`), memory, the root filesystem's disk usage and the
@@ -196,8 +229,9 @@ cannot be read there is reported in its group and left out, and the snapshot is 
 everything else it read in this collection; earlier values are never copied in.
 
 How a value that could not be read looks: a temperature or power rail is missing from its table; a fan
-stays listed with `rpm` or `percent` `null`; a CPU's `freq` and the GPU's `freq`/`max_freq` are `null`;
-`gpu` is `null` without a load; `power_mode` is `null`; `system.l4t` is missing. A measured `0` is `0`.
+stays listed with `rpm` or `percent` `null`; a CPU's `freq` and the GPU's `usage`/`freq`/`max_freq` are
+`null`; `gpu` itself is `null` only without a graphics device; `power_mode` is `null`; `system.l4t` is
+missing. A measured `0` is `0`.
 
 `collectors` has one entry per optional group: `cpu_frequency`, `gpu`, `temperature`, `power`, `fans`,
 `power_mode`, `board_info` (the L4T release), and `network` / `disk_io` while enabled ([network.md](network.md),
@@ -208,7 +242,7 @@ stays listed with `rpm` or `percent` `null`; a CPU's `freq` and the GPU's `freq`
   "core": {"state": "ok", "reason": null},
   "temperature": {"state": "partial", "reason": "some_unreadable",
                   "issues": [{"target": "hwmon2.temp1", "reason": "invalid_data"}], "issues_truncated": 0},
-  "gpu": {"state": "unavailable", "reason": "unsupported_platform", "issues": [], "issues_truncated": 0}
+  "gpu": {"state": "unavailable", "reason": "not_detected", "issues": [], "issues_truncated": 0}
 }
 ```
 
@@ -226,7 +260,8 @@ cannot be listed (a sensor class or one chip) is a failure, not "nothing found";
 `no_data` (there, but no current value, e.g. ENODATA from an inactive thermal zone, an EIO fan speed on a
 board that declares a fan but reports no tachometer, or no CPU rows to read
 clocks for during warmup), `not_exposed` (the device does not provide that attribute), `not_detected`
-(nothing of the kind found), `unsupported_platform` (no provider on this board, e.g. the GPU off Jetson).
+(nothing of the kind found), `unsupported_platform` (no provider on this board, e.g. the power mode off
+Jetson).
 A group with nothing to try is `unavailable`, never `ok`.
 
 `issues` lists the failures only, at most 32 per group (`issues_truncated` counts the rest), as a target

@@ -214,15 +214,28 @@ def test_detect(compatible, has_dmi, expected):
     assert detect(compatible, has_dmi) == expected
 
 
+def without_host_gpu(monkeypatch, tmp_path):
+    """Read the GPU from an empty DRM tree, so the card of the machine running the tests does not decide
+    what the collector reports."""
+    import functools
+
+    import collector
+    empty = tmp_path / "no-drm"
+    empty.mkdir(exist_ok=True)
+    monkeypatch.setattr(collector, "Gpu", functools.partial(collector.Gpu, root=str(empty)))
+    return empty
+
+
 def without_host_sensors(monkeypatch, tmp_path):
     """Read the optional sensors from an empty tree. Tests that run collect() against fake /proc/stat and
-    fake counters otherwise pick up this host's thermal zones and hwmon chips, so one unreadable sensor
-    (an EIO fan, a denied zone) makes the service degraded and the test fail on that machine alone."""
+    fake counters otherwise pick up this host's thermal zones, hwmon chips and GPU, so one unreadable
+    sensor (an EIO fan, a denied zone) makes the service degraded and the test fail on that machine alone."""
     import functools
     empty = tmp_path / "no-sensors"
     empty.mkdir(exist_ok=True)
     monkeypatch.setattr(common, "thermal_zones", functools.partial(common.thermal_zones, root=str(empty)))
     monkeypatch.setattr(common, "hwmon_sensors", functools.partial(common.hwmon_sensors, root=str(empty)))
+    without_host_gpu(monkeypatch, tmp_path)
     return empty
 
 
@@ -612,13 +625,11 @@ def test_cpu_frequency_failure_keeps_usage(monkeypatch):
 
 
 def test_no_optional_sensors_is_not_an_error(tmp_path, monkeypatch):
-    """A plain Linux host without cpufreq, thermal zones or hwmon chips: everything required, nothing degraded."""
+    """A plain Linux host without cpufreq, thermal zones, hwmon chips or a DRM card: everything required,
+    nothing degraded."""
     import collector
     monkeypatch.setattr(collector, "BOARD", None)  # a plain Linux host, whatever board runs the tests
-    monkeypatch.setattr(common, "hwmon_chips", lambda root, *groups: [])
-    real_entries = common.entries
-    monkeypatch.setattr(common, "entries", lambda path, *g, **kw: [] if path.startswith("/sys/class/thermal")
-                        else real_entries(path, *g, **kw))
+    without_host_sensors(monkeypatch, tmp_path)
     monkeypatch.setattr(sysfs, "open", lambda path, *a, **kw: (_ for _ in ()).throw(FileNotFoundError(path))
                         if "cpufreq" in str(path) else open(path, *a, **kw), raising=False)
     s = collector.collect()

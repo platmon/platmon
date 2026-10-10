@@ -531,8 +531,9 @@ def test_all_optional_failing_still_publishes_then_required_failure_keeps_last_g
 
     import collector
     from collector import common, sysfs
-    from test_common import Proc, fail_reads, fake_hwmon, idle_busy
+    from test_common import Proc, fail_reads, fake_hwmon, idle_busy, without_host_gpu
 
+    without_host_gpu(monkeypatch, tmp_path)  # this host's card would answer where the fake tree has none
     root = fake_hwmon(tmp_path, [{"name": "chip", "temp1_input": 1, "power1_input": 1, "fan1_input": 1}])
     monkeypatch.setattr(common, "hwmon_chips", lambda r, *groups: [(f"{root}/hwmon0", "chip")])
     monkeypatch.setattr(common, "thermal_zones", lambda group=None: ({}, set()))

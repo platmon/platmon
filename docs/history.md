@@ -34,6 +34,7 @@ collection started (elapsed clock, as of the answer; wall-clock steps do not cha
 | series id | value | identity |
 | --- | --- | --- |
 | `cpu/<id>/usage` | CPU usage % | the CPU id |
+| `gpu/usage` | GPU usage % | - (one GPU is reported, [api.md](api.md#gpu)) |
 | `memory/used_bytes` | used memory | - |
 | `temperature/<source id>` (or `temperature/name:<key>` without an id) | °C | `sensor_meta` source id ([api.md](api.md#sensor-sources-and-read-times)) |
 | `network/<namespace id>/<ifindex>/<name>/rx_bytes_per_s`, `…/tx_bytes_per_s` | bytes/s | namespace, index and name together ([network.md](network.md#scope-and-identity)); interfaces without a known index are not kept |
@@ -74,7 +75,7 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
   At very fast cadences, the point cap can shorten the effective retained window; retention is an upper limit. A series not seen for longer than `retention` is removed, so devices that come
   and go do not pile up.
 - Which series keep a slot when a host has more identities than the limit (a 22-core PC with 31
-  temperature channels needs 69): `memory/`, then `cpu/`, `network/`, `disk_io/`, `observation/`, and
+  temperature channels needs 69): `memory/`, then `cpu/`, `gpu/`, `network/`, `disk_io/`, `observation/`, and
   `temperature/` last, because boards expose dozens of nearly identical temperature channels while every
   core, interface and disk is a reading of its own. A series that is already kept wins a tie against a
   new one of the same rank, so sensors never take turns dropping each other. Each publisher's slots are
@@ -89,7 +90,7 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
 ## Web page
 
 With history on, the Resources, Network, Storage and Temperature & power tabs show a "Recent history" panel with that topic's CPU, memory,
-temperature, network, disk or low-frequency series: one graph per series, bounded by the endpoint's own
+GPU, temperature, network, disk or low-frequency series: one graph per series, bounded by the endpoint's own
 series limit. A row of buttons above the graphs lists the kinds of series that view has with how many each
 covers ("CPU cores 22", "RAM 1"); a button turns its kind off and on, and a view with only one kind has no
 buttons. Each kind that is on gets its own labelled section, in the order of the button row, so a single

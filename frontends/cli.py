@@ -252,8 +252,10 @@ def render(s, obs=None):
         lines.append(note)
     g = s["gpu"]
     if g:
-        freq = f"  {g['freq'] / 1e6:4.0f} MHz" if g.get("freq") else ""  # None: clock not readable
-        lines.append(f"GPU   {bar(g['usage'])} {g['usage']:5.1f}%{freq}")
+        freq = f"  {g['freq'] / 1e6:4.0f} MHz" if g.get("freq") else ""  # None or 0: clock not readable
+        # a card whose driver publishes no load, or the first reading of a counter: a clock, no share
+        load = f"{bar(g['usage'])} {g['usage']:5.1f}%" if g.get("usage") is not None else f"{bar(0)}    n/a"
+        lines.append(f"GPU   {load}{freq}")
     m = s["memory"]
     lines.append(f"RAM   {bar(100 * m['used'] / m['total'])} {gib(m['used'])}/{gib(m['total'])}")
     if m["swap_total"]:
