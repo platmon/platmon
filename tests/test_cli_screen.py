@@ -234,6 +234,24 @@ def test_a_long_name_never_cuts_a_value_off_a_table(width):
                 assert cut not in row or value in row, (row, cut)
 
 
+def test_the_overview_detail_takes_the_width_that_is_free():
+    """"x86_pkg_temp · hottest of 38" was cut to "x86_pkg_temp · h" at 16 columns while 22 columns of an
+    80-column terminal went unused. The column grows to what the details need, and no further, so a
+    board with short ones keeps the layout it had."""
+    many = dict(HOT, temperature={f"coretemp Core {i}": 40.0 + i for i in range(37)} | {"x86_pkg_temp": 88.0})
+    history = {"CPU": [10] * 24, "TEMP": [88] * 24}
+    for width in (119, 100, 78, 70):
+        row = [line for line in plain(screen(many, None, width, 40, Style(), LIVE, history, "overview"))
+               if line.lstrip().startswith("TEMP")][0]
+        assert "x86_pkg_temp · hottest of 38" in row, (width, row)
+        assert vlen(row) <= width
+    # a short detail leaves the column where it was: the spark still starts at the same place
+    short = plain(screen(HOT, None, 119, 40, Style(), LIVE, history, "overview"))
+    cpu = [line for line in short if line.lstrip().startswith("CPU ")][0]
+    assert cpu.index("mean of") == 2 + 6 + 7 + 1 + 20 + 2  # label, value, bar, gap: where it always was
+    assert cpu.rstrip().endswith("▁" * 24) and vlen(cpu) <= 119
+
+
 def test_the_offline_banner_wraps_instead_of_losing_the_advice():
     """A cut banner loses the errno, the retry interval or the name of the script to run — the whole
     point of it. It needs 111 columns, so on anything narrower it wraps."""

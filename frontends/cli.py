@@ -578,6 +578,11 @@ def body_overview(v):
         body += [st(f"  {note}", "warn"), ""]
 
     bw, dw, sw = (20, 22, SPARK_POINTS) if wide else (10, 16, 12 if width >= 62 else 0)
+    # The detail says which sensor is the hottest and of how many; at 16 columns "x86_pkg_temp · hottest
+    # of 38" became "x86_pkg_temp · h" while 22 columns of the terminal went unused. The column grows to
+    # what the details need, no further, so a board with short ones keeps the layout it had.
+    needed = max((len(detail) for *_, detail in metrics(s)), default=0) + 2  # +2: a gap before the spark
+    dw = max(dw, min(needed, width - (2 + 6 + 7 + 1 + bw + 2 + sw)))
     if wide:
         body.append(pad(v.title("OVERVIEW"), 2 + 6 + 7 + 1 + bw + 2 + dw) + st(f"last {SPARK_POINTS} updates", "muted"))
     for label, value, unit, lim, detail in metrics(s):
