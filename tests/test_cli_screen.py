@@ -5,8 +5,8 @@ from collections import deque
 import pytest
 
 from frontends import cli
-from frontends.cli import (ANSI, LIMITS, Style, attention, busiest_first, data_age, fit, make_style, render, screen,
-                           use_levels, vlen)
+from frontends.cli import (ANSI, LIMITS, VIEWS, Style, attention, busiest_first, data_age, fit, make_style,
+                           next_view, render, screen, tabbar, use_levels, vlen)
 from test_cli import FULL
 
 HOT = dict(FULL, cpu=[{"id": 0, "usage": 12.5, "freq": 1728000000}, {"id": 7, "usage": 91.4, "freq": 1728000000}],
@@ -106,3 +106,117 @@ def test_ascii_on_request():
 def test_render_is_unchanged_by_the_live_view():
     """--once, pipes and /text keep the plain screen."""
     assert "\033" not in render(HOT)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The views (the web page's tabs): Overview is the whole screen as before, the detail views show their kind
+# in full, so a narrow terminal reaches every reading by switching views.
+
+RATES = {"rx_bytes_per_s": 2048.0, "tx_bytes_per_s": 1024.0, "rx_packets_per_s": 8.0, "tx_packets_per_s": 4.0}
+IO_RATES = {"read_bytes_per_s": 4096.0, "write_bytes_per_s": 512.0, "reads_per_s": 3.0, "writes_per_s": 1.0,
+            "io_time_ratio": 0.25}
+RICH = dict(HOT, npu={"usage": 11.0, "freq": 614400000},
+            gpu={"usage": 73.0, "freq": 918000000, "max_freq": 1300000000},
+            network={"interfaces": [{"name": "eth0", "rates": RATES, "rx": {"errors": 0, "dropped": 0},
+                                     "tx": {"errors": 1, "dropped": 2}}]},
+            disk_io={"disks": [{"name": "nvme0n1", "rates": IO_RATES, "in_flight": 0}]},
+            pressure={"resources": {"cpu": {"some": {"avg10": 12.4}},
+                                    "io": {"some": {"avg10": 3.1}, "full": {"avg10": 0.8}}}})
+G = 2**30
+OBSERVED = {"groups": {
+    "storage": {"observation": {"data_age_ms": 4200, "stale": False}, "data": {
+        "filesystems": [{"mount_points": [{"path": "/", "read_only": False}], "device": "/dev/nvme0n1p1",
+                         "fstype": "ext4", "major": 259, "minor": 1, "used_bytes": 40 * G,
+                         "total_bytes": 100 * G, "available_bytes": 55 * G}],
+        "partitions": [{"disk": "nvme0n1", "mount_points": ["/"]}]}},
+    "wifi": {"observation": {"data_age_ms": 4200, "stale": False}, "data": {"interfaces": [
+        {"name": "wlan0", "connected": True, "signal_dbm": -47, "signal_raw": None, "link_quality": 62,
+         "noise_dbm": -92}]}},
+    "probe": {"observation": {"data_age_ms": 4200, "stale": False}, "data": {"targets": [
+        {"address": "192.168.1.1", "port": 53, "connect_ms": 1.8, "failures": 0, "attempts": 10,
+         "reason": None}]}}}}
+
+
+@pytest.mark.parametrize("view", VIEWS)
+@pytest.mark.parametrize("width,height", [(119, 40), (79, 24), (60, 20), (44, 22), (40, 12), (20, 6), (12, 3)])
+def test_every_view_fits_the_terminal(view, width, height):
+    lines = screen(RICH, OBSERVED, width, height, Style(), LIVE, {}, view)
+    assert len(lines) <= height
+    assert all(vlen(line) <= width for line in lines)
+
+
+@pytest.mark.parametrize("view", VIEWS)
+def test_every_view_is_ascii_without_utf8(view):
+    text = "\n".join(screen(RICH, OBSERVED, 119, 40, Style(color=False, utf8=False), LIVE, {}, view))
+    assert not re.search(r"[^\x00-\x7f°·↓↑]", text)  # labels and units only; bars, rules and arrows are ASCII
+
+
+def test_the_tab_bar_names_every_view_and_marks_the_active_one():
+    bar = tabbar(Style(color=False), 119, "network")
+    assert "[3 Network]" in bar and "1 Overview" in bar and "6 System" in bar
+    narrow = tabbar(Style(color=False), 44, "network")  # shorter labels, still every view
+    assert "[3 Net]" in narrow and vlen(narrow) <= 44
+    assert all(str(n) in narrow for n in range(1, len(VIEWS) + 1))
+    tiny = tabbar(Style(color=False), 24, "system")  # no room for six labels: the position instead
+    assert tiny.strip().startswith(f"{len(VIEWS)}/{len(VIEWS)} Sys") and vlen(tiny) <= 24
+
+
+def test_keys_switch_views():
+    assert next_view("3", "overview") == "network"
+    assert next_view("\t", "overview") == "resources"
+    assert next_view("\033[C", "system") == "overview"  # right wraps round
+    assert next_view("\033[D", "overview") == "system"  # left wraps back
+    assert next_view("\033[Z", "resources") == "overview"  # Shift-Tab
+    assert next_view("x", "network") == "network" and next_view("9", "network") == "network"
+    assert next_view("\033[1;2C", "network") == "storage"  # a modified arrow moves; its digits are not a number
+
+
+def test_the_active_view_is_the_one_drawn():
+    system = plain(screen(RICH, OBSERVED, 79, 24, Style(), LIVE, {}, "system"))
+    assert any("Kernel" in line for line in system) and not any("NEEDS ATTENTION" in line for line in system)
+    overview = plain(screen(RICH, OBSERVED, 79, 24, Style(), LIVE, {}, "overview"))
+    assert any("NEEDS ATTENTION" in line for line in overview) and not any("Kernel" in line for line in overview)
+
+
+def test_detail_views_keep_what_the_narrow_overview_drops():
+    """At 79 columns the Overview has no room for disk I/O, power, Wi-Fi or TCP; its views do."""
+    overview = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "overview")))
+    assert "I/O TIME" not in overview and "VDD_IN" not in overview and "wlan0" not in overview
+    storage = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "storage")))
+    assert "I/O TIME" in storage and "nvme0n1" in storage and "1 partition, 1 mounted" in storage
+    thermal = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "thermal")))
+    assert "VDD_IN" in thermal and "fan pwmfan" in thermal and "tj" in thermal
+    network = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "network")))
+    assert "wlan0" in network and "-47 dBm" in network and "192.168.1.1:53" in network
+
+
+def test_resources_shows_the_swap_the_live_overview_never_had():
+    text = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "resources")))
+    assert "SWAP" in text and "4.0G" in text  # FULL has 4 GiB of swap, none of it used
+    assert "max 1300 MHz" in text and "NPU" in text and "RESOURCE PRESSURE" in text
+    assert "CPU0" not in text and " 0 " in text  # the core grid, as the Overview numbers them
+
+
+def test_system_lists_the_boards_own_fields():
+    board = dict(RICH, system=dict(RICH["system"], firmware="1.2"))
+    text = "\n".join(plain(screen(board, None, 79, 24, Style(), LIVE, {}, "system")))
+    assert "Architecture   aarch64" in text and "L4T            R36.5.2" in text
+    assert "firmware       1.2" in text  # an unknown key keeps its own name, as the web page adds it
+    assert "Power mode" not in text  # it stays in Temperature & power, as on the web page
+
+
+@pytest.mark.parametrize("view,text", [
+    ("network", "No interface, Wi-Fi or TCP connect readings"),
+    ("storage", "No filesystem or disk I/O readings"),
+    ("thermal", "No temperature, power or fan readings")])
+def test_a_view_with_nothing_to_show_says_so(view, text):
+    bare = dict(FULL, temperature={}, power={}, fans=[], network=None, disk_io=None)
+    lines = plain(screen(bare, None, 79, 24, Style(), LIVE, {}, view))
+    assert any(text in line for line in lines)
+
+
+def test_offline_dims_every_view():
+    down = dict(LIVE, state="offline", age=47, error="cannot reach platmon at x:9797 (timed out)")
+    lines = screen(RICH, OBSERVED, 119, 40, Style(), down, {}, "thermal")
+    assert any("NOT CURRENT" in ANSI.sub("", line) for line in lines)
+    assert any("VDD_IN" in ANSI.sub("", line) for line in lines)  # still there, dimmed

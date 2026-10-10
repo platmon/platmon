@@ -46,13 +46,22 @@ platmon                          # this device: live view, q or Ctrl+C to quit
 platmon 192.168.55.53            # another device (host[:port], default port 9797)
 platmon 192.168.55.53 2          # update every 2 s
 platmon --once                   # one snapshot without clearing the screen (scripts, ssh, logs)
+platmon --view network           # start on a view other than Overview
 ```
 
 On an interactive terminal (Linux, macOS) the live view fits the terminal and colors readings with the
 web page's warning and critical levels (the service's `[thresholds]`), with a Needs attention line,
 sparklines of the last 24 updates, and a banner over the last data while the service cannot be reached.
-`NO_COLOR=1` turns colors off; `PLATMON_ASCII=1` draws with ASCII only (for terminals that draw block and
-line characters two columns wide). `--once`, pipes and Windows keep the plain screen, the same as `/text`.
+It shows one view at a time, the same six the web page has as tabs: Overview, Resources, Network,
+Storage, Temp & power and System. `1`-`6`, Tab and the arrow keys switch them, `q` quits, and the tab bar
+in the header names them (shorter labels on a narrow terminal). Overview is the whole screen as before:
+the web Overview's readings, the cores, and as much of each detail kind as the terminal has room for.
+The detail views show their own kind in full instead, so a narrow terminal reaches every reading —
+disk I/O, temperatures, power rails, fans, pressure, Wi-Fi, TCP connect times and swap among them — by
+switching views rather than being enlarged. Switching asks the service for nothing: every view is drawn
+from the data already in hand. `NO_COLOR=1` turns colors off; `PLATMON_ASCII=1` draws with ASCII only
+(for terminals that draw block and line characters two columns wide). `--once`, pipes and Windows keep
+the plain screen with every section, the same as `/text`; `--view` is for the live view only.
 
 If the service is not running, `platmon` says so and how to start it. On the device the command comes
 with the service: the Debian package puts it in `/usr/bin`, `scripts/systemd/install.sh` in `/usr/local/bin`, `scripts/docker/start.sh` in

@@ -4,6 +4,17 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `frontends/cli.py`; Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+- `platmon` live view shows one view at a time, the same six the web page has as tabs: Overview,
+  Resources, Network, Storage, Temp & power and System. `1`-`6`, Tab and the arrow keys switch them,
+  `--view` picks the first one, and a tab bar in the header names them. Switching makes no request.
+- Overview keeps the screen it had. The detail views show their kind in full on any terminal width, so
+  a narrow terminal no longer loses disk I/O, temperatures, power rails, fans, pressure, Wi-Fi or TCP
+  connect times; swap, partition counts and the GPU's maximum clock reach the live view for the first
+  time. Long sensor, rail and path names keep their column; the bars give up the room instead.
+- `--once`, pipes, Windows and `/text` are unchanged: the plain screen with every section.
+
 ## 1.0.0 — 2026-10-10
 
 First release. From this version the HTTP API (its `schema_version` contracts), the `platmon.ini` keys and

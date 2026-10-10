@@ -89,6 +89,15 @@ def test_once_prints_one_snapshot():
     assert r.stdout == render(FULL) + "\n"  # the metadata the server adds changes nothing, no screen clearing
 
 
+def test_view_only_selects_a_live_view():
+    """--view picks the live screen's first view; --once prints every section, so the two do not mix."""
+    bad = run_cli("--once", "--view", "network")
+    assert bad.returncode == 2 and "--view selects a view of the live screen" in bad.stderr
+    unknown = run_cli("--view", "cpu")
+    assert unknown.returncode == 2 and "invalid choice" in unknown.stderr
+    assert "1-6" in run_cli("--help").stdout  # the keys are documented where the options are
+
+
 def test_not_running_explains_and_exits():
     import socket
     with socket.socket() as s:  # a port nothing listens on

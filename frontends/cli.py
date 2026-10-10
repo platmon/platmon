@@ -6,7 +6,8 @@ Usage: platmon [host[:port]] [interval_sec] [--once]   (default localhost:9797, 
 The service itself runs in the background: scripts/systemd/install.sh or scripts/docker/start.sh.
 
 On an interactive terminal the live view is screen(): colored levels, a layout fitted to the terminal size,
-redrawn in place on the alternate screen. --once, pipes and /text keep render(), plain text as before.
+redrawn in place on the alternate screen. It shows one view at a time, as the web page's tabs do (VIEWS);
+1-6, Tab and the arrow keys switch them. --once, pipes and /text keep render(), plain text as before.
 """
 # platmon-cli: marker that lets scripts/install-cli.sh recognise (and only replace) its own command
 import argparse
@@ -320,13 +321,16 @@ def tone(lv):
 
 class Style:
     """Basic ANSI colors (when color is on) and the glyphs: block characters, or ASCII without UTF-8."""
-    CODES = {"ok": "32", "warn": "33", "crit": "31", "muted": "90", "dim": "2", "bold": "1", "crit_bg": "30;41"}
+    CODES = {"ok": "32", "warn": "33", "crit": "31", "muted": "90", "dim": "2", "bold": "1", "under": "4",
+             "crit_bg": "30;41"}
 
     def __init__(self, color=True, utf8=True):
         self.color = color
         (self.full, self.track, self.tick, self.rule, self.dot, self.cross, self.up, self.gap,
-         self.sparks) = (("█", "░", "╎", "─", "●", "✕", "▲", "·", "▁▂▃▄▅▆▇█") if utf8 else
-                         ("#", "-", "|", "-", "*", "x", "!", ".", "_.-:=+*#"))
+         self.larr, self.rarr, self.sparks) = (("█", "░", "╎", "─", "●", "✕", "▲", "·", "←", "→",
+                                                "▁▂▃▄▅▆▇█") if utf8 else
+                                               ("#", "-", "|", "-", "*", "x", "!", ".", "<", ">",
+                                                "_.-:=+*#"))
 
     def __call__(self, text, *names):
         codes = ";".join(self.CODES[n] for n in names if n)
@@ -434,42 +438,131 @@ def attention(s, obs):
     return sorted((a for a in out if a[2] != "ok"), key=lambda a: a[2] != "crit")
 
 
-def screen(s, obs, width, height, st, status, history):
-    """The live view as lines of at most width columns and at most height lines.
-    status: state (live, partial, offline), age (seconds), error (explain() text or None), addr, interval.
-    history: label -> the latest values of that Overview reading (None for a missed answer)."""
-    wide = width >= WIDE
-    sys_ = s.get("system") or {}
-    up = int(s["uptime"])
-    uptime = f"up {up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}"
+# The views of the live screen, one at a time, as the web page's tabs: the same data, wording and levels.
+# Overview is the whole screen as before; the detail views show their own kind in full, so a narrow
+# terminal reaches every reading by switching views instead of being enlarged.
+VIEWS = ("overview", "resources", "network", "storage", "thermal", "system")
+# Label sets from the widest that fits; the web page shortens its tab labels on narrow screens too.
+VIEW_LABELS = {"overview": ("Overview", "Over", "Ovr"), "resources": ("Resources", "Res", "Res"),
+               "network": ("Network", "Net", "Net"), "storage": ("Storage", "Store", "Sto"),
+               "thermal": ("Temp & power", "Temp", "Tmp"), "system": ("System", "Sys", "Sys")}
 
-    def title(name, right=""):
-        left = st(f"  {name}", "muted", "bold")
-        return spread(left, st(right + " ", "muted"), width) if right else left
 
-    def kv(label, text):
-        return st(f"  {label:<10}", "muted", "bold") + text
+def next_view(keys, view):
+    """The view a key press selects: 1-6 directly, Tab or the right arrow the next, Shift-Tab or the left
+    arrow the previous; any other key keeps the view. Escape sequences carry digits of their own, so a
+    key press is only read as a number when it is not one."""
+    index = VIEWS.index(view)
+    if "\033" not in keys:
+        for number, name in enumerate(VIEWS, 1):
+            if str(number) in keys:
+                return name
+    finals = re.findall(r"\033\[[0-9;?]*([A-Za-z])", keys)  # the key, whatever modifier it carries
+    if "Z" in finals or "D" in finals:  # Shift-Tab, left arrow (with any modifier)
+        return VIEWS[index - 1]
+    if "C" in finals or "\t" in keys:  # right arrow, Tab
+        return VIEWS[(index + 1) % len(VIEWS)]
+    return view
 
-    state = status["state"]
-    color = {"live": "ok", "partial": "warn", "offline": "crit"}[state]
-    sample = s.get("sample") if isinstance(s.get("sample"), dict) else {}
-    seq = f"#{sample['sequence']} · " if isinstance(sample.get("sequence"), int) and wide else ""
-    age = (f"data {status['age']:.0f} s old" if state == "offline" else
-           f"{status['age']:.1f} s ago" if wide else f"{status['age']:.1f} s")
-    head = [spread(st(" p_", "ok", "bold") + st(" platmon", "bold") + "   " + st(s["model"] if wide else sys_.get("hostname") or s["model"], "bold"),
-                   st(f"{st.dot} {state.upper()}", color) + st(f"  {seq}{age} ", "muted"), width),
-            st("             " + " · ".join(str(v) for v in (
-                ([sys_.get("hostname")] if wide else []) + [s["platform"], s["power_mode"] and f"mode {s['power_mode']}", uptime]
-                + ([sys_.get("os"), sys_.get("l4t") and f"L4T {sys_['l4t']}", sys_.get("arch")] if wide else [sys_.get("l4t") and f"L4T {sys_['l4t']}"]))
-                if v), "muted"),
-            st(st.rule * width, "muted")]
 
-    banner = []
-    if status.get("error"):
-        first, *rest = status["error"].split("\n")
-        banner.append(st(pad(f"  {st.cross} NOT CURRENT  {first} · retrying every {status['interval']:g} s", width), "crit_bg"))
-        banner += [st("                 " + r.strip(), "crit") for r in rest]
+def tabbar(st, width, view):
+    """The views on one line, the active one marked, in the header's rule line: the widest label set that
+    fits, and the position alone when even the shortest does not. Without color the active label is
+    bracketed, so it stays visible in a plain terminal."""
+    for size, gap in enumerate(("   ", "   ", " ")):  # the shortest labels also give up their spacing
+        cells = [st(f"{n} {VIEW_LABELS[name][size]}" if st.color else f"[{n} {VIEW_LABELS[name][size]}]",
+                    "ok", "bold", "under") if name == view else st(f"{n} {VIEW_LABELS[name][size]}", "muted")
+                 for n, name in enumerate(VIEWS, 1)]
+        line = "  " + gap.join(cells)
+        if vlen(line) <= width:
+            return line
+    return st(f"  {VIEWS.index(view) + 1}/{len(VIEWS)} {VIEW_LABELS[view][2]} {st.larr}/{st.rarr}", "ok", "bold")
 
+
+def mhz(hz):
+    """"918 MHz" for a frequency in hertz; empty when the clock is not readable (None or 0)."""
+    return f"{hz / 1e6:.0f} MHz" if hz else ""
+
+
+def group_data(obs, name):
+    """(data, observation) of an /api/observations group, or (None, None) when it is off, not observed
+    yet, or the server has no such endpoint."""
+    groups = obs.get("groups") if isinstance(obs, dict) else None
+    g = groups.get(name) if isinstance(groups, dict) else None
+    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
+    return (data, o) if isinstance(data, dict) and isinstance(o, dict) else (None, None)
+
+
+def observed_text(o):
+    """How old an observation is, as its section's caption; empty when it reports no age."""
+    if not isinstance(o, dict) or not isinstance(o.get("data_age_ms"), (int, float)):
+        return ""
+    return f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
+
+
+def detail_widths(width, columns):
+    """Column widths for a detail table: the value columns a narrow terminal has no room for fall off the
+    right, and the name column keeps what the rest leave it (at most 28)."""
+    while columns and 14 + sum(columns) > width:
+        columns = columns[:-1]
+    return [min(28, max(14, width - sum(columns)))] + columns
+
+
+def joined(width, parts):
+    """The parts that fit in width columns, in order: a narrow terminal keeps the first ones whole rather
+    than cutting the next one in half."""
+    line = ""
+    for part in parts:
+        if vlen(line) + vlen(part) > width:
+            break
+        line += part
+    return line
+
+
+class View:
+    """What a view body draws with: the data, the terminal width and the style, plus the layout helpers
+    the sections share."""
+
+    def __init__(self, s, obs, width, st, history):
+        self.s, self.obs, self.width, self.st, self.history = s, obs, width, st, history
+        self.wide = width >= WIDE
+
+    def title(self, name, right=""):
+        left = self.st(f"  {name}", "muted", "bold")
+        if not right or len(name) + len(right) + 5 > self.width:  # no room for both: the name alone
+            return left
+        return spread(left, self.st(right + " ", "muted"), self.width)
+
+    def kv(self, label, text):
+        return self.st(f"  {label:<10}", "muted", "bold") + text
+
+    def row(self, widths, cells, tones):
+        """One table line; cells and tones past the widths a narrow terminal kept are left out."""
+        return "".join(self.st(pad(c, w, i > 0), *(t or "").split())
+                       for i, (c, w, t) in enumerate(zip(cells, widths, tones)))
+
+    def no_rate(self, widths, name, item):
+        return self.st(pad(f"    {name}", widths[0])
+                       + RATE_REASONS.get(item.get("reason"), str(item.get("reason"))), "muted")
+
+    def meter_row(self, label, pct, limits, detail, label_w=6):
+        """A reading as the Overview draws it, indented under a section title."""
+        bw = 20 if self.wide else 10
+        if pct is None:
+            return self.st(f"    {label:<{label_w}}", "muted") + self.st("unavailable", "muted")
+        lv = level(pct, limits) if limits else "ok"
+        return joined(self.width, [self.st(f"    {label:<{label_w}}", "muted"),
+                                   self.st(pad(f"{pct:.1f} %", 7), "bold", tone(lv)) + " ",
+                                   meter(self.st, pct, bw, limits), self.st(f"   {detail}", "muted")])
+
+    def empty(self, text):
+        return [self.st(f"  {text}", "muted")]
+
+
+def body_overview(v):
+    """Everything on one screen, as the live view has always drawn it: the readings the web Overview
+    shows, the cores, and as much of each detail kind as the terminal has room for."""
+    s, obs, st, width, wide, history = v.s, v.obs, v.st, v.width, v.wide, v.history
     body = []
     alerts = attention(s, obs)
     if alerts:
@@ -482,14 +575,14 @@ def screen(s, obs, width, height, st, status, history):
 
     bw, dw, sw = (20, 22, SPARK_POINTS) if wide else (10, 16, 12 if width >= 62 else 0)
     if wide:
-        body.append(pad(title("OVERVIEW"), 2 + 6 + 7 + 1 + bw + 2 + dw) + st(f"last {SPARK_POINTS} updates", "muted"))
-    for label, v, unit, lim, detail in metrics(s):
-        if v is None:
+        body.append(pad(v.title("OVERVIEW"), 2 + 6 + 7 + 1 + bw + 2 + dw) + st(f"last {SPARK_POINTS} updates", "muted"))
+    for label, value, unit, lim, detail in metrics(s):
+        if value is None:
             body.append(st(f"  {label:<6}", "muted") + st("unavailable", "muted"))
             continue
-        lv = level(v, lim)
-        body.append(st(f"  {label:<6}", "muted") + st(pad(f"{v:.1f} {unit}", 7), "bold", tone(lv)) + " "
-                    + meter(st, v, bw, lim) + "  " + st(pad(detail[:dw], dw), "muted")
+        lv = level(value, lim)
+        body.append(st(f"  {label:<6}", "muted") + st(pad(f"{value:.1f} {unit}", 7), "bold", tone(lv)) + " "
+                    + meter(st, value, bw, lim) + "  " + st(pad(detail[:dw], dw), "muted")
                     + (spark(st, history.get(label, ()), sw, lv) if sw else ""))
     body.append("")
 
@@ -507,7 +600,7 @@ def screen(s, obs, width, height, st, status, history):
                 cells.append(st(f"{c['id']:>3} ", lv or "muted") + meter(st, c["usage"], 4, LIMITS["cpu"], False)
                              + st(f" {c['usage']:3.0f}%", lv))
         if wide:
-            body.append(title("CORES", f"%  ·  MHz  ·  {len(s['cpu'])} measured"))
+            body.append(v.title("CORES", f"%  ·  MHz  ·  {len(s['cpu'])} measured"))
         sep = "   " if wide else " "
         body += [sep.join(cells[i:i + cols]) for i in range(0, len(cells), cols)]
     if cpu_note(s):
@@ -522,43 +615,38 @@ def screen(s, obs, width, height, st, status, history):
     name_w = 4 + max([len(i["name"]) for i in shown] + [6]) + 2
     widths = [max(26, name_w), 12, 14, 18, 15] if wide else [max(18, name_w), 11, 12]
 
-    def row(cells, tones):
-        return "".join(st(pad(c, w, i > 0), *(t or "").split()) for i, (c, w, t) in enumerate(zip(cells, widths, tones)))
-
-    def no_rate(name, item):
-        return st(pad(f"    {name}", widths[0]) + RATE_REASONS.get(item.get("reason"), str(item.get("reason"))), "muted")
-
     if shown:
-        body.append(row(["  NETWORK", "↓ RX", "↑ TX", "PKT/S rx · tx", "ERR · DROP"], ["muted bold"] + ["muted"] * 4)
+        body.append(v.row(widths, ["  NETWORK", "↓ RX", "↑ TX", "PKT/S rx · tx", "ERR · DROP"], ["muted bold"] + ["muted"] * 4)
                     + (st("   this netns · err/drop = totals", "muted") if wide else ""))
         for i in shown:
             r = i["rates"]
             if not r:
-                body.append(no_rate(i["name"], i))
+                body.append(v.no_rate(widths, i["name"], i))
                 continue
             err = (i.get("rx") or {}).get("errors", 0) + (i.get("tx") or {}).get("errors", 0)
             drop = (i.get("rx") or {}).get("dropped", 0) + (i.get("tx") or {}).get("dropped", 0)
             idle = not r["rx_bytes_per_s"] and not r["tx_bytes_per_s"]
-            body.append(row([f"    {i['name']}", per_s(r["rx_bytes_per_s"]), per_s(r["tx_bytes_per_s"]),
-                             f"{r['rx_packets_per_s']:.0f} · {r['tx_packets_per_s']:.0f}", f"{err} · {drop}"],
-                            ["muted"] * 5 if idle else [None, None, None, "muted", "warn" if err or drop else "muted"]))
+            body.append(v.row(widths, [f"    {i['name']}", per_s(r["rx_bytes_per_s"]), per_s(r["tx_bytes_per_s"]),
+                                       f"{r['rx_packets_per_s']:.0f} · {r['tx_packets_per_s']:.0f}", f"{err} · {drop}"],
+                              ["muted"] * 5 if idle else [None, None, None, "muted", "warn" if err or drop else "muted"]))
         if len(ifaces) > len(shown):
-            body.append(st(f"    +{len(ifaces) - len(shown)} more interfaces" + (" (all in /api/stats)" if wide else " · widen the terminal for all"), "muted"))
+            body.append(st(f"    +{len(ifaces) - len(shown)} more interfaces"
+                           + (" (all in /api/stats)" if wide else " · view 3 shows all"), "muted"))
         body.append("")
 
     dio = s.get("disk_io") if isinstance(s.get("disk_io"), dict) else {}
     disks = dio.get("disks") if isinstance(dio.get("disks"), list) else []
     if wide and disks:
-        body.append(row(["  DISK I/O", "READ", "WRITE", "OPS/S r · w", "I/O TIME"], ["muted bold"] + ["muted"] * 4))
+        body.append(v.row(widths, ["  DISK I/O", "READ", "WRITE", "OPS/S r · w", "I/O TIME"], ["muted bold"] + ["muted"] * 4))
         for d in disks[:MAX_ROWS]:
             r = d["rates"]
             if not r:
-                body.append(no_rate(d["name"], d))
+                body.append(v.no_rate(widths, d["name"], d))
                 continue
             idle = not r["read_bytes_per_s"] and not r["write_bytes_per_s"]
-            body.append(row([f"    {d['name']}", per_s(r["read_bytes_per_s"]), per_s(r["write_bytes_per_s"]),
-                             f"{r['reads_per_s']:.0f} · {r['writes_per_s']:.0f}", f"{100 * r['io_time_ratio']:.1f} %"],
-                            ["muted"] * 5 if idle else [None, None, None, "muted", None]))
+            body.append(v.row(widths, [f"    {d['name']}", per_s(r["read_bytes_per_s"]), per_s(r["write_bytes_per_s"]),
+                                       f"{r['reads_per_s']:.0f} · {r['writes_per_s']:.0f}", f"{100 * r['io_time_ratio']:.1f} %"],
+                              ["muted"] * 5 if idle else [None, None, None, "muted", None]))
         if len(disks) > MAX_ROWS:
             body.append(st(f"    +{len(disks) - MAX_ROWS} more disks (all in /api/stats)", "muted"))
         body.append("")
@@ -566,22 +654,22 @@ def screen(s, obs, width, height, st, status, history):
     if wide:
         temps = hottest_first(s)
         if temps:
-            body.append(kv("THERMAL", "   ".join(st(f"{k} {v:.1f}", tone(level(v, temp_limits(s)))) for k, v in temps) + st("  °C", "muted")))
-        power = [f"{k} {v:.2f} W" for k, v in (s.get("power") or {}).items()]
+            body.append(v.kv("THERMAL", "   ".join(st(f"{k} {t:.1f}", tone(level(t, temp_limits(s)))) for k, t in temps) + st("  °C", "muted")))
+        power = [f"{k} {p:.2f} W" for k, p in (s.get("power") or {}).items()]
         fans = [f"fan {f['name']} " + (" · ".join(x for x in (f["rpm"] is not None and f"{f['rpm']} rpm",
                                                                f["percent"] is not None and f"{f['percent']} %") if x) or "n/a")
                 for f in s.get("fans") or []]
         if power or fans:
-            body.append(kv("POWER", "   ".join(power + fans)))
+            body.append(v.kv("POWER", "   ".join(power + fans)))
         psi = s.get("pressure")
         res = psi.get("resources") if isinstance(psi, dict) else None
         if isinstance(res, dict) and res:
-            body.append(kv("PRESSURE", "   ".join(f"{name} {r['some']['avg10']:.1f}" + (f" / {r['full']['avg10']:.1f}" if r.get("full") else "") + " %"
-                                                  for name, r in res.items()) + st("      some / full · avg10, time stalled", "muted")))
+            body.append(v.kv("PRESSURE", "   ".join(f"{name} {r['some']['avg10']:.1f}" + (f" / {r['full']['avg10']:.1f}" if r.get("full") else "") + " %"
+                                                    for name, r in res.items()) + st("      some / full · avg10, time stalled", "muted")))
 
     data, o = filesystems(obs)
     if data:
-        seen = st(f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "") + " ", "muted")
+        seen = st(observed_text(o) + " ", "muted")
         fss = data.get("filesystems") or []
         if wide:
             path_w = max([len(f["mount_points"][0]["path"]) for f in fss] + [1]) + 2
@@ -592,24 +680,286 @@ def screen(s, obs, width, height, st, status, history):
                 text = (meter(st, pct, 20, LIMITS["filesystem"]) + st(f"  {pct:3.0f} %", tone(level(pct, LIMITS["filesystem"])))
                         + f"   {gib(f['used_bytes'])} / {gib(f['total_bytes'])}" + st(f"   {gib(f['available_bytes'])} free   {f['fstype']} {dev}", "muted")
                         if pct is not None else st(f"capacity unknown   {f['fstype']} {dev}", "muted"))
-                line = kv("STORAGE" if n == 0 else "", where + text)
+                line = v.kv("STORAGE" if n == 0 else "", where + text)
                 body.append(spread(line, seen, width) if n == 0 else line)
         else:
             parts = [f"{f['mount_points'][0]['path']} " + st(f"{fs_pct(f):.0f} %", tone(level(fs_pct(f), LIMITS["filesystem"])))
                      for f in fss if fs_pct(f) is not None]
             if parts:
-                body.append(spread(kv("STORAGE", "   ".join(parts)), seen, width))
+                body.append(spread(v.kv("STORAGE", "   ".join(parts)), seen, width))
     if wide:
         for lines, label in ((wifi_lines(obs), "WIFI"), (probe_lines(obs), "TCP")):
             for n, line in enumerate(lines[1:]):
-                body.append(kv(label if n == 0 else "", line.strip()))
+                body.append(v.kv(label if n == 0 else "", line.strip()))
+    return body
 
+
+def body_resources(v):
+    """The web Resources tab: every measured core with its clock, the accelerators, memory with swap, and
+    resource pressure. Nothing is dropped for a narrow terminal; the cores wrap into fewer columns."""
+    s, st = v.s, v.st
+    body = []
+    if s["cpu"]:
+        body.append(v.title("CPU CORES", f"%  ·  MHz  ·  {len(s['cpu'])} measured"))
+        cells = []
+        for c in s["cpu"]:
+            lv = tone(level(c["usage"], LIMITS["cpu"]))
+            freq = f"{c['freq'] / 1e6:4.0f}" if c.get("freq") else "    "
+            cells.append(st(f"{c['id']:>4} ", lv or "muted", "bold" if lv else None)
+                         + meter(st, c["usage"], 8, LIMITS["cpu"], False)
+                         + st(f" {c['usage']:5.1f}%", lv, "bold" if lv else None) + st(f" {freq}", "muted"))
+        cols = max(1, (v.width + 3) // 28)
+        body += ["   ".join(cells[i:i + cols]) for i in range(0, len(cells), cols)]
+    if cpu_note(s):
+        body.append(st(f"  {cpu_note(s)}", "muted"))
+
+    g, n = s.get("gpu"), s.get("npu")
+    if g or n:
+        body += ["", v.title("ACCELERATORS")]
+        if g:  # a card whose driver publishes no load has a clock and no share
+            body.append(v.meter_row("GPU", g.get("usage"), LIMITS["gpu"],
+                                    " · ".join(x for x in (mhz(g.get("freq")), g.get("max_freq") and f"max {mhz(g['max_freq'])}") if x)))
+        if n:  # no [thresholds] entry sets levels for an NPU, so it is shown without one
+            body.append(v.meter_row("NPU", n.get("usage"), None, mhz(n.get("freq"))))
+
+    m = s["memory"]
+    body += ["", v.title("MEMORY")]
+    body.append(v.meter_row("RAM", 100 * m["used"] / m["total"] if m["total"] else None, LIMITS["memory"],
+                            f"{gib(m['used'])} / {gib(m['total'])}   {gib(m['total'] - m['used'])} free"))
+    if m["swap_total"]:  # the web page gives swap the memory levels too
+        body.append(v.meter_row("SWAP", 100 * m["swap_used"] / m["swap_total"], LIMITS["memory"],
+                                f"{gib(m['swap_used'])} / {gib(m['swap_total'])}"))
+
+    psi = s.get("pressure")
+    res = psi.get("resources") if isinstance(psi, dict) else None
+    if isinstance(res, dict) and res:
+        body += ["", v.title("RESOURCE PRESSURE", "some / full · avg10, time stalled")]
+        for name, r in res.items():
+            full = f" / {r['full']['avg10']:.1f}" if r.get("full") else ""
+            body.append(st(f"    {name:<10}", "muted") + f"{r['some']['avg10']:.1f}{full} %")
+    return body
+
+
+def body_network(v):
+    """The web Network tab: every interface this process's namespace has, then the Wi-Fi signal and the TCP
+    connect times from the slower observations."""
+    s, obs, st = v.s, v.obs, v.st
+    net = s.get("network") if isinstance(s.get("network"), dict) else {}
+    ifaces = busiest_first(net.get("interfaces") if isinstance(net.get("interfaces"), list) else [])
+    wifi, wifi_o = group_data(obs, "wifi")
+    probe, probe_o = group_data(obs, "probe")
+    wlans = wifi.get("interfaces") if isinstance(wifi, dict) else None
+    targets = probe.get("targets") if isinstance(probe, dict) else None
+    if not ifaces and not wlans and not targets:
+        return v.empty("No interface, Wi-Fi or TCP connect readings · they appear here when collected")
+
+    body = []
+    if ifaces:
+        shown = ifaces[:MAX_ROWS]
+        widths = detail_widths(v.width, [13, 13, 17, 12])
+        body.append(v.row(widths, ["  INTERFACES", "↓ RX", "↑ TX", "PKT/S rx · tx", "ERR · DROP"],
+                          ["muted bold"] + ["muted"] * 4))
+        for i in shown:
+            r = i["rates"]
+            if not r:
+                body.append(v.no_rate(widths, i["name"], i))
+                continue
+            err = (i.get("rx") or {}).get("errors", 0) + (i.get("tx") or {}).get("errors", 0)
+            drop = (i.get("rx") or {}).get("dropped", 0) + (i.get("tx") or {}).get("dropped", 0)
+            idle = not r["rx_bytes_per_s"] and not r["tx_bytes_per_s"]
+            body.append(v.row(widths, [f"    {i['name']}", per_s(r["rx_bytes_per_s"]), per_s(r["tx_bytes_per_s"]),
+                                       f"{r['rx_packets_per_s']:.0f} · {r['tx_packets_per_s']:.0f}", f"{err} · {drop}"],
+                              ["muted"] * 5 if idle else [None, None, None, "muted", "warn" if err or drop else "muted"]))
+        if len(ifaces) > len(shown):
+            body.append(st(f"    +{len(ifaces) - len(shown)} more interfaces (all in /api/stats)", "muted"))
+        body.append(st(pad("this netns · err/drop = totals", min(v.width, max(sum(widths), 32)), True), "muted"))
+
+    if wlans:
+        body += ["", v.title("WI-FI", observed_text(wifi_o))]
+        for i in wlans:
+            if i.get("connected") is not True:  # never the last signal of a connection that ended
+                state = "not connected" if i.get("connected") is False else i.get("connection_state", "unknown")
+                body.append(st(f"    {i['name']:<8}  {state}", "muted"))
+                continue
+            signal = (f"{i['signal_dbm']} dBm" if i["signal_dbm"] is not None
+                      else f"signal {i['signal_raw']} (unit not reported)" if i["signal_raw"] is not None else "signal n/a")
+            extra = [f"link quality {i['link_quality']}" if i["link_quality"] is not None else "",
+                     f"noise {i['noise_dbm']} dBm" if i["noise_dbm"] is not None else ""]
+            body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), signal]
+                               + [st(f"   {e}", "muted") for e in extra if e]))
+
+    if targets:
+        body += ["", v.title("TCP CONNECT", observed_text(probe_o))]
+        places = {id(t): (f"[{t['address']}]:{t['port']}" if ":" in t["address"]
+                          else f"{t['address']}:{t['port']}") for t in targets}
+        where_w = max(len(w) for w in places.values()) + 2
+        for t in targets:
+            where = places[id(t)]
+            now = f"{t['connect_ms']:.1f} ms" if t["connect_ms"] is not None else str(t["reason"])
+            body.append(joined(v.width, [st(pad(f"    {where}", 4 + where_w), "muted"), pad(now, 10, True),
+                                         st(f"   failed {t['failures']}/{t['attempts']} recent",
+                                            "warn" if t["failures"] else "muted")]))
+    return body
+
+
+def body_storage(v):
+    """The web Storage tab: every filesystem the storage observation found, its disks' partition counts,
+    and the per-disk I/O rates."""
+    s, obs, st = v.s, v.obs, v.st
+    data, o = group_data(obs, "storage")
+    dio = s.get("disk_io") if isinstance(s.get("disk_io"), dict) else {}
+    disks = dio.get("disks") if isinstance(dio.get("disks"), list) else []
+    fss = (data or {}).get("filesystems") or []
+    parts = (data or {}).get("partitions") or []
+    if not fss and not parts and not disks:
+        return v.empty("No filesystem or disk I/O readings · they appear here when collected")
+
+    body = []
+    if fss:
+        body.append(v.title("FILESYSTEMS", observed_text(o)))
+        path_w = max(len(f["mount_points"][0]["path"]) for f in fss) + 2
+        cap_w = max(len(f"{gib(f['used_bytes'])} / {gib(f['total_bytes'])}") for f in fss
+                    if f["total_bytes"] is not None) if any(f["total_bytes"] is not None for f in fss) else 0
+        bw = min(20 if v.wide else 11, max(6, v.width - 20 - path_w))
+        for f in fss:
+            m, pct = f["mount_points"], fs_pct(f)
+            where = pad(m[0]["path"], path_w) + ("(ro) " if m[0]["read_only"] else "")
+            more = st(f"+{len(m) - 1} ", "muted") if len(m) > 1 else ""  # bind mounts can be dozens
+            node = f"{f['major']}:{f['minor']}"  # a filesystem with no device name
+            dev = st(f"   {f['fstype']} {f['device'] or node}", "muted")
+            if pct is None:
+                body.append(joined(v.width, [st(f"    {where}", "muted"), more,
+                                             st("capacity unknown", "muted"), dev]))
+                continue
+            body.append(joined(v.width, [
+                st(f"    {where}", "muted"), more, meter(st, pct, bw, LIMITS["filesystem"]),
+                st(pad(f"{pct:.0f} %", 7, True), tone(level(pct, LIMITS["filesystem"]))),
+                "   " + pad(f"{gib(f['used_bytes'])} / {gib(f['total_bytes'])}", cap_w),
+                st(f"   {gib(f['available_bytes'])} free", "muted"), dev]))
+
+    if parts:
+        by_disk = {}
+        for p in parts:
+            by_disk.setdefault(p["disk"], []).append(p)
+        body += ["", v.title("PARTITIONS")]
+        for disk, items in by_disk.items():
+            mounted = sum(1 for p in items if p["mount_points"])
+            body.append(st(f"    {disk:<12}", "muted")
+                        + f"{len(items)} partition{'s' if len(items) != 1 else ''}, {mounted} mounted")
+
+    if disks:
+        widths = detail_widths(v.width, [13, 13, 17, 12])
+        body += ["", v.row(widths, ["  DISK I/O", "READ", "WRITE", "OPS/S r · w", "I/O TIME"],
+                           ["muted bold"] + ["muted"] * 4)]
+        for d in disks[:MAX_ROWS]:
+            r = d["rates"]
+            if not r:
+                body.append(v.no_rate(widths, d["name"], d))
+                continue
+            idle = not r["read_bytes_per_s"] and not r["write_bytes_per_s"]
+            body.append(v.row(widths, [f"    {d['name']}", per_s(r["read_bytes_per_s"]), per_s(r["write_bytes_per_s"]),
+                                       f"{r['reads_per_s']:.0f} · {r['writes_per_s']:.0f}", f"{100 * r['io_time_ratio']:.1f} %"],
+                              ["muted"] * 5 if idle else [None, None, None, "muted", None]))
+        if len(disks) > MAX_ROWS:
+            body.append(st(f"    +{len(disks) - MAX_ROWS} more disks (all in /api/stats)", "muted"))
+        body.append(st(pad("I/O time = share of window with I/O in flight", min(v.width, max(sum(widths), 46)), True), "muted"))
+    return body
+
+
+def body_thermal(v):
+    """The web Temperature & power tab: every sensor on the same 0-100 °C scale as the web page's bars,
+    then the power rails, the fans and the board's power mode."""
+    s, st = v.s, v.st
+    temps, limits = hottest_first(s), temp_limits(s)
+    power = list((s.get("power") or {}).items())
+    fans = s.get("fans") or []
+    if not temps and not power and not fans:
+        return v.empty("No temperature, power or fan readings · this board reports none")
+
+    body = []
+    if temps:
+        body.append(v.title("TEMPERATURE", f"bar scale 0-100 °C · warning from {limits[0]:g} °C" if limits
+                            else "bar scale 0-100 °C"))
+        name_w = max(len(k) for k, _ in temps) + 2  # sensor names can be long ("coretemp Package id 0")
+        bw = min(20 if v.wide else 11, max(6, v.width - 14 - name_w))
+        for k, t in temps:
+            lv = level(t, limits)
+            body.append(joined(v.width, [st(f"    {k:<{name_w}}", "muted"),
+                                         st(pad(f"{t:.1f} °C", 9), "bold", tone(lv)),
+                                         " " + meter(st, t, bw, limits)]))
+    if power or fans:
+        mode = f"mode {s['power_mode']}" if s.get("power_mode") else ""
+        body += ["", v.title("POWER & FANS", mode)]
+        name_w = max([len(k) for k, _ in power] + [len(f"fan {f['name']}") for f in fans]) + 2
+        for k, p in power:
+            body.append(st(f"    {k:<{name_w}}", "muted") + f"{p:.2f} W")
+        for f in fans:
+            vals = " · ".join(x for x in (f["rpm"] is not None and f"{f['rpm']} rpm",
+                                          f["percent"] is not None and f"{f['percent']} %") if x) or "n/a"
+            body.append(st(f"    {'fan ' + f['name']:<{name_w}}", "muted") + vals)
+    return body
+
+
+def body_system(v):
+    """The web System tab: the platform, uptime and whatever the board reported about itself. The power
+    mode stays in Temperature & power, as on the web page."""
+    s, st = v.s, v.st
+    up = int(s["uptime"])
+    system = s.get("system") if isinstance(s.get("system"), dict) else {}
+    rows = [("Model", s["model"]), ("Platform", s["platform"]),
+            ("Uptime", f"{up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}")]
+    rows += [(label, system[key]) for key, label in SYSTEM_ROWS if system.get(key)]
+    # Board-specific fields keep their own key, as the web page adds them without rebuilding its rows.
+    rows += [(key, value) for key, value in system.items() if value and key not in dict(SYSTEM_ROWS)]
+    label_w = max(len(label) for label, _ in rows) + 3
+    return [st(f"  {label:<{label_w}}", "muted") + str(value) for label, value in rows]
+
+
+# The web page's System rows, in its order; anything else the board sent follows under its own key.
+SYSTEM_ROWS = (("os", "OS"), ("kernel", "Kernel"), ("arch", "Architecture"), ("hostname", "Hostname"),
+               ("l4t", "L4T"))
+BODIES = {"overview": body_overview, "resources": body_resources, "network": body_network,
+          "storage": body_storage, "thermal": body_thermal, "system": body_system}
+
+
+def screen(s, obs, width, height, st, status, history, view="overview"):
+    """The live view as lines of at most width columns and at most height lines.
+    status: state (live, partial, offline), age (seconds), error (explain() text or None), addr, interval.
+    history: label -> the latest values of that Overview reading (None for a missed answer).
+    view: which of VIEWS to draw; the tab bar names the others."""
+    wide = width >= WIDE
+    sys_ = s.get("system") or {}
+    up = int(s["uptime"])
+    uptime = f"up {up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}"
+
+    state = status["state"]
+    color = {"live": "ok", "partial": "warn", "offline": "crit"}[state]
+    sample = s.get("sample") if isinstance(s.get("sample"), dict) else {}
+    seq = f"#{sample['sequence']} · " if isinstance(sample.get("sequence"), int) and wide else ""
+    age = (f"data {status['age']:.0f} s old" if state == "offline" else
+           f"{status['age']:.1f} s ago" if wide else f"{status['age']:.1f} s")
+    head = [spread(st(" p_", "ok", "bold") + st(" platmon", "bold") + "   " + st(s["model"] if wide else sys_.get("hostname") or s["model"], "bold"),
+                   st(f"{st.dot} {state.upper()}", color) + st(f"  {seq}{age} ", "muted"), width),
+            st("             " + " · ".join(str(value) for value in (
+                ([sys_.get("hostname")] if wide else []) + [s["platform"], s["power_mode"] and f"mode {s['power_mode']}", uptime]
+                + ([sys_.get("os"), sys_.get("l4t") and f"L4T {sys_['l4t']}", sys_.get("arch")] if wide else [sys_.get("l4t") and f"L4T {sys_['l4t']}"]))
+                if value), "muted"),
+            tabbar(st, width, view)]
+
+    banner = []
+    if status.get("error"):
+        first, *rest = status["error"].split("\n")
+        banner.append(st(pad(f"  {st.cross} NOT CURRENT  {first} · retrying every {status['interval']:g} s", width), "crit_bg"))
+        banner += [st("                 " + r.strip(), "crit") for r in rest]
+
+    body = BODIES[view](View(s, obs, width, st, history))
     while body and not body[-1]:
         body.pop()
     if status.get("error"):  # the last data, dimmed: shown as what it is, not as current
         body = [st(ANSI.sub("", line), "dim") for line in body]
 
-    keys = st("  ") + st("q", "bold") + st(" quit", "muted")
+    keys = (st("  ") + st("q", "bold") + st(" quit", "muted")
+            + (st(" · ", "muted") + st(f"1-6 {st.larr}/{st.rarr}", "bold") + st(" view", "muted") if width >= 60 else ""))
     foot = [st(st.rule * width, "muted"),
             spread(keys, st((f"platmon {VERSION} · {status['addr']} · every {status['interval']:g} s" if wide
                              else f"{VERSION} · {status['addr']} · {status['interval']:g} s") + " ", "muted"), width)]
@@ -699,8 +1049,9 @@ def data_age(s, got, now):
     return (age / 1000 if isinstance(age, (int, float)) and age >= 0 else 0) + now - got
 
 
-def live(addr, interval, fetch, first):
-    """The live view on an interactive terminal: one request per interval as before, nothing in between."""
+def live(addr, interval, fetch, first, view="overview"):
+    """The live view on an interactive terminal: one request per interval as before, nothing in between.
+    view: the first of VIEWS to draw; keys switch it without asking the service for anything more."""
     st = make_style(os.environ, sys.stdout.encoding)
     history = {}
 
@@ -721,13 +1072,14 @@ def live(addr, interval, fetch, first):
             state = "offline" if error else "partial" if collection_note(s) else "live"
             status = {"state": state, "age": data_age(s, got, time.monotonic()), "error": error, "addr": addr,
                       "interval": interval}
-            term.draw(screen(s, obs, cols - 1, rows, st, status, history))  # cols - 1: never wraps the last column
+            term.draw(screen(s, obs, cols - 1, rows, st, status, history, view))  # cols - 1: never wraps the last column
             event = term.wait(deadline - time.monotonic())
             if event == "resize":
                 continue
             if event != "tick":
                 if "q" in event.lower():
                     return
+                view = next_view(event, view)  # redrawn from the data in hand, no request
                 continue
             try:
                 s, obs = fetch()
@@ -757,15 +1109,20 @@ def explain(addr, e):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="platmon", description="Live view of a platmon service (this device by default).",
                                 epilog="The service runs in the background: scripts/systemd/install.sh or "
-                                       "scripts/docker/start.sh in the platmon repo. NO_COLOR=1 turns colors off; "
+                                       "scripts/docker/start.sh in the platmon repo. In the live view 1-6, Tab "
+                                       "or the arrow keys switch views and q quits. NO_COLOR=1 turns colors off; "
                                        "PLATMON_ASCII=1 draws with ASCII only.")
     p.add_argument("host", nargs="?", default="localhost", help=f"host[:port], default localhost:{PORT}")
     p.add_argument("interval", nargs="?", type=float, default=1.0, help="seconds between updates, default 1")
     p.add_argument("--once", action="store_true", help="print one snapshot without clearing the screen, then exit")
+    p.add_argument("--view", choices=VIEWS, help="the live view's first view (default overview); switch with 1-6, "
+                                                 "Tab or the arrow keys. Interactive terminals only")
     p.add_argument("--version", action="version", version=f"platmon {VERSION}")
     a = p.parse_args(argv)
     if not (math.isfinite(a.interval) and a.interval > 0):  # nan and inf would crash in time.sleep()
         p.error("interval must be a number greater than 0")
+    if a.once and a.view:  # --once prints every section, so there is no view to choose
+        p.error("--view selects a view of the live screen; --once prints every section")
     addr = a.host if ":" in a.host else f"{a.host}:{PORT}"
     url = f"http://{addr}/api/stats"
 
@@ -807,7 +1164,7 @@ def main(argv=None):
                     use_levels(json.load(r).get("levels"))
             except (OSError, ValueError, AttributeError):  # an older server or none: the defaults
                 pass
-            live(addr, a.interval, fetch, first)
+            live(addr, a.interval, fetch, first, a.view or "overview")
             return
         out = render(*first)  # not a terminal (a pipe, a log, Windows): the plain screen as before
         while True:
