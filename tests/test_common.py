@@ -277,16 +277,55 @@ def test_hwmon_pc(tmp_path):
     assert fans == [{"name": "nct6775 fan2", "rpm": 950, "percent": 50}]
 
 
+def class_link(link, target):
+    """The class symlink the kernel makes, e.g. class/hwmon/hwmon2 -> ../../devices/.../hwmon2."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(os.path.relpath(target, link.parent))
+
+
+def test_hwmon_twin_of_a_zone_is_skipped_by_its_path(tmp_path):
+    """A thermal zone's hwmon twin is left out by the zone's path, not by its name: the kernel may name
+    the twin after the zone instead of after the zone type (acpitz_0 for a zone of type acpitz), and then
+    no name matches. Reading it twice would duplicate the value and pay twice for a slow sensor."""
+    sysroot = tmp_path / "sys"
+    for n, (zt, milli, twin) in enumerate([("acpitz", 54000, "acpitz_0"), ("iwlwifi_1", 41000, "iwlwifi_1_8")]):
+        z = sysroot / "devices" / "virtual" / "thermal" / f"thermal_zone{n}"
+        z.mkdir(parents=True)
+        (z / "type").write_text(zt)
+        (z / "temp").write_text(str(milli))
+        class_link(sysroot / "class" / "thermal" / f"thermal_zone{n}", z)
+        d = z / f"hwmon{n}"  # the twin sits directly inside the zone's own directory
+        d.mkdir()
+        (d / "name").write_text(twin)
+        (d / "temp1_input").write_text(str(milli))
+        class_link(sysroot / "class" / "hwmon" / f"hwmon{n}", d)
+    chip = sysroot / "devices" / "platform" / "coretemp.0" / "hwmon" / "hwmon9"  # real hardware, not a twin
+    chip.mkdir(parents=True)
+    (chip / "name").write_text("coretemp")
+    (chip / "temp1_input").write_text("58000")
+    class_link(sysroot / "class" / "hwmon" / "hwmon9", chip)
+
+    temps, zone_types, zone_paths = thermal_zones(root=str(sysroot / "class" / "thermal"))
+    assert temps == {"acpitz": 54.0, "iwlwifi_1": 41.0}
+    assert zone_types == {"acpitz", "iwlwifi_1"}  # neither names the twin, so the name alone cannot skip it
+    assert zone_paths == {"devices/virtual/thermal/thermal_zone0", "devices/virtual/thermal/thermal_zone1"}
+    hw_temps, _, _ = hwmon_sensors(skip=zone_types, skip_devices=zone_paths,
+                                   root=str(sysroot / "class" / "hwmon"))
+    assert hw_temps == {"coretemp temp1": 58.0}
+
+
 def test_thermal_zones(tmp_path):
-    """Zone types reported as hwmon names ("-" -> "_"), duplicate zone types kept apart."""
+    """Zone types reported as hwmon names ("-" -> "_"), duplicate zone types kept apart, every listed
+    zone's resolved path returned (hwmon_sensors leaves the twins inside them out)."""
     for i, (zt, t) in enumerate([("cpu-thermal", 51200), ("acpitz", 27800), ("acpitz", 30000)]):
         z = tmp_path / f"thermal_zone{i}"
         z.mkdir()
         (z / "type").write_text(zt)
         (z / "temp").write_text(str(t))
-    temps, zone_types = thermal_zones(root=str(tmp_path))
+    temps, zone_types, zone_paths = thermal_zones(root=str(tmp_path))
     assert temps == {"cpu": 51.2, "acpitz": 27.8, "acpitz (thermal_zone2)": 30.0}
     assert zone_types == {"cpu_thermal", "acpitz"}
+    assert {os.path.basename(p) for p in zone_paths} == {"thermal_zone0", "thermal_zone1", "thermal_zone2"}
 
 
 def test_host_paths_from_env(tmp_path):

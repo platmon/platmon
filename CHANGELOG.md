@@ -4,6 +4,15 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `frontends/cli.py`; Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+- A thermal zone that also appears as an hwmon chip is now recognised by the zone's path instead of its
+  name, so its temperature is reported once. The kernel may name the chip after the zone rather than
+  after the zone type (`acpitz_0` for a zone of type `acpitz`), and then the name no longer matched: on
+  an x86_64 PC `/api/stats` listed `acpitz`, `acpitz (thermal_zone1)` and `iwlwifi_1` a second time as
+  `acpitz_0 temp1`, `acpitz_1 temp1` and `iwlwifi_1_8 temp1`. Reading a channel twice also paid twice
+  for a slow sensor: the duplicate Wi-Fi read alone cost about 2 ms of every collection.
+
 ## 1.1.0 — 2026-10-11
 
 - The GPU of any host is read from the standard DRM class and the NPU from the accel class, with one
