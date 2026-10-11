@@ -112,3 +112,63 @@ review: the first round missed the call p95 criterion on the Raspberry Pi).
 | headroom to 2.0 % (means) | about 0.25 pp | about 0.44 pp |
 
 Disk I/O is therefore **on by default**, with `[disk_io] enabled = no` to turn it off.
+
+## Device-wake sensors on x86 hosts (2026-10-11)
+
+Not a feature decision and not a new experiment: a finding about a host class the conditions above do
+not cover. Both reference boards are measured with their own sensors, and neither a Jetson Orin Nano nor
+a Raspberry Pi 4 has an NVMe hwmon channel or an Intel Wi-Fi thermal zone, so the responsiveness
+criterion had never been checked against a sensor whose read wakes a device. The release target, the
+feature criteria and the recorded board results above are unchanged.
+
+Measured on an x86_64 PC (22 logical CPUs, Ubuntu 26.04, kernel 7.0, NVMe root, Intel Wi-Fi) with every
+feature on by default and `[core] interval = 1.0`, after the thermal-zone twin fix. Two of the 102 reads
+of a collection cost 13.3 ms of its 16.7 ms of reading; the other 100 cost 3.5 ms together.
+
+| | nvme `temp1_input` | iwlwifi zone `temp` |
+| --- | --- | --- |
+| elapsed per read at the 1 s cadence (criterion: p95 ≤ 2 ms) | 9.5 ms | 3.5 ms |
+| elapsed per read in a tight loop, the device never idle | 1.70 ms | 0.14 ms |
+| thread CPU of that elapsed time | 0.371 ms (4 %) | 0.275 ms (10 %) |
+| elapsed per read at a 5 s / 15 s cadence | 8.84 / 8.64 ms | 4.55 / 4.52 ms |
+
+Reading either one wakes the device: an NVMe admin command to a drive in an APST low-power state, and a
+firmware command to the Wi-Fi card. The cost is waiting, not computing, and it does not fall with a
+longer interval — only how often it is paid does.
+
+What that does and does not reach, on the same host:
+
+| | result |
+| --- | --- |
+| whole process, default configuration, idle (release target ≤ 2.0 %) | about 0.8 % over 4 h 45 m |
+| collection elapsed, median / p95 | 18.8 / 27.7 ms |
+| cadence at `interval = 1.0` | 30 collections in 30.1 s; no overruns, no stale snapshots |
+| cadence at `interval = 0.1`, the shortest the config allows (other groups at their minimums) | 299 collections in 30.0 s (100 %), 4.6 % of one core |
+| responsiveness, a call's elapsed p95 ≤ 2 ms | **not met** by these two channels |
+| regressions: memory, failures, overruns, data-age fallbacks | none; 10 088 collections at a compressed cadence left no lasting growth |
+
+**Accepted as it is.** The release target is met with margin precisely because the cost is wait and not
+CPU, the cadence holds at every interval the config allows, and the alternatives are each worse. The
+first two were measured on this host; the third was assessed against the API and the viewers:
+
+- Leaving a channel out of the snapshots that did not read it keeps the data age honest
+  (`data_age_basis` stays `oldest_current_read_start`, no log entries), but the web page's
+  "Hottest of N sensors" then alternates between 26 and 28, the `platmon` screen's TEMP line gains and
+  loses two entries from second to second, and the channel loses its history entirely: an identity that
+  is not present every time never wins a slot back once `MAX_SERIES` is reached, because established
+  series win ties (`collector/history.py`, `_fitting`).
+- Carrying the last value forward keeps the key and stops the flicker, but every snapshot that carries
+  one falls back to `cycle_start_upper_bound`, its `sensor_meta` says `read: null`, and the service logs
+  `a value without a valid read` about 700 times an hour. The snapshot would stop saying when its own
+  temperature was read.
+- Moving the two channels to a low-frequency group would solve both, at the cost of taking two keys out
+  of `/api/stats` and of both viewers merging two sources: a breaking change in exchange for 13 ms of
+  waiting a second. Not measured.
+
+The criterion stays as written. It is a review trigger for the work platmon does, and it did its job
+here: it is what made these two channels visible. A channel whose cost is a device wake is recorded
+here rather than quietly exempted, so the next host that shows one is compared against this.
+
+Not measured: the power cost of waking an NVMe drive once a second, which matters on a battery-powered
+host. If that is judged to matter, the low-frequency group becomes the better trade and this decision
+should be revisited.

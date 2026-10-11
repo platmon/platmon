@@ -129,7 +129,7 @@ def test_virtual_hwmon_and_thermal_zone_are_path_based(tmp_path):
     _, g = hwmon(tmp_path)
     assert g["temperature"].sensors["acpitz temp1"]["identity_basis"] == "resolved_path"  # not "devices/virtual"
     tg = sysfs.Group("temperature", sysfs.Trace(Tick()))
-    temps, _ = common.thermal_zones(root=str(tmp_path / "class" / "thermal"), group=tg)
+    temps, *_ = common.thermal_zones(root=str(tmp_path / "class" / "thermal"), group=tg)
     assert temps == {"cpu": 51.0}
     assert tg.sensors["cpu"]["provider"] == "thermal" and tg.sensors["cpu"]["identity_basis"] == "resolved_path"
 

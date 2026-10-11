@@ -16,19 +16,27 @@ def unique_key(table, key, d):
     return f"{key} ({os.path.basename(d)})" if key in table else key
 
 
-def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
-    """Temps, power and fans from every hwmon chip, in one pass. skip: chip names already read elsewhere.
+def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None, skip_devices=()):
+    """Temps, power and fans from every hwmon chip, in one pass.
+    skip: chip names already read elsewhere; skip_devices: resolved sysfs paths (sysfs.canonical) whose
+    hwmon children are already read elsewhere. A thermal zone's hwmon twin is left out by its path,
+    because the kernel may name it after the zone type or after the zone itself (acpitz_0); the name
+    stays the fallback for a tree whose paths do not resolve, e.g. a container's partial /sys mount.
     groups: the temperature/power/fans sysfs.Group to note unreadable channels in; a channel that cannot be
     read is left out (a fan's unreadable rpm or pwm is None), the others are kept."""
     g = groups or sysfs.groups("temperature", "power", "fans")
     temp_g, power_g, fan_g = g["temperature"], g["power"], g["fans"]
     temps, power, fans = {}, {}, []
     track = temp_g.trace is not None  # the service records each value's source and read span
+    sysroot = os.path.dirname(os.path.dirname(root))
     with guard(temp_g, power_g, fan_g):
         chips = hwmon_chips(root, temp_g, power_g, fan_g)
-        ids = sysfs.chip_identities(chips, os.path.dirname(os.path.dirname(root))) if track else {}
+        ids = sysfs.chip_identities(chips, sysroot) if track else {}
         for d, chip in chips:
             if chip in skip:
+                continue
+            # a zone's twin sits inside the zone's own directory, whatever the chip is named
+            if skip_devices and (rel := sysfs.canonical(d, sysroot)) and os.path.dirname(rel) in skip_devices:
                 continue
             dev = os.path.basename(d)
             basis, where = ids.get(d, ("unresolved", {}))
@@ -99,14 +107,19 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
 
 
 def thermal_zones(root="/sys/class/thermal", group=None):
-    """Zone temps, plus zone types as their hwmon twins name them (kernel turns "-" into "_").
+    """Zone temps, the zone types their hwmon twins may be named after (kernel turns "-" into "_"), and the
+    zones' resolved paths; hwmon_sensors leaves the twins out by both.
     group: the temperature sysfs.Group; inactive zones (ENODATA) count as no_data, not as errors."""
     g = group or sysfs.Group("temperature")
-    temps, zone_types = {}, set()
+    temps, zone_types, zone_paths = {}, set(), set()
     sysroot = os.path.dirname(os.path.dirname(root))
     with guard(g):
         zones = sorted(numbered(entries(root, g), "thermal_zone", ""))
         for z in (f"{root}/thermal_zone{n}" for n in zones):
+            # zones are numbered virtual devices: identified by their path only, not their type
+            rel = sysfs.canonical(z, sysroot)
+            if rel:
+                zone_paths.add(rel)
             # the zone's name; unreadable, the zone is named after its directory (a read failure is noted)
             zt = g.read(f"{z}/type", f"{os.path.basename(z)}.type", parse=str, found=z) or os.path.basename(z)
             zone_types.add(zt.replace("-", "_"))
@@ -117,11 +130,10 @@ def thermal_zones(root="/sys/class/thermal", group=None):
                 if key in temps:  # e.g. several acpitz zones
                     key += f" ({os.path.basename(z)})"
                 temps[key] = g.got(t / 1000)
-                if g.trace:  # zones are numbered virtual devices: identified by their path only, not their type
-                    rel = sysfs.canonical(z, sysroot)
+                if g.trace:
                     g.sensor(key, sysfs.source("thermal", "celsius", "resolved_path" if rel else "unresolved",
                                                path=rel, attr="temp"), span)
-    return temps, zone_types
+    return temps, zone_types, zone_paths
 
 
 def cpu_times(path="/proc/stat"):
@@ -261,9 +273,9 @@ def collect(cpu=None, groups=None, trace=None):
                 freq_g.sensor(n, sysfs.source("cpufreq", "hertz", "device_channel", cpu=n, attr="scaling_cur_freq"),
                               freq_g.span)
 
-    temps, zone_types = thermal_zones(group=groups["temperature"])
+    temps, zone_types, zone_paths = thermal_zones(group=groups["temperature"])
     # zones (acpitz, cpu-thermal, ...) also show up as hwmon chips; skip them to avoid duplicates
-    hw_temps, power, fans = hwmon_sensors(skip=zone_types, groups=groups)
+    hw_temps, power, fans = hwmon_sensors(skip=zone_types, skip_devices=zone_paths, groups=groups)
     temps.update(hw_temps)
 
     timed = trace.timed if trace else (lambda name, fn, *args: fn(*args))

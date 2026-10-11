@@ -19,6 +19,7 @@ BRAND_ASSETS = {
 }
 LIVE = ("/api/stats", "/api/status", "/api/observations", "/api/history", "/text")
 MAX_POINTS, MAX_PREFIX = 600, 128
+REQUEST_TIMEOUT = 10  # seconds to send a request line and headers in; generous for any real client
 
 
 def history_query(history, query):
@@ -45,7 +46,16 @@ def make_handler(sampler, web=True, observations=None, history=None, levels=None
                                                           "clock": dict(sampler.clock), "groups": {}}
 
     class Handler(BaseHTTPRequestHandler):
+        # Without a deadline a client that connects and then sends nothing holds its thread, and the
+        # memory behind it, for as long as it stays connected: a dropped client or a port scan leaves
+        # the thread parked in the request read forever. This bounds reading the request only.
+        timeout = REQUEST_TIMEOUT
+
         def do_GET(self):
+            # Answering is not bounded: a socket timeout is a deadline for a whole write, not an idle
+            # one, so keeping it would cut a large response (/api/history can be hundreds of kB) off a
+            # client that reads slowly but steadily. HTTP/1.0 closes after this, so no read follows.
+            self.connection.settimeout(None)
             path, _, query = self.path.partition("?")
             if history is not None and path == "/api/history":  # read-only, bounded; never collects
                 try:

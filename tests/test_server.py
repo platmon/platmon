@@ -1,4 +1,5 @@
 import json
+import socket
 import threading
 import time
 import urllib.error
@@ -10,7 +11,7 @@ import pytest
 
 from collector.sampler import METADATA_KEYS, Sampler
 from frontends.cli import VERSION, render
-from frontends.server import make_handler
+from frontends.server import REQUEST_TIMEOUT, make_handler
 
 
 class NoWait(Sampler):
@@ -23,15 +24,57 @@ class NoWait(Sampler):
         return super()._stats_json(0.0)
 
 
-def serve(stats, web=True, sampler=None):
-    """Serves one collected snapshot of stats (None: nothing collected yet), or the given sampler."""
+def serve(stats, web=True, sampler=None, timeout=None, wrap=None):
+    """Serves one collected snapshot of stats (None: nothing collected yet), or the given sampler.
+    timeout: the handler's request deadline, shortened from the product default to keep tests fast.
+    wrap: called with the handler class, returns the class to serve with."""
     if sampler is None:
         sampler = NoWait(lambda: stats)
         if stats is not None:
             sampler._attempt()
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(sampler, web))
+    cls = make_handler(sampler, web)
+    if timeout is not None:
+        cls = type("Impatient", (cls,), {"timeout": timeout})
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), wrap(cls) if wrap else cls)
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
     return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
+
+
+def test_a_silent_client_is_dropped_instead_of_parking_its_thread():
+    """A client that connects and then sends no request is closed when the request deadline passes.
+    Without one it would hold its thread, and the memory behind it, for as long as it stayed connected,
+    so a dropped client or a port scan leaves threads parked for good."""
+    assert make_handler(NoWait(lambda: None)).timeout == REQUEST_TIMEOUT > 0  # the shipped deadline
+    httpd, base = serve({"platform": "PC"}, timeout=0.3)  # the same mechanism, shortened for the test
+    try:
+        s = socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=5)
+        s.settimeout(5)  # the recv below would block until this, were the server still waiting
+        assert s.recv(1) == b""  # closed by the server
+        s.close()
+        assert get(base + "/api/status")[0] == 200  # and it goes on serving
+    finally:
+        httpd.shutdown()
+
+
+def test_answering_is_not_bounded_by_the_request_deadline():
+    """The deadline covers reading the request only. A socket timeout is a deadline for a whole write,
+    not an idle one, so leaving it in force would cut a large response (/api/history can be hundreds of
+    kB) off a client that reads slowly but steadily."""
+    seen = []
+
+    def watch(cls):
+        class Watched(cls):
+            def do_GET(self):
+                super().do_GET()
+                seen.append(self.connection.gettimeout())
+        return Watched
+
+    httpd, base = serve({"platform": "PC"}, timeout=0.3, wrap=watch)
+    try:
+        assert get(base + "/api/status")[0] == 200
+        assert seen == [None]  # no deadline left on the connection the response went out on
+    finally:
+        httpd.shutdown()
 
 
 def get(url):
