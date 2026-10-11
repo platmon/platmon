@@ -211,7 +211,8 @@
       <button id="tab-resources" role="tab" aria-controls="panel-resources" aria-selected="false" tabindex="-1">Resources</button>
       <button id="tab-network" role="tab" aria-controls="panel-network" aria-selected="false" tabindex="-1">Network</button>
       <button id="tab-storage" role="tab" aria-controls="panel-storage" aria-selected="false" tabindex="-1">Storage</button>
-      <button id="tab-thermal" role="tab" aria-controls="panel-thermal" aria-selected="false" tabindex="-1" aria-label="Temperature &amp; power">Temp<span class="wide"> &amp; power</span></button>
+      <button id="tab-thermal" role="tab" aria-controls="panel-thermal" aria-selected="false" tabindex="-1">Temp<span class="wide">erature</span></button>
+      <button id="tab-power" role="tab" aria-controls="panel-power" aria-selected="false" tabindex="-1" aria-label="Power &amp; battery">Power<span class="wide"> &amp; battery</span></button>
       <button id="tab-system" role="tab" aria-controls="panel-system" aria-selected="false" tabindex="-1">System</button>
     </nav>
   </div>
@@ -243,10 +244,14 @@
     <section class="card" data-card hidden><div class="card-head"><h2>Disk I/O</h2><span class="cap">I/O time = share of window with I/O in flight</span></div><div id="dio"></div></section>
   </div>
   <div id="panel-thermal" role="tabpanel" aria-labelledby="tab-thermal" tabindex="0" hidden>
-    <section id="thermal-empty" class="card empty-card"><h2>No temperature, power, fan or battery data</h2>
-      <p>This board reports no thermal zones, power rails, fans or power supplies. Readings appear here automatically when the hardware exposes them.</p></section>
+    <section id="thermal-empty" class="card empty-card"><h2>No temperature data</h2>
+      <p>This board reports no thermal zones or hwmon temperature channels. Readings appear here automatically when the hardware exposes them.</p></section>
+    <section class="card" data-card hidden><div class="card-head"><h2>Temperature</h2><span class="cap">Bar scale 0–100 °C</span></div><div id="temp"></div></section>
+  </div>
+  <div id="panel-power" role="tabpanel" aria-labelledby="tab-power" tabindex="0" hidden>
+    <section id="power-empty" class="card empty-card"><h2>No power rail, fan or battery data</h2>
+      <p>This board reports no power rails, fans or power supplies. Readings appear here automatically when the hardware exposes them.</p></section>
     <div class="grid">
-      <section class="card" data-card hidden><div class="card-head"><h2>Temperature</h2><span class="cap">Bar scale 0–100 °C</span></div><div id="temp"></div></section>
       <section class="card" data-card hidden><div class="card-head"><h2>Power &amp; fans</h2><span id="pwr-cap"></span></div><div id="pwr"></div></section>
       <section class="card" data-card hidden><div class="card-head"><h2>Battery</h2><span class="cap" data-observation-age="battery"></span></div><div id="batt"></div></section>
     </div>
@@ -306,7 +311,7 @@ const uptimeText = seconds => {
   return `${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`;
 };
 
-const TABS = ['overview', 'resources', 'network', 'storage', 'thermal', 'system'];
+const TABS = ['overview', 'resources', 'network', 'storage', 'thermal', 'power', 'system'];
 let activeTab = 'overview', latestStats = null;
 const wantsObs = () => activeTab === 'network' || activeTab === 'storage';
 const visible = () => document.visibilityState === 'visible';
@@ -631,7 +636,8 @@ function collectionNote(s) {
 function hideEmptyPanels() {
   document.querySelectorAll('[data-card]').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
   $('network-empty').hidden = ['net', 'wifi', 'probe'].some(id => $(id).innerHTML);
-  $('thermal-empty').hidden = ['temp', 'pwr', 'batt'].some(id => $(id).innerHTML);
+  $('thermal-empty').hidden = !!$('temp').innerHTML;
+  $('power-empty').hidden = ['pwr', 'batt'].some(id => $(id).innerHTML);
 }
 
 function overviewRows(s) {
@@ -705,6 +711,10 @@ function renderThermal(s) {
   const temps = Object.entries(s.temperature).sort((a, b) => b[1] - a[1]);
   $('temp').innerHTML = temps.length ? '<div class="temps">' + temps.map(([k, v]) =>
     `<div class="temp"><span>${esc(k)}</span>${bar(v, LIMITS.temperature)}<span>${v.toFixed(1)} °C</span></div>`).join('') + '</div>' : '';
+}
+// what the board draws and what it has left, read together: consumption is the draw over a window
+// against the charge that window cost
+function renderPower(s) {
   const rows = Object.entries(s.power).map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') +
     s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
   $('pwr-cap').innerHTML = s.power_mode ? `<span class="chip">MODE ${esc(s.power_mode)}</span>` : '';
@@ -736,6 +746,7 @@ function renderActive() {
   else if (activeTab === 'network') { $('net').innerHTML = netRows(s); $('net-cap').textContent = netCaption(s); }
   else if (activeTab === 'storage') $('dio').innerHTML = diskRows(s);
   else if (activeTab === 'thermal') renderThermal(s);
+  else if (activeTab === 'power') renderPower(s);
   else if (activeTab === 'system') renderSystem(s);
   hideEmptyPanels();
 }
@@ -743,7 +754,7 @@ function renderObservations() {
   if (!visible()) return;
   if (activeTab === 'storage') $('sto').innerHTML = storageRows();
   if (activeTab === 'network') { $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows(); }
-  if (activeTab === 'thermal') $('batt').innerHTML = batteryRows();
+  if (activeTab === 'power') $('batt').innerHTML = batteryRows();
   hideEmptyPanels();
   updateDetailAges();
 }

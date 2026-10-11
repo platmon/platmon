@@ -196,6 +196,12 @@ def test_probe_from_observations(steps):
     assert steps["read_based_age"]["probe"] == ""
 
 
+def test_the_battery_card_is_under_power_and_battery(steps):
+    """The card is in the Power & battery panel, with the rails and fans, not under Temperature: what the
+    board draws and what it has left are read together."""
+    assert steps["ok"]["batt_panel"] == {"thermal": False, "power": True}
+
+
 def test_battery_from_observations(steps):
     batt = steps["ok"]["batt"]
     assert steps["ok"]["obs_age"]["battery"] == "observed 30 s ago"

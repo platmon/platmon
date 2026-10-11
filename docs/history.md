@@ -90,7 +90,7 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
 
 ## Web page
 
-With history on, the Resources, Network, Storage and Temperature & power tabs show a "Recent history" panel with that topic's CPU, memory,
+With history on, the Resources, Network, Storage and Temperature tabs show a "Recent history" panel with that topic's CPU, memory,
 GPU, NPU, temperature, network, disk or low-frequency series: one graph per series, bounded by the endpoint's own
 series limit. A row of buttons above the graphs lists the kinds of series that view has with how many each
 covers ("CPU cores 22", "RAM 1"); a button turns its kind off and on, and a view with only one kind has no

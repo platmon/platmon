@@ -114,6 +114,12 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
       for (const tab of TABS.slice(1)) { activeTab = tab; all += histRows(); }
       activeTab = saved; $('hist').innerHTML = all;
       return {net_cap: latestStats ? netCaption(latestStats) : '',
+        // which panel renderObservations fills: the card lives under Power & battery, not Temperature
+        batt_panel: Object.fromEntries(['thermal', 'power'].map(tab => {
+          const keep = activeTab; activeTab = tab; $('batt').innerHTML = '';
+          renderObservations(); const filled = !!$('batt').innerHTML; activeTab = keep;
+          return [tab, filled];
+        })),
         obs_age: Object.fromEntries(['storage', 'wifi', 'probe', 'battery'].map(g => [g, observationAge(g)]))};
     };
   `);
