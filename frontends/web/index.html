@@ -313,7 +313,11 @@ const uptimeText = seconds => {
 
 const TABS = ['overview', 'resources', 'network', 'storage', 'thermal', 'power', 'system'];
 let activeTab = 'overview', latestStats = null;
-const wantsObs = () => activeTab === 'network' || activeTab === 'storage';
+// The views whose cards come from /api/observations. A view holding such a card must be listed here, or
+// the page never asks for them while that view is open and the card stays empty: the fetch is gated on
+// the view so a view that shows none costs no request (see pollObs).
+const OBS_TABS = ['network', 'storage', 'power'];
+const wantsObs = () => OBS_TABS.includes(activeTab);
 const visible = () => document.visibilityState === 'visible';
 function activateTab(tab, save = true) {
   if (!TABS.includes(tab)) return;

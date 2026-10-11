@@ -24,8 +24,16 @@ const context = vm.createContext({AbortController, console, performance: {now: (
   clearTimeout: id => timers.delete(id), fetch: async url => {
     requests.push(url);
     if (failure && url === 'api/stats') return {ok: false, status: 503};
-    return {ok: true, status: 200, json: async () => url === 'api/stats' ? stats : url.startsWith('api/history') ? history : {groups: {}}};
+    return {ok: true, status: 200, json: async () => url === 'api/stats' ? stats : url.startsWith('api/history') ? history : observations};
   }});
+const observations = {schema_version: 2, groups: {battery: {state: 'ok', stale_after_ms: 180000,
+  observation: {id: 5, data_age_ms: 1000, stale: false},
+  data: {provider: 'sysfs_power_supply', external: [],
+         batteries: [{name: 'BAT1', present: true, percent: 72, status: 'Discharging', capacity_level: null,
+                      technology: null, health: null, charge_now_uah: null, charge_full_uah: null,
+                      charge_full_design_uah: null, energy_now_uwh: null, energy_full_uwh: null,
+                      energy_full_design_uwh: null, current_ua: null, power_uw: null, voltage_uv: null,
+                      cycle_count: null}]}}}};
 const run = text => vm.runInContext(text, context);
 const flush = async () => { for (let n = 0; n < 6; n++) await new Promise(setImmediate); };
 const count = prefix => requests.filter(url => url.startsWith(prefix)).length;
@@ -154,7 +162,11 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   await switchTo('system');
   assert.equal(osWrites, 1);
   assert.equal(el('system-l4t-row').hidden, true);
-  await switchTo('power');
+  const obsBeforePower = count('api/observations');
+  now += 30000;  // past the 10 s request interval, so a view that needs them may ask again
+  await switchTo('power'); intervals.forEach(fn => fn()); await flush();
+  assert(count('api/observations') > obsBeforePower, 'Power & battery asks for /api/observations');
+  assert(el('batt').innerHTML.includes('72 %'), 'and fills its Battery card from the answer');
   assert(el('pwr-cap').innerHTML.includes('MODE MAXN_SUPER'), 'power mode is in the Power & battery view');
   assert(el('pwr').innerHTML.includes('No power rails or fans reported'), 'a power mode alone still shows the card');
   assert.equal(context.location.hash, '#power', 'selection is stored in the URL');

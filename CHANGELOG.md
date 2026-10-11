@@ -6,6 +6,13 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- Fixed: the web page's Battery card stayed empty. The page asks for `/api/observations` only while a
+  view that needs them is open, and the view holding the card was not in that list, so on a page opened
+  straight to it nothing was ever requested and the card stayed hidden. The `platmon` command was
+  unaffected: it asks for the groups every 10 s whatever view is on. The list is now named beside the
+  request it gates, and the view harness drives the real polling path instead of calling the row
+  builder directly, which is why nothing caught this.
+
 - The Temperature & power view is now two: **Temperature**, and **Power & battery** with the power rails,
   the fans, the board's power mode and the batteries. Both viewers gain the view, the keys become
   `1`-`7`, and the live view's tab bar gains a shortest label set (`1 Ov 2 Re …`) so a 40-column terminal
