@@ -4,35 +4,29 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `frontends/cli.py`; Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
-
-- Fixed: the web page's Battery card stayed empty. The page asks for `/api/observations` only while a
-  view that needs them is open, and the view holding the card was not in that list, so on a page opened
-  straight to it nothing was ever requested and the card stayed hidden. The `platmon` command was
-  unaffected: it asks for the groups every 10 s whatever view is on. The list is now named beside the
-  request it gates, and the view harness drives the real polling path instead of calling the row
-  builder directly, which is why nothing caught this.
-
-- The Temperature & power view is now two: **Temperature**, and **Power & battery** with the power rails,
-  the fans, the board's power mode and the batteries. Both viewers gain the view, the keys become
-  `1`-`7`, and the live view's tab bar gains a shortest label set (`1 Ov 2 Re …`) so a 40-column terminal
-  keeps every tab named instead of falling back to the position alone. What the board draws and what it
-  has left are read together, which is how consumption is read: the draw over a window against the
-  charge that window cost. It also stops a host with dozens of temperature channels from pushing them
-  off the screen — on the reporting PC the battery sat on line 36 of 43 and was off a 24-row terminal
-  entirely; it is now line 4 of its own view. The Power & battery view has no Recent history panel: the
-  power rails and the battery have no history series yet (see docs/development/remaining-work.md).
+## 1.2.0 — 2026-10-11
 
 - Batteries and external power supplies are reported, as a low-frequency group `battery` at
   `/api/observations` (docs/battery.md), on by default every 60 seconds. Per battery: charge percent,
   the driver's status, the charge or energy family its gauge counts, voltage, current or power, cycle
-  count and the wear its full charge shows against the design charge; per external supply, whether it is
-  online. The plain screen (`--once`, pipes, `/text`) gains a `BATT` block, and a wide Overview a `BATT`
-  summary line. A narrow terminal wraps the readings onto their own lines rather than dropping one.
-  `/api/stats` is unchanged. Read on its own slow cadence because on an ACPI host one reading of a
-  battery is a 101 ms firmware call behind the driver's 1 s cache, which the 1 s core interval would hit
-  every collection, and because reading a battery costs the battery.
-
+  count and the wear its full charge shows against the design charge; per external supply, whether it
+  is online. The web page shows them in a Battery card, the `platmon` live view in its Power & battery
+  view with a `BATT` summary line on a wide Overview, and the plain screen (`--once`, pipes, `/text`)
+  in a `BATT` block; a narrow terminal wraps the readings onto their own lines rather than dropping
+  one. `/api/stats` and its schema are unchanged, and a viewer that does not know the group ignores it.
+  Read on its own slow cadence because on an ACPI host one reading of a battery is a 101 ms firmware
+  call behind the driver's 1 s cache, which the 1 s core interval would hit every collection, and
+  because reading a battery costs the battery.
+- The Temperature & power view is now two: **Temperature**, and **Power & battery** with the power
+  rails, the fans, the board's power mode and the batteries. Both viewers gain the view and the keys
+  become `1`-`7`; the live view's tab bar gains a shortest label set (`1 Ov 2 Re …`) so a 40-column
+  terminal keeps every tab named instead of falling back to the position alone. What the board draws
+  and what it has left are read together, which is how consumption is read: the draw over a window
+  against the charge that window cost. It also stops a host with dozens of temperature channels from
+  pushing them off the screen — on the reporting PC the battery sat on line 36 of 43 of the combined
+  view and was off a 24-row terminal entirely. The Power & battery view has no Recent history panel:
+  the power rails and the battery have no history series yet
+  ([remaining work](docs/development/remaining-work.md)).
 - A thermal zone that also appears as an hwmon chip is now recognised by the zone's path instead of its
   name, so its temperature is reported once. The kernel may name the chip after the zone rather than
   after the zone type (`acpitz_0` for a zone of type `acpitz`), and then the name no longer matched: on
