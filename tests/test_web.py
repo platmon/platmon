@@ -229,6 +229,16 @@ def test_history_graphs(steps):
     assert steps["read_based_age"]["hist"] == "" and steps["read_based_age"]["hist_fetches"] == 2  # 404: stopped
 
 
+def test_power_rail_history(steps):
+    """The rails are what a consumption reading is made of, so they get their own graphs in watts, on the
+    view that shows the rails. A rail is labelled from sensor_meta like a temperature channel, by name
+    when the server gave no source id."""
+    hist = steps["ok"]["hist"]
+    assert "<h3>Power rails</h3>" in hist
+    assert "rail VDD_IN</span><span>5.50 W" in hist and "5.25 W – 5.50 W" in hist  # the id resolved by sensor_meta
+    assert "rail VDD_SOC</span><span>1.50 W" in hist  # no id: the name the server published
+
+
 def test_pressure_rows(steps):
     psi = steps["pressure"]["psi"]
     assert "io</span><span>3.0%</span><span><span class=\"muted\">0.5%" in psi

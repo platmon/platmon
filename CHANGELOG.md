@@ -4,6 +4,16 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `frontends/cli.py`; Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+- Power rails are kept in the recent history, as `power/<source id>` series in watts
+  (docs/history.md), and drawn in the web page's Power & battery view. They were the only numeric
+  group of `/api/stats` with no series at all, which left the rails — what a consumption reading is
+  made of — impossible to read back over a window. A rail is identified by its `sensor_meta` source
+  id exactly as a temperature channel is, so a renamed rail or a replaced chip starts a new series.
+  Rails rank above the temperature channels when the 64-series limit is reached: a board labels a few
+  of them against dozens of nearly identical temperature channels.
+
 ## 1.2.0 — 2026-10-11
 
 - Batteries and external power supplies are reported, as a low-frequency group `battery` at

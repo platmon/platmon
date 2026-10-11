@@ -17,6 +17,7 @@ S = 10**9
 def stats(n, rx=100.0, ns="netns1:a", ifindex=2, disk_rates=True):
     return {"cpu": [{"id": 0, "usage": 10.0 + n}, {"id": 1, "usage": None}], "memory": {"used": 1000 + n},
             "temperature": {"cpu": 40.0, "a/b": 41.0},
+            "power": {"VDD_IN": 5.25, "VDD_CPU_GPU_CV": 1.5},
             "network": {"scope": {"id": ns}, "interfaces": [
                 {"name": "eth0", "ifindex": ifindex, "rates": {"rx_bytes_per_s": rx, "tx_bytes_per_s": 0.0}},
                 {"name": "wlan0", "ifindex": 3, "rates": None, "reason": "warmup"},
@@ -26,11 +27,14 @@ def stats(n, rx=100.0, ns="netns1:a", ifindex=2, disk_rates=True):
 
 
 def test_series_ids_follow_identities_and_gaps_are_none():
-    meta = {"/temperature/cpu": {"id": "src1:abc"}, "/temperature/a~1b": {"id": None}}
+    meta = {"/temperature/cpu": {"id": "src1:abc"}, "/temperature/a~1b": {"id": None},
+            "/power/VDD_IN": {"id": "src1:rail"}}
     p = points_of(stats(1), meta)
     assert p["cpu/0/usage"] == 11.0 and p["cpu/1/usage"] is None
     assert p["memory/used_bytes"] == 1001
     assert p["temperature/src1:abc"] == 40.0 and p["temperature/name:a/b"] == 41.0  # no id: by name, marked so
+    # a power rail is a named sensor value like a temperature, and is identified the same way
+    assert p["power/src1:rail"] == 5.25 and p["power/name:VDD_CPU_GPU_CV"] == 1.5
     assert p["network/netns1:a/2/eth0/rx_bytes_per_s"] == 100.0
     assert p["network/netns1:a/3/wlan0/rx_bytes_per_s"] is None  # warmup: a gap, not 0
     assert not any("/odd/" in k for k in p)  # no ifindex: no identity to join points on
@@ -77,12 +81,13 @@ def test_series_limit_counts_what_it_drops():
     assert h.view(11 * S)[1] == dropped
 
 
-def busy_host(warmup=False, cpus=22, temps=31, interfaces=4):
+def busy_host(warmup=False, cpus=22, temps=31, interfaces=4, rails=3):
     """As many identities as a 22-core PC with 31 temperature channels: 64 core series, 69 with the
     low-frequency groups below. warmup: the first snapshot, where no CPU has been measured yet."""
     return {"cpu": [] if warmup else [{"id": i, "usage": float(i)} for i in range(cpus)],
             "memory": {"used": 1000},
             "temperature": {f"sensor{i}": 40.0 + i for i in range(temps)},
+            "power": {f"rail{i}": 1.0 + i for i in range(rails)},
             "network": {"scope": {"id": "netns1:a"}, "interfaces": [
                 {"name": f"eth{i}", "ifindex": i + 1, "rates": {"rx_bytes_per_s": 1.0, "tx_bytes_per_s": 2.0}}
                 for i in range(interfaces)]},
@@ -108,16 +113,17 @@ def test_every_cpu_core_keeps_its_series_when_sensors_outnumber_the_limit():
     h.append({"sequence": 1, "started": S, "stats": busy_host(warmup=True), "sensor_meta": {}})
     h.append({"sequence": 2, "started": 2 * S, "stats": busy_host(), "sensor_meta": {}})
     series, dropped = h.view(2 * S)
-    assert len(series) == 64 and dropped == 5
+    assert len(series) == 64 and dropped == 8
     assert all(f"cpu/{i}/usage" in series for i in range(22))
-    assert len([sid for sid in series if sid.startswith("temperature/")]) == 26  # 31 channels, 26 slots left
+    assert len([sid for sid in series if sid.startswith("power/")]) == 3  # the rails keep theirs
+    assert len([sid for sid in series if sid.startswith("temperature/")]) == 23  # 31 channels, 23 slots left
     assert len([sid for sid in series if sid.startswith("network/")]) == 8
     assert len([sid for sid in series if sid.startswith("disk_io/")]) == 2
     assert len([sid for sid in series if sid.startswith("observation/")]) == 5  # the slow groups keep theirs
     assert "memory/used_bytes" in series
     h.append({"sequence": 3, "started": 3 * S, "stats": busy_host(), "sensor_meta": {}})
     series, dropped = h.view(3 * S)  # a stable choice: no series takes turns with another
-    assert dropped == 5 and len(series) == 64 and all(f"cpu/{i}/usage" in series for i in range(22))
+    assert dropped == 8 and len(series) == 64 and all(f"cpu/{i}/usage" in series for i in range(22))
     assert all(len(points) == 2 for sid, points in series.items() if sid.startswith("cpu/"))
 
 

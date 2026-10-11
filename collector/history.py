@@ -17,8 +17,10 @@ MAX_DROPPED_IDS = 256  # distinct dropped ids remembered; dropped_series stops g
 # Which series keep a slot on a host with more identities than max_series. A reading no other series
 # shows comes first; temperature is last because boards expose dozens of nearly identical channels (one
 # per core, plus the package and its thermal zone twin), while every CPU core, interface and disk is a
-# reading of its own. An id with none of these prefixes ranks with temperature.
-PRIORITY = ("memory/", "cpu/", "gpu/", "npu/", "network/", "disk_io/", "observation/", "temperature/")
+# reading of its own. Power rails rank above them: a board labels a few of them and they are what a
+# consumption reading is made of. An id with none of these prefixes ranks with temperature.
+PRIORITY = ("memory/", "cpu/", "gpu/", "npu/", "power/", "network/", "disk_io/", "observation/",
+            "temperature/")
 
 
 def priority(sid):
@@ -44,9 +46,12 @@ def points_of(stats, sensor_meta):
         if isinstance(values, dict) and "usage" in values:
             out[f"{kind}/usage"] = values["usage"]
     meta = sensor_meta or {}
-    for key, value in (stats.get("temperature") or {}).items():
-        sid = (meta.get(pointer("temperature", key)) or {}).get("id")
-        out[f"temperature/{sid or 'name:' + key}"] = value
+    # temperatures and power rails are both named sensor values with a source id in sensor_meta, so they
+    # are identified the same way: a renamed rail or a replaced chip starts a new series.
+    for kind in ("temperature", "power"):
+        for key, value in (stats.get(kind) or {}).items():
+            sid = (meta.get(pointer(kind, key)) or {}).get("id")
+            out[f"{kind}/{sid or 'name:' + key}"] = value
     net = stats.get("network") or {}
     ns = (net.get("scope") or {}).get("id")
     for i in net.get("interfaces") or []:

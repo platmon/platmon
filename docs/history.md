@@ -38,6 +38,7 @@ collection started (elapsed clock, as of the answer; wall-clock steps do not cha
 | `npu/usage` | NPU usage % | - (one NPU is reported, [api.md](api.md#npu)) |
 | `memory/used_bytes` | used memory | - |
 | `temperature/<source id>` (or `temperature/name:<key>` without an id) | °C | `sensor_meta` source id ([api.md](api.md#sensor-sources-and-read-times)) |
+| `power/<source id>` (or `power/name:<key>` without an id) | W | the same, for the power rails: a rail is a named sensor value like a temperature channel |
 | `network/<namespace id>/<ifindex>/<name>/rx_bytes_per_s`, `…/tx_bytes_per_s` | bytes/s | namespace, index and name together ([network.md](network.md#scope-and-identity)); interfaces without a known index are not kept |
 | `disk_io/<major>:<minor>/<name>/read_bytes_per_s`, `…/write_bytes_per_s` | bytes/s | device number and name ([disk-io.md](disk-io.md)) |
 
@@ -90,7 +91,7 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
 
 ## Web page
 
-With history on, the Resources, Network, Storage and Temperature tabs show a "Recent history" panel with that topic's CPU, memory,
+With history on, the Resources, Network, Storage, Temperature and Power & battery tabs show a "Recent history" panel with that topic's CPU, memory,
 GPU, NPU, temperature, network, disk or low-frequency series: one graph per series, bounded by the endpoint's own
 series limit. A row of buttons above the graphs lists the kinds of series that view has with how many each
 covers ("CPU cores 22", "RAM 1"); a button turns its kind off and on, and a view with only one kind has no
