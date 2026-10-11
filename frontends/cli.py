@@ -938,13 +938,16 @@ def body_storage(v):
 
 def body_thermal(v):
     """The web Temperature & power tab: every sensor on the same 0-100 °C scale as the web page's bars,
-    then the power rails, the fans and the board's power mode."""
-    s, st = v.s, v.st
+    then the power rails, the fans, the board's power mode and the batteries."""
+    s, obs, st = v.s, v.obs, v.st
     temps, limits = hottest_first(s), temp_limits(s)
     power = list((s.get("power") or {}).items())
     fans = s.get("fans") or []
-    if not temps and not power and not fans:
-        return v.empty("No temperature, power or fan readings · this board reports none")
+    battery, battery_o = group_data(obs, "battery")
+    cells = (battery.get("batteries") or []) if battery else []
+    supplies = (battery.get("external") or []) if battery else []
+    if not temps and not power and not fans and not (cells or supplies):
+        return v.empty("No temperature, power, fan or battery readings · this board reports none")
 
     body = []
     if temps:
@@ -967,6 +970,41 @@ def body_thermal(v):
             vals = " · ".join(x for x in (f["rpm"] is not None and f"{f['rpm']} rpm",
                                           f["percent"] is not None and f"{f['percent']} %") if x) or "n/a"
             body.append(st(f"    {'fan ' + f['name']:<{name_w}}", "muted") + vals)
+    if cells or supplies:
+        # the group's own cadence, so its age is its caption, as for the other observations
+        body += ["", v.title("BATTERY", observed_text(battery_o))]
+        name_w = max([len(b["name"]) for b in cells] + [0]) + 2
+        for b in cells:
+            if b.get("present") is False:
+                body.append(st(f"    {b['name']:<{name_w}}", "muted") + "not present")
+                continue
+            charge = (f"{b['percent']} %" if b.get("percent") is not None
+                      else b.get("capacity_level") or "charge n/a")
+            full = b.get("charge_full_uah") or b.get("energy_full_uwh")
+            design = b.get("charge_full_design_uah") or b.get("energy_full_design_uwh")
+            detail = " · ".join(x for x in (
+                b.get("status") or "",
+                b.get("voltage_uv") is not None and f"{b['voltage_uv'] / 1e6:.2f} V",
+                b.get("current_ua") is not None and f"{b['current_ua'] / 1e6:+.2f} A",
+                b.get("power_uw") is not None and f"{b['power_uw'] / 1e6:.2f} W",
+                b.get("cycle_count") is not None and f"{b['cycle_count']} cycles",
+                full and design and f"{full * 100 / design:.0f} % of design") if x)
+            head = [st(f"    {b['name']:<{name_w}}", "muted"), st(pad(charge, 7), "bold")]
+            bw = min(14 if v.wide else 8, max(6, v.width - 10 - name_w - vlen(charge) - vlen(detail)))
+            bar = ["  " + meter(st, b["percent"], bw, None)] if b.get("percent") is not None else []
+            # the readings come before the bar, so a narrow terminal gives up the bar, never a reading;
+            # where even that is not enough they wrap onto their own lines rather than being cut
+            inline = vlen("".join(head)) + vlen(detail) + 2 <= v.width
+            body.append(joined(v.width, head + ([st(detail, "muted")] if detail and inline else []) + bar))
+            if detail and not inline:
+                for part in textwrap.wrap(detail, max(12, v.width - 6)):
+                    body.append(st("      " + part, "muted"))
+        if supplies:  # one line each: a long driver name must not cut the next supply off the screen
+            sup_w = max(len(e["name"]) for e in supplies) + 2
+            for e in supplies:
+                state = "on" if e["online"] else "off" if e["online"] is False else "n/a"
+                body.append(joined(v.width, [st(f"    {e['name']:<{sup_w}}", "muted"), state,
+                                             st(f"   {e['type']} power", "muted")]))
     return body
 
 

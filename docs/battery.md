@@ -69,6 +69,14 @@ reported.
 `online`. Those say whether power is coming in, not how much charge is stored, so nothing else is read
 from them.
 
+## Where it is shown
+
+The web page has a **Battery** card under **Temp & power**, beside the temperatures and the power rails.
+The `platmon` live view carries the same readings in its own **Temp & power** view (`5`), with a one-line
+`BATT` summary on a wide Overview, and the plain screen (`--once`, a pipe, `/text`) prints a `BATT` block.
+A narrow terminal gives up the charge bar and then wraps the readings onto their own lines; it does not
+drop one. Neither viewer colours the charge, for the reason in Not included.
+
 ## Diagnostics
 
 The group's `collector` entry follows the usual rules ([api.md](api.md), Optional metrics):

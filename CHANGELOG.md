@@ -10,7 +10,10 @@ API schema versions are independent of release versions.
   `/api/observations` (docs/battery.md), on by default every 60 seconds. Per battery: charge percent,
   the driver's status, the charge or energy family its gauge counts, voltage, current or power, cycle
   count and the wear its full charge shows against the design charge; per external supply, whether it is
-  online. The `platmon` screen gains a `BATT` block and the web page a Battery card under Temp & power.
+  online. The web page gains a Battery card under Temp & power and the `platmon` live view the same
+  readings in its Temp & power view, with a `BATT` summary on a wide Overview; the plain screen
+  (`--once`, pipes, `/text`) gains a `BATT` block. A narrow terminal wraps the readings onto their
+  own lines rather than dropping one.
   `/api/stats` is unchanged. Read on its own slow cadence because on an ACPI host one reading of a
   battery is a 101 ms firmware call behind the driver's 1 s cache, which the 1 s core interval would hit
   every collection, and because reading a battery costs the battery.
