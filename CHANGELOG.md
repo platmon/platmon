@@ -6,6 +6,15 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- Batteries and external power supplies are reported, as a low-frequency group `battery` at
+  `/api/observations` (docs/battery.md), on by default every 60 seconds. Per battery: charge percent,
+  the driver's status, the charge or energy family its gauge counts, voltage, current or power, cycle
+  count and the wear its full charge shows against the design charge; per external supply, whether it is
+  online. The `platmon` screen gains a `BATT` block and the web page a Battery card under Temp & power.
+  `/api/stats` is unchanged. Read on its own slow cadence because on an ACPI host one reading of a
+  battery is a 101 ms firmware call behind the driver's 1 s cache, which the 1 s core interval would hit
+  every collection, and because reading a battery costs the battery.
+
 - A thermal zone that also appears as an hwmon chip is now recognised by the zone's path instead of its
   name, so its temperature is reported once. The kernel may name the chip after the zone rather than
   after the zone type (`acpitz_0` for a zone of type `acpitz`), and then the name no longer matched: on

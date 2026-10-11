@@ -243,11 +243,12 @@
     <section class="card" data-card hidden><div class="card-head"><h2>Disk I/O</h2><span class="cap">I/O time = share of window with I/O in flight</span></div><div id="dio"></div></section>
   </div>
   <div id="panel-thermal" role="tabpanel" aria-labelledby="tab-thermal" tabindex="0" hidden>
-    <section id="thermal-empty" class="card empty-card"><h2>No temperature, power or fan data</h2>
-      <p>This board reports no thermal zones, power rails or fans. Readings appear here automatically when the hardware exposes them.</p></section>
+    <section id="thermal-empty" class="card empty-card"><h2>No temperature, power, fan or battery data</h2>
+      <p>This board reports no thermal zones, power rails, fans or power supplies. Readings appear here automatically when the hardware exposes them.</p></section>
     <div class="grid">
       <section class="card" data-card hidden><div class="card-head"><h2>Temperature</h2><span class="cap">Bar scale 0–100 °C</span></div><div id="temp"></div></section>
       <section class="card" data-card hidden><div class="card-head"><h2>Power &amp; fans</h2><span id="pwr-cap"></span></div><div id="pwr"></div></section>
+      <section class="card" data-card hidden><div class="card-head"><h2>Battery</h2><span class="cap" data-observation-age="battery"></span></div><div id="batt"></div></section>
     </div>
   </div>
   <div id="panel-system" role="tabpanel" aria-labelledby="tab-system" tabindex="0" hidden>
@@ -429,6 +430,35 @@ function wifiRows() {
       (i.connected === true ? `<div class="detail">Connected${i.link_quality != null ? ' · link quality ' + i.link_quality : ''}</div>` : '') + '</div>';
   }).join('') + '</div>';
 }
+// batteries and external supplies, observed on their own slow cadence: one reading is one firmware call,
+// so the age is shown. No threshold colouring: for a battery a low reading is the bad one, the opposite of
+// every level() reading, and [thresholds] has no battery entry.
+function batteryRows() {
+  const g = obs && obs.groups && obs.groups.battery, o = g && g.observation, d = g && g.data;
+  const cells = d && Array.isArray(d.batteries) ? d.batteries : [];
+  const external = d && Array.isArray(d.external) ? d.external : [];
+  if (!o || !(cells.length || external.length)) return '';
+  const rows = cells.map(b => {
+    const head = b.present === false ? 'not present'
+      : b.percent != null ? b.percent + ' %' : esc(b.capacity_level || 'charge n/a');
+    const open = `<div class="meter"><div class="meter-head"><span class="mono">${esc(b.name)}</span><span>${head}</span></div>`;
+    if (b.present === false) return open + '</div>';
+    const full = b.charge_full_uah || b.energy_full_uwh, design = b.charge_full_design_uah || b.energy_full_design_uwh;
+    const detail = [b.voltage_uv != null ? (b.voltage_uv / 1e6).toFixed(2) + ' V' : '',
+      b.current_ua != null ? (b.current_ua / 1e6).toFixed(2) + ' A' : '',
+      b.power_uw != null ? (b.power_uw / 1e6).toFixed(2) + ' W' : '',
+      b.cycle_count != null ? b.cycle_count + ' cycles' : '',
+      full && design ? Math.round(full * 100 / design) + ' % of design' : ''].filter(Boolean).join(' · ');
+    return open + (b.percent != null ? bar(b.percent) : '') +
+      `<div class="detail">${esc(b.status || 'status n/a')}${detail ? ' · ' + detail : ''}</div></div>`;
+  });
+  if (external.length) {
+    rows.push('<div class="meter"><div class="meter-head"><span>External power</span></div><div class="detail">' +
+      external.map(e => `${esc(e.name)} ${e.online ? 'on' : e.online === false ? 'off' : 'n/a'}`).join(' · ') +
+      '</div></div>');
+  }
+  return '<div class="meters">' + rows.join('') + '</div>';
+}
 const fsPct = f => f.total_bytes ? pctOf(f.used_bytes, f.total_bytes) : -1;
 function storageRows() {
   const g = obs && obs.groups && obs.groups.storage, o = g && g.observation, d = g && g.data;
@@ -601,7 +631,7 @@ function collectionNote(s) {
 function hideEmptyPanels() {
   document.querySelectorAll('[data-card]').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
   $('network-empty').hidden = ['net', 'wifi', 'probe'].some(id => $(id).innerHTML);
-  $('thermal-empty').hidden = ['temp', 'pwr'].some(id => $(id).innerHTML);
+  $('thermal-empty').hidden = ['temp', 'pwr', 'batt'].some(id => $(id).innerHTML);
 }
 
 function overviewRows(s) {
@@ -713,6 +743,7 @@ function renderObservations() {
   if (!visible()) return;
   if (activeTab === 'storage') $('sto').innerHTML = storageRows();
   if (activeTab === 'network') { $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows(); }
+  if (activeTab === 'thermal') $('batt').innerHTML = batteryRows();
   hideEmptyPanels();
   updateDetailAges();
 }

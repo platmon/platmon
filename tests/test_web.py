@@ -196,6 +196,17 @@ def test_probe_from_observations(steps):
     assert steps["read_based_age"]["probe"] == ""
 
 
+def test_battery_from_observations(steps):
+    batt = steps["ok"]["batt"]
+    assert steps["ok"]["obs_age"]["battery"] == "observed 30 s ago"
+    assert "89 %" in batt and "Not charging" in batt and "237 cycles" in batt
+    assert "16.44 V" in batt and "-1.20 A" in batt and "85 % of design" in batt  # 3400000/4000000
+    assert "BAT2</span><span>not present" in batt and batt.count('class="bar"') == 1  # no bar for an empty bay
+    assert "ADP1 on · USBC1 off" in batt
+    assert "&#60;i&#62;BAT1&#60;/i&#62;" in batt and "<i>" not in batt  # a driver name is escaped
+    assert steps["read_based_age"]["batt"] == ""  # cleared after the server stopped answering it (404)
+
+
 def line(hist, label):
     """The drawn line (not the area fill) of the chart labelled label."""
     return re.search('class="line" d="([^"]*)"', hist.split(label + "</span>")[1]).group(1)

@@ -75,7 +75,7 @@ In a browser: `http://<host>:9797`. Without Python, from any machine with curl (
 `watch -n1 curl -s <host>:9797/text` shows the same screen as `platmon`. Raw data: `http://<host>:9797/api/stats`, collector state:
 `http://<host>:9797/api/status` (fields and freshness rules: [docs/api.md](docs/api.md); per-interface
 network counters: [docs/network.md](docs/network.md); disk I/O counters: [docs/disk-io.md](docs/disk-io.md); storage capacity: [docs/storage.md](docs/storage.md); Wi-Fi signal:
-[docs/wifi.md](docs/wifi.md); TCP connect probe to configured targets: [docs/probe.md](docs/probe.md); recent history:
+[docs/wifi.md](docs/wifi.md); battery and external power: [docs/battery.md](docs/battery.md); TCP connect probe to configured targets: [docs/probe.md](docs/probe.md); recent history:
 [docs/history.md](docs/history.md); pressure stall information: [docs/pressure.md](docs/pressure.md)). The API has no
 authentication. Run it on trusted networks only.
 

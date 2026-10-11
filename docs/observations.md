@@ -49,7 +49,7 @@ Clients ask for `/api/observations` on the groups' cadence, not every second: th
 `platmon` command ask at most every 10 s (the page only while visible with Network or Storage selected) and add the time since that
 answer to the ages shown. A server without the endpoint (404) is not asked again.
 
-Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `probe` ([probe.md](probe.md)).
+Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `battery` ([battery.md](battery.md)), `probe` ([probe.md](probe.md)).
 
 The viewers also compare the growing age to `stale_after_ms` between answers, so a cached observation
 becomes not current without waiting for a new server response. The web page limits each optional

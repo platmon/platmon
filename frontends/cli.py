@@ -207,6 +207,41 @@ def wifi_lines(obs):
     return out
 
 
+def battery_lines(obs):
+    """Batteries and external supplies from /api/observations. Observed on its own slow cadence, so the
+    age is shown: a battery reading is one firmware call and is not taken every second."""
+    groups = obs.get("groups") if isinstance(obs, dict) else None
+    g = groups.get("battery") if isinstance(groups, dict) else None
+    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
+    if not isinstance(data, dict) or not isinstance(o, dict):
+        return []
+    cells, external = data.get("batteries"), data.get("external")
+    if not isinstance(cells, list) or not isinstance(external, list) or not (cells or external):
+        return []
+    age = f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
+    out = [f"BATT  {age}"]
+    for b in cells:
+        if b.get("present") is False:
+            out.append(f"  {b['name']}  not present")
+            continue
+        full, design = b.get("charge_full_uah") or b.get("energy_full_uwh"), \
+            b.get("charge_full_design_uah") or b.get("energy_full_design_uwh")
+        parts = [f"{b['percent']}%" if b.get("percent") is not None else b.get("capacity_level") or "charge n/a",
+                 b.get("status") or "",
+                 f"{b['voltage_uv'] / 1e6:.2f} V" if b.get("voltage_uv") is not None else "",
+                 f"{b['current_ua'] / 1e6:+.2f} A" if b.get("current_ua") is not None else "",
+                 f"{b['power_uw'] / 1e6:.2f} W" if b.get("power_uw") is not None else "",
+                 f"{b['cycle_count']} cycles" if b.get("cycle_count") is not None else "",
+                 # wear: what the gauge now calls full against what it was designed for
+                 f"{full * 100 / design:.0f}% of design" if full and design else ""]
+        out.append(f"  {b['name']}  " + "  ".join(x for x in parts if x))
+    if external:
+        shown = "  ".join(f"{e['name']} {'on' if e['online'] else 'off' if e['online'] is False else 'n/a'}"
+                          for e in external)
+        out.append(f"  external  {shown}")
+    return out
+
+
 def probe_lines(obs):
     """TCP connect times from /api/observations (not ICMP ping): the latest attempt per target, and the
     failures among its recent attempts."""
@@ -277,7 +312,7 @@ def render(s, obs=None):
     for f in s["fans"]:
         vals = [f"{f['rpm']} rpm" if f["rpm"] is not None else "", f"{f['percent']}%" if f["percent"] is not None else ""]
         lines.append(f"FAN   {f['name']}  " + ("  ".join(v for v in vals if v) or "n/a"))  # n/a: unreadable
-    extra = counters_lines(s) + storage_lines(obs) + wifi_lines(obs) + probe_lines(obs)
+    extra = counters_lines(s) + storage_lines(obs) + wifi_lines(obs) + battery_lines(obs) + probe_lines(obs)
     if extra and lines[-1]:
         lines.append("")
     return "\n".join(lines + extra)
@@ -723,7 +758,7 @@ def body_overview(v):
             if parts:
                 body.append(spread(v.kv("STORAGE", "   ".join(parts)), seen, width))
     if wide:
-        for lines, label in ((wifi_lines(obs), "WIFI"), (probe_lines(obs), "TCP")):
+        for lines, label in ((wifi_lines(obs), "WIFI"), (battery_lines(obs), "BATT"), (probe_lines(obs), "TCP")):
             for n, line in enumerate(lines[1:]):
                 body.append(v.kv(label if n == 0 else "", line.strip()))
     return body

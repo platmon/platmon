@@ -56,7 +56,7 @@ const report = step => { views = captureViews(); console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('status').title, status: el('status').textContent, err_age: el('err-age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
-  net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches, ...views,
+  net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, batt: el('batt').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches, ...views,
 })); };
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
@@ -77,7 +77,18 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
       {name: '<i>x</i>', connected: true, signal_dbm: null, signal_raw: 70, link_quality: null, noise_dbm: null}]}},
     probe: {state: 'ok', observation: {id: 4, data_age_ms: 1000, stale: false}, data: {provider: 'tcp_connect', timeout_ms: 2000, targets: [
       {address: '192.0.2.1', port: 443, connect_ms: 12.34, reason: null, attempts: 10, failures: 1, failure_ratio: 0.1},
-      {address: '2001:db8::1', port: 22, connect_ms: null, reason: 'timeout', attempts: 3, failures: 3, failure_ratio: 1}]}}}}));
+      {address: '2001:db8::1', port: 22, connect_ms: null, reason: 'timeout', attempts: 3, failures: 3, failure_ratio: 1}]}},
+    battery: {state: 'ok', observation: {id: 7, data_age_ms: 30000, stale: false}, data: {provider: 'sysfs_power_supply',
+      batteries: [{name: '<i>BAT1</i>', present: true, percent: 89, status: 'Not charging', capacity_level: 'Normal',
+                   technology: 'Li-ion', health: null, charge_now_uah: 3026000, charge_full_uah: 3400000,
+                   charge_full_design_uah: 4000000, energy_now_uwh: null, energy_full_uwh: null,
+                   energy_full_design_uwh: null, current_ua: -1200000, power_uw: null, voltage_uv: 16436000,
+                   cycle_count: 237},
+                  {name: 'BAT2', present: false, percent: null, status: null, capacity_level: null, technology: null,
+                   health: null, charge_now_uah: null, charge_full_uah: null, charge_full_design_uah: null,
+                   energy_now_uwh: null, energy_full_uwh: null, energy_full_design_uwh: null, current_ua: null,
+                   power_uw: null, voltage_uv: null, cycle_count: null}],
+      external: [{name: 'ADP1', type: 'Mains', online: true}, {name: 'USBC1', type: 'USB', online: false}]}}}}));
   histAnswers.push(ok({schema_version: 1, retention_s: 600, interval_ms: 1000, dropped_series: 0, series: {
     'memory/used_bytes': [[1, 3000, 2 ** 30], [2, 2000, 2 ** 31], [3, 1000, 2 ** 31]],
     'network/netns1:x/2/eth0/rx_bytes_per_s': [[1, 3000, null], [2, 2000, 1024], [3, 1000, null]],
@@ -98,11 +109,12 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
         $('dio').innerHTML = diskRows(latestStats);
       }
       $('sto').innerHTML = storageRows(); $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows();
+      $('batt').innerHTML = batteryRows();
       const saved = activeTab; let all = '';
       for (const tab of TABS.slice(1)) { activeTab = tab; all += histRows(); }
       activeTab = saved; $('hist').innerHTML = all;
       return {net_cap: latestStats ? netCaption(latestStats) : '',
-        obs_age: Object.fromEntries(['storage', 'wifi', 'probe'].map(g => [g, observationAge(g)]))};
+        obs_age: Object.fromEntries(['storage', 'wifi', 'probe', 'battery'].map(g => [g, observationAge(g)]))};
     };
   `);
   await settle(); report('ok');
