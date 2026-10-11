@@ -7,7 +7,7 @@ The service itself runs in the background: scripts/systemd/install.sh or scripts
 
 On an interactive terminal the live view is screen(): colored levels, a layout fitted to the terminal size,
 redrawn in place on the alternate screen. It shows one view at a time, as the web page's tabs do (VIEWS);
-1-6, Tab and the arrow keys switch them. --once, pipes and /text keep render(), plain text as before.
+1-7, Tab and the arrow keys switch them. --once, pipes and /text keep render(), plain text as before.
 """
 # platmon-cli: marker that lets scripts/install-cli.sh recognise (and only replace) its own command
 import argparse
@@ -478,15 +478,16 @@ def attention(s, obs):
 # The views of the live screen, one at a time, as the web page's tabs: the same data, wording and levels.
 # Overview is the whole screen as before; the detail views show their own kind in full, so a narrow
 # terminal reaches every reading by switching views instead of being enlarged.
-VIEWS = ("overview", "resources", "network", "storage", "thermal", "system")
+VIEWS = ("overview", "resources", "network", "storage", "thermal", "power", "system")
 # Label sets from the widest that fits; the web page shortens its tab labels on narrow screens too.
-VIEW_LABELS = {"overview": ("Overview", "Over", "Ovr"), "resources": ("Resources", "Res", "Res"),
-               "network": ("Network", "Net", "Net"), "storage": ("Storage", "Store", "Sto"),
-               "thermal": ("Temp & power", "Temp", "Tmp"), "system": ("System", "Sys", "Sys")}
+VIEW_LABELS = {"overview": ("Overview", "Over", "Ovr", "Ov"), "resources": ("Resources", "Res", "Res", "Re"),
+               "network": ("Network", "Net", "Net", "Ne"), "storage": ("Storage", "Store", "Sto", "St"),
+               "thermal": ("Temperature", "Temp", "Tmp", "Tm"),
+               "power": ("Power & battery", "Power", "Pwr", "Pw"), "system": ("System", "Sys", "Sys", "Sy")}
 
 
 def next_view(keys, view):
-    """The view a key press selects: 1-6 directly, Tab or the right arrow the next, Shift-Tab or the left
+    """The view a key press selects: 1-7 directly, Tab or the right arrow the next, Shift-Tab or the left
     arrow the previous; any other key keeps the view. Escape sequences carry digits of their own, so a
     key press is only read as a number when it is not one."""
     index = VIEWS.index(view)
@@ -531,7 +532,7 @@ def tabbar(st, width, view):
     """The views on one line, the active one marked, in the header's rule line: the widest label set that
     fits, and the position alone when even the shortest does not. Without color the active label is
     bracketed, so it stays visible in a plain terminal."""
-    for size, gap in enumerate(("   ", "   ", " ")):  # the shortest labels also give up their spacing
+    for size, gap in enumerate(("   ", "   ", " ", " ")):  # the shortest labels also give up their spacing
         cells = [st(f"{n} {VIEW_LABELS[name][size]}" if st.color else f"[{n} {VIEW_LABELS[name][size]}]",
                     "ok", "bold", "under") if name == view else st(f"{n} {VIEW_LABELS[name][size]}", "muted")
                  for n, name in enumerate(VIEWS, 1)]
@@ -937,17 +938,13 @@ def body_storage(v):
 
 
 def body_thermal(v):
-    """The web Temperature & power tab: every sensor on the same 0-100 °C scale as the web page's bars,
-    then the power rails, the fans, the board's power mode and the batteries."""
-    s, obs, st = v.s, v.obs, v.st
+    """The web Temperature tab: every sensor on the same 0-100 °C scale as the web page's bars. Power
+    rails, fans and the batteries are their own view, so a host with dozens of channels here does not
+    push what it draws and what it has left off the screen."""
+    s, st = v.s, v.st
     temps, limits = hottest_first(s), temp_limits(s)
-    power = list((s.get("power") or {}).items())
-    fans = s.get("fans") or []
-    battery, battery_o = group_data(obs, "battery")
-    cells = (battery.get("batteries") or []) if battery else []
-    supplies = (battery.get("external") or []) if battery else []
-    if not temps and not power and not fans and not (cells or supplies):
-        return v.empty("No temperature, power, fan or battery readings · this board reports none")
+    if not temps:
+        return v.empty("No temperature readings · this board reports none")
 
     body = []
     if temps:
@@ -960,9 +957,26 @@ def body_thermal(v):
             body.append(joined(v.width, [st(f"    {k:<{name_w}}", "muted"),
                                          st(pad(f"{t:.1f} °C", 9), "bold", tone(lv)),
                                          " " + meter(st, t, bw, limits)]))
+    return body
+
+
+def body_power(v):
+    """The web Power & battery tab: what the board draws on its rails, how it is cooled, its power mode,
+    and the charge it has left. Measured together because that is how consumption is read: the draw over
+    a window against the charge the window cost."""
+    s, obs, st = v.s, v.obs, v.st
+    power = list((s.get("power") or {}).items())
+    fans = s.get("fans") or []
+    battery, battery_o = group_data(obs, "battery")
+    cells = (battery.get("batteries") or []) if battery else []
+    supplies = (battery.get("external") or []) if battery else []
+    if not power and not fans and not (cells or supplies):
+        return v.empty("No power rail, fan or battery readings · this board reports none")
+
+    body = []
     if power or fans:
         mode = f"mode {s['power_mode']}" if s.get("power_mode") else ""
-        body += ["", v.title("POWER & FANS", mode)]
+        body.append(v.title("POWER & FANS", mode))
         name_w = max([len(k) for k, _ in power] + [len(f"fan {f['name']}") for f in fans]) + 2
         for k, p in power:
             body.append(st(f"    {k:<{name_w}}", "muted") + f"{p:.2f} W")
@@ -972,7 +986,7 @@ def body_thermal(v):
             body.append(st(f"    {'fan ' + f['name']:<{name_w}}", "muted") + vals)
     if cells or supplies:
         # the group's own cadence, so its age is its caption, as for the other observations
-        body += ["", v.title("BATTERY", observed_text(battery_o))]
+        body += ([""] if body else []) + [v.title("BATTERY", observed_text(battery_o))]
         name_w = max([len(b["name"]) for b in cells] + [0]) + 2
         for b in cells:
             if b.get("present") is False:
@@ -1027,7 +1041,7 @@ def body_system(v):
 SYSTEM_ROWS = (("os", "OS"), ("kernel", "Kernel"), ("arch", "Architecture"), ("hostname", "Hostname"),
                ("l4t", "L4T"))
 BODIES = {"overview": body_overview, "resources": body_resources, "network": body_network,
-          "storage": body_storage, "thermal": body_thermal, "system": body_system}
+          "storage": body_storage, "thermal": body_thermal, "power": body_power, "system": body_system}
 
 
 def screen(s, obs, width, height, st, status, history, view="overview", offset=0):
@@ -1077,7 +1091,7 @@ def screen(s, obs, width, height, st, status, history, view="overview", offset=0
         body = [st(ANSI.sub("", line), "dim") for line in body]
 
     keys = (st("  ") + st("q", "bold") + st(" quit", "muted")
-            + (st(" · ", "muted") + st(f"1-6 {st.larr}/{st.rarr}", "bold") + st(" view", "muted") if width >= 60 else "")
+            + (st(" · ", "muted") + st(f"1-7 {st.larr}/{st.rarr}", "bold") + st(" view", "muted") if width >= 60 else "")
             + (st(" · ", "muted") + st(f"{st.uarr}/{st.darr}", "bold") + st(" scroll", "muted") if width >= 80 else ""))
     foot = [st(st.rule * width, "muted"),
             spread(keys, st((f"platmon {VERSION} · {status['addr']} · every {status['interval']:g} s" if wide
@@ -1239,13 +1253,13 @@ def explain(addr, e):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="platmon", description="Live view of a platmon service (this device by default).",
                                 epilog="The service runs in the background: scripts/systemd/install.sh or "
-                                       "scripts/docker/start.sh in the platmon repo. In the live view 1-6, Tab "
+                                       "scripts/docker/start.sh in the platmon repo. In the live view 1-7, Tab "
                                        "or the arrow keys switch views and q quits. NO_COLOR=1 turns colors off; "
                                        "PLATMON_ASCII=1 draws with ASCII only.")
     p.add_argument("host", nargs="?", default="localhost", help=f"host[:port], default localhost:{PORT}")
     p.add_argument("interval", nargs="?", type=float, default=1.0, help="seconds between updates, default 1")
     p.add_argument("--once", action="store_true", help="print one snapshot without clearing the screen, then exit")
-    p.add_argument("--view", choices=VIEWS, help="the live view's first view (default overview); switch with 1-6, "
+    p.add_argument("--view", choices=VIEWS, help="the live view's first view (default overview); switch with 1-7, "
                                                  "Tab or the arrow keys. Interactive terminals only")
     p.add_argument("--version", action="version", version=f"platmon {VERSION}")
     a = p.parse_args(argv)

@@ -95,7 +95,7 @@ def test_view_only_selects_a_live_view():
     assert bad.returncode == 2 and "--view selects a view of the live screen" in bad.stderr
     unknown = run_cli("--view", "cpu")
     assert unknown.returncode == 2 and "invalid choice" in unknown.stderr
-    assert "1-6" in run_cli("--help").stdout  # the keys are documented where the options are
+    assert "1-7" in run_cli("--help").stdout  # the keys are documented where the options are
 
 
 def test_not_running_explains_and_exits():

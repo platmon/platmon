@@ -154,10 +154,13 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   await switchTo('system');
   assert.equal(osWrites, 1);
   assert.equal(el('system-l4t-row').hidden, true);
-  await switchTo('thermal');
-  assert(el('pwr-cap').innerHTML.includes('MODE MAXN_SUPER'), 'power mode remains in the thermal view');
+  await switchTo('power');
+  assert(el('pwr-cap').innerHTML.includes('MODE MAXN_SUPER'), 'power mode is in the Power & battery view');
   assert(el('pwr').innerHTML.includes('No power rails or fans reported'), 'a power mode alone still shows the card');
+  assert.equal(context.location.hash, '#power', 'selection is stored in the URL');
+  await switchTo('thermal');
   assert(el('temp').innerHTML.indexOf('&#60;b&#62;hot') < el('temp').innerHTML.indexOf('cool'), 'hottest first');
+  assert.equal(el('pwr').innerHTML.includes('No power rails'), true, 'the other view keeps what it drew');
   assert.equal(context.location.hash, '#thermal', 'selection is stored in the URL');
   const beforeNavigation = requests.length;
   context.location.hash = '#system'; navigation.hashchange();

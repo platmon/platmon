@@ -52,8 +52,8 @@ platmon --view network           # start on a view other than Overview
 On an interactive terminal (Linux, macOS) the live view fits the terminal and colors readings with the
 web page's warning and critical levels (the service's `[thresholds]`), with a Needs attention line,
 sparklines of the last 24 updates, and a banner over the last data while the service cannot be reached.
-It shows one view at a time, the same six the web page has as tabs: Overview, Resources, Network,
-Storage, Temp & power and System. `1`-`6`, Tab and the left and right arrows switch them, the up and down
+It shows one view at a time, the same seven the web page has as tabs: Overview, Resources, Network,
+Storage, Temperature, Power & battery and System. `1`-`7`, Tab and the left and right arrows switch them, the up and down
 arrows, PgUp/PgDn and Home/End scroll a view longer than the terminal, `q` quits, and the tab bar in the
 header names the views (shorter labels on a narrow terminal). When a view does not fit, its last line
 says how much is out of sight above and below. Overview is the whole screen as before:
@@ -95,10 +95,10 @@ A Needs attention strip lists every reading at or above its warning level and li
 CPU is the mean of measured cores; Network lists separate readings
 for up to four non-loopback interfaces, shows any omission count and links to the full Network tab.
 It does not infer an uplink or sum overlapping interfaces. Resources, Network, Storage and
-Temperature & power tabs show details and related recent history; hovering or touching a chart shows
+Temperature and Power & battery tabs show details and related recent history; hovering or touching a chart shows
 the nearest point's value and age. System lists the platform, uptime,
 OS, kernel, architecture, hostname and available board-specific information such as L4T; power mode
-remains in Temperature & power. System updates only changed values and makes no optional API requests.
+remains in Power & battery. System updates only changed values and makes no optional API requests.
 The common header keeps the model, host, uptime and a Live/Partial/Offline status visible in every view;
 the status tooltip shows the sample number and data age. When requests fail, a banner names the error
 and the age of the data still shown, and the views are dimmed. The footer shows the running version.

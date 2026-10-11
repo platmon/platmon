@@ -6,14 +6,22 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- The Temperature & power view is now two: **Temperature**, and **Power & battery** with the power rails,
+  the fans, the board's power mode and the batteries. Both viewers gain the view, the keys become
+  `1`-`7`, and the live view's tab bar gains a shortest label set (`1 Ov 2 Re …`) so a 40-column terminal
+  keeps every tab named instead of falling back to the position alone. What the board draws and what it
+  has left are read together, which is how consumption is read: the draw over a window against the
+  charge that window cost. It also stops a host with dozens of temperature channels from pushing them
+  off the screen — on the reporting PC the battery sat on line 36 of 43 and was off a 24-row terminal
+  entirely; it is now line 4 of its own view. The Power & battery view has no Recent history panel: the
+  power rails and the battery have no history series yet (see docs/development/remaining-work.md).
+
 - Batteries and external power supplies are reported, as a low-frequency group `battery` at
   `/api/observations` (docs/battery.md), on by default every 60 seconds. Per battery: charge percent,
   the driver's status, the charge or energy family its gauge counts, voltage, current or power, cycle
   count and the wear its full charge shows against the design charge; per external supply, whether it is
-  online. The web page gains a Battery card under Temp & power and the `platmon` live view the same
-  readings in its Temp & power view, with a `BATT` summary on a wide Overview; the plain screen
-  (`--once`, pipes, `/text`) gains a `BATT` block. A narrow terminal wraps the readings onto their
-  own lines rather than dropping one.
+  online. The plain screen (`--once`, pipes, `/text`) gains a `BATT` block, and a wide Overview a `BATT`
+  summary line. A narrow terminal wraps the readings onto their own lines rather than dropping one.
   `/api/stats` is unchanged. Read on its own slow cadence because on an ACPI host one reading of a
   battery is a 101 ms firmware call behind the driver's 1 s cache, which the 1 s core interval would hit
   every collection, and because reading a battery costs the battery.

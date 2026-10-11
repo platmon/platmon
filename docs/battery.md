@@ -71,11 +71,16 @@ from them.
 
 ## Where it is shown
 
-The web page has a **Battery** card under **Temp & power**, beside the temperatures and the power rails.
-The `platmon` live view carries the same readings in its own **Temp & power** view (`5`), with a one-line
-`BATT` summary on a wide Overview, and the plain screen (`--once`, a pipe, `/text`) prints a `BATT` block.
+The web page has a **Battery** card under **Power & battery**, beside the power rails and the fans; the
+`platmon` live view carries the same readings in its **Power & battery** view (`6`), with a one-line
+`BATT` summary on a wide Overview, and the plain screen (`--once`, a pipe, `/text`) prints a `BATT`
+block. Rails and charge share a view because that is how consumption is read: the draw over a window
+against the charge that window cost.
+
 A narrow terminal gives up the charge bar and then wraps the readings onto their own lines; it does not
-drop one. Neither viewer colours the charge, for the reason in Not included.
+drop one. Neither viewer colours the charge, for the reason in Not included. The view has no Recent
+history panel yet, because the battery has no history series
+([development/remaining-work.md](development/remaining-work.md)).
 
 ## Diagnostics
 

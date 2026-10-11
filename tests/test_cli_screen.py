@@ -164,10 +164,10 @@ def test_every_view_is_ascii_without_utf8(view):
 
 @pytest.mark.parametrize("width", [119, 79, 60, 44])
 def test_the_battery_keeps_every_reading_at_any_width(width):
-    """Temp & power carries the battery, as the web page's Battery card does. A narrow terminal gives up
-    the bar and then wraps the readings onto their own lines; it never drops one. The height is generous
-    on purpose: what a view does when it is taller than the terminal is scrolling, tested separately."""
-    lines = plain(screen(RICH, OBSERVED, width, 90, Style(), LIVE, {}, "thermal"))
+    """Power & battery carries it, as the web page's Battery card does. A narrow terminal gives up the
+    bar and then wraps the readings onto their own lines; it never drops one. The height is generous on
+    purpose: what a view does when it is taller than the terminal is scrolling, tested separately."""
+    lines = plain(screen(RICH, OBSERVED, width, 90, Style(), LIVE, {}, "power"))
     start = next(n for n, line in enumerate(lines) if "BATTERY" in line)
     # wrapping splits a reading across lines, so the section is compared as one run of words
     section = re.sub(r"\s+", " ", " ".join(lines[start:]))
@@ -179,17 +179,18 @@ def test_the_battery_keeps_every_reading_at_any_width(width):
 
 def test_the_battery_section_is_absent_without_the_observation():
     """A host with no supply, or a server without the endpoint: the section is simply not there."""
-    text = "\n".join(plain(screen(RICH, {"groups": {}}, 119, 40, Style(), LIVE, {}, "thermal")))
-    assert "BATTERY" not in text and "TEMPERATURE" in text
+    text = "\n".join(plain(screen(RICH, {"groups": {}}, 119, 40, Style(), LIVE, {}, "power")))
+    assert "BATTERY" not in text and "POWER & FANS" in text
 
 
 def test_the_tab_bar_names_every_view_and_marks_the_active_one():
     bar = tabbar(Style(color=False), 119, "network")
-    assert "[3 Network]" in bar and "1 Overview" in bar and "6 System" in bar
+    assert "[3 Network]" in bar and "1 Overview" in bar and f"{len(VIEWS)} System" in bar
+    assert "5 Temperature" in bar and "6 Power & battery" in bar  # the two the thermal view was split into
     narrow = tabbar(Style(color=False), 44, "network")  # shorter labels, still every view
-    assert "[3 Net]" in narrow and vlen(narrow) <= 44
+    assert "[3 Ne]" in narrow and vlen(narrow) <= 44
     assert all(str(n) in narrow for n in range(1, len(VIEWS) + 1))
-    tiny = tabbar(Style(color=False), 24, "system")  # no room for six labels: the position instead
+    tiny = tabbar(Style(color=False), 24, "system")  # no room for seven labels: the position instead
     assert tiny.strip().startswith(f"{len(VIEWS)}/{len(VIEWS)} Sys") and vlen(tiny) <= 24
 
 
@@ -217,7 +218,9 @@ def test_detail_views_keep_what_the_narrow_overview_drops():
     storage = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "storage")))
     assert "I/O TIME" in storage and "nvme0n1" in storage and "1 partition, 1 mounted" in storage
     thermal = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "thermal")))
-    assert "VDD_IN" in thermal and "fan pwmfan" in thermal and "tj" in thermal
+    assert "tj" in thermal and "VDD_IN" not in thermal  # temperatures alone
+    power = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "power")))
+    assert "VDD_IN" in power and "fan pwmfan" in power and "BATTERY" in power
     network = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "network")))
     assert "wlan0" in network and "-47 dBm" in network and "192.168.1.1:53" in network
 
@@ -234,13 +237,14 @@ def test_system_lists_the_boards_own_fields():
     text = "\n".join(plain(screen(board, None, 79, 24, Style(), LIVE, {}, "system")))
     assert "Architecture   aarch64" in text and "L4T            R36.5.2" in text
     assert "firmware       1.2" in text  # an unknown key keeps its own name, as the web page adds it
-    assert "Power mode" not in text  # it stays in Temperature & power, as on the web page
+    assert "Power mode" not in text  # it stays in Power & battery, as on the web page
 
 
 @pytest.mark.parametrize("view,text", [
     ("network", "No interface, Wi-Fi or TCP connect readings"),
     ("storage", "No filesystem or disk I/O readings"),
-    ("thermal", "No temperature, power, fan or battery readings")])
+    ("thermal", "No temperature readings"),
+    ("power", "No power rail, fan or battery readings")])
 def test_a_view_with_nothing_to_show_says_so(view, text):
     bare = dict(FULL, temperature={}, power={}, fans=[], network=None, disk_io=None)
     lines = plain(screen(bare, None, 79, 24, Style(), LIVE, {}, view))
@@ -282,11 +286,11 @@ def test_a_view_longer_than_the_terminal_scrolls():
         body = "\n".join(lines)
         if offset:
             assert f"{offset} above" in body
-    assert seen == {0, 1, 13, 32}  # top, a line, a page, the end, back to the top
-    # the end shows the last sensor and the section below it, which "+N more lines" never reached
+    assert seen == {0, 1, 13, 27}  # top, a line, a page, the end, back to the top
+    # the end shows the last sensors, which "+N more lines" never reached
     status = dict(LIVE)
     end = "\n".join(plain(screen(many, None, 79, 18, Style(), status, {}, "thermal", BOTTOM)))
-    assert "sensor00" in end and "POWER & FANS" in end and "32 above" in end
+    assert "sensor00" in end and "27 above" in end
 
 
 def test_scroll_keys_and_clamping():
@@ -336,6 +340,6 @@ def test_the_offline_banner_wraps_instead_of_losing_the_advice():
 
 def test_offline_dims_every_view():
     down = dict(LIVE, state="offline", age=47, error="cannot reach platmon at x:9797 (timed out)")
-    lines = screen(RICH, OBSERVED, 119, 40, Style(), down, {}, "thermal")
+    lines = screen(RICH, OBSERVED, 119, 40, Style(), down, {}, "power")
     assert any("NOT CURRENT" in ANSI.sub("", line) for line in lines)
     assert any("VDD_IN" in ANSI.sub("", line) for line in lines)  # still there, dimmed
