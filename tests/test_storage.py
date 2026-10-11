@@ -249,15 +249,20 @@ def test_storage_is_on_by_default_and_its_interval_is_checked(monkeypatch, tmp_p
             platmon.load_config(ini_file(tmp_path, text))
 
 
+BAT = ("battery", 60.0)  # on by default, like storage and wifi
+
+
 @pytest.mark.parametrize("text, groups, history_on", [
-    (None, [("storage", 30.0), ("wifi", 5.0)], True),
-    ("[storage]\ninterval = 60\n", [("storage", 60.0), ("wifi", 5.0)], True),
-    ("[storage]\nenabled = no\n", [("wifi", 5.0)], True),
-    ("[wifi]\nenabled = no\n", [("storage", 30.0)], True),
-    ("[storage]\nenabled = no\n[wifi]\nenabled = no\n[history]\nenabled = no\n", [], False),
-    ("[probe]\ntargets = 127.0.0.1:9797\n", [("storage", 30.0), ("wifi", 5.0), ("probe", 10.0)], True),
-    ("[probe]\nenabled = no\ntargets = 127.0.0.1:9797\n", [("storage", 30.0), ("wifi", 5.0)], True),
-    ("[probe]\ntargets = , ,\n", [("storage", 30.0), ("wifi", 5.0)], True),
+    (None, [("storage", 30.0), ("wifi", 5.0), BAT], True),
+    ("[storage]\ninterval = 60\n", [("storage", 60.0), ("wifi", 5.0), BAT], True),
+    ("[storage]\nenabled = no\n", [("wifi", 5.0), BAT], True),
+    ("[wifi]\nenabled = no\n", [("storage", 30.0), BAT], True),
+    ("[battery]\nenabled = no\n", [("storage", 30.0), ("wifi", 5.0)], True),
+    ("[battery]\ninterval = 120\n", [("storage", 30.0), ("wifi", 5.0), ("battery", 120.0)], True),
+    ("[storage]\nenabled = no\n[wifi]\nenabled = no\n[battery]\nenabled = no\n[history]\nenabled = no\n", [], False),
+    ("[probe]\ntargets = 127.0.0.1:9797\n", [("storage", 30.0), ("wifi", 5.0), BAT, ("probe", 10.0)], True),
+    ("[probe]\nenabled = no\ntargets = 127.0.0.1:9797\n", [("storage", 30.0), ("wifi", 5.0), BAT], True),
+    ("[probe]\ntargets = , ,\n", [("storage", 30.0), ("wifi", 5.0), BAT], True),
 ])
 def test_slow_groups_and_history_follow_configuration(monkeypatch, tmp_path, text, groups, history_on):
     class Stop(Exception):

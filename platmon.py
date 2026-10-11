@@ -13,6 +13,7 @@ import signal
 import sys
 
 from collector import BOARD, PLATFORM, collect_recorded
+from collector.battery import Battery
 from collector.common import CpuCounters
 from collector.disk_io import DiskCounters
 from collector.gpu import Gpu
@@ -36,6 +37,9 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "disk_io": {"enabled": True},
     "storage": {"enabled": True, "interval": 30.0},
     "wifi": {"enabled": True, "interval": 5.0},
+    # a whole battery is one firmware call on an ACPI host (measured 101 ms): read far from the core
+    # cycle, and seldom, because reading a battery costs the battery. docs/performance/budget.md
+    "battery": {"enabled": True, "interval": 60.0},
     "probe": {"enabled": True, "interval": 10.0, "timeout": 2.0, "targets": ""},
     "history": {"enabled": True, "retention": 600.0},
     "pressure": {"enabled": True},
@@ -45,6 +49,7 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
 RANGES = {("core", "interval"): (0.1, 3600), ("storage", "interval"): (5, 3600), ("wifi", "interval"): (1, 3600), ("probe", "interval"): (1, 3600),
+          ("battery", "interval"): (10, 3600),
           ("probe", "timeout"): (0.1, 10), ("history", "retention"): (60, 3600), ("http", "port"): (1, 65535)}
 
 
@@ -170,7 +175,7 @@ def main(argv=None):
     # Low-frequency groups, each on its own thread and cadence. With no configured targets,
     # Probe stays idle: no worker, observation group or connection is created.
     slow = [Slow(name, observe(), cfg[name].getfloat("interval"), clock[0])
-            for name, observe in (("storage", Storage), ("wifi", Wifi),
+            for name, observe in (("storage", Storage), ("wifi", Wifi), ("battery", Battery),
                                   ("probe", lambda: Probe(parse_targets(cfg["probe"].get("targets")),
                                                           cfg["probe"].getfloat("timeout"))))
             if cfg[name].getboolean("enabled")

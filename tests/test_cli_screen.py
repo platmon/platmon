@@ -135,7 +135,17 @@ OBSERVED = {"groups": {
          "noise_dbm": -92}]}},
     "probe": {"observation": {"data_age_ms": 4200, "stale": False}, "data": {"targets": [
         {"address": "192.168.1.1", "port": 53, "connect_ms": 1.8, "failures": 0, "attempts": 10,
-         "reason": None}]}}}}
+         "reason": None}]}},
+    "battery": {"observation": {"data_age_ms": 4200, "stale": False}, "data": {
+        "batteries": [{"name": "BAT1", "present": True, "percent": 89, "status": "Not charging",
+                       "capacity_level": "Normal", "technology": "Li-ion", "health": None,
+                       "charge_now_uah": 3026000, "charge_full_uah": 3400000,
+                       "charge_full_design_uah": 4000000, "energy_now_uwh": None, "energy_full_uwh": None,
+                       "energy_full_design_uwh": None, "current_ua": -1200000, "power_uw": None,
+                       "voltage_uv": 16436000, "cycle_count": 237}],
+        # a driver name long enough to crowd a narrow terminal, as a USB-PD source really is
+        "external": [{"name": "ADP1", "type": "Mains", "online": True},
+                     {"name": "ucsi-source-psy-USBC000:001", "type": "USB", "online": False}]}}}}
 
 
 @pytest.mark.parametrize("view", VIEWS)
@@ -150,6 +160,27 @@ def test_every_view_fits_the_terminal(view, width, height):
 def test_every_view_is_ascii_without_utf8(view):
     text = "\n".join(screen(RICH, OBSERVED, 119, 40, Style(color=False, utf8=False), LIVE, {}, view))
     assert not re.search(r"[^\x00-\x7f°·↓↑]", text)  # labels and units only; bars, rules and arrows are ASCII
+
+
+@pytest.mark.parametrize("width", [119, 79, 60, 44])
+def test_the_battery_keeps_every_reading_at_any_width(width):
+    """Temp & power carries the battery, as the web page's Battery card does. A narrow terminal gives up
+    the bar and then wraps the readings onto their own lines; it never drops one. The height is generous
+    on purpose: what a view does when it is taller than the terminal is scrolling, tested separately."""
+    lines = plain(screen(RICH, OBSERVED, width, 90, Style(), LIVE, {}, "thermal"))
+    start = next(n for n, line in enumerate(lines) if "BATTERY" in line)
+    # wrapping splits a reading across lines, so the section is compared as one run of words
+    section = re.sub(r"\s+", " ", " ".join(lines[start:]))
+    assert "observed 4 s ago" in section and "BAT1" in section and "89 %" in section
+    for reading in ("Not charging", "16.44 V", "-1.20 A", "237 cycles", "85 % of design"):
+        assert reading in section, f"{reading} lost at {width} columns"
+    assert "ADP1 on" in section and "ucsi-source-psy-USBC000:001 off" in section  # no supply cut off
+
+
+def test_the_battery_section_is_absent_without_the_observation():
+    """A host with no supply, or a server without the endpoint: the section is simply not there."""
+    text = "\n".join(plain(screen(RICH, {"groups": {}}, 119, 40, Style(), LIVE, {}, "thermal")))
+    assert "BATTERY" not in text and "TEMPERATURE" in text
 
 
 def test_the_tab_bar_names_every_view_and_marks_the_active_one():
@@ -209,7 +240,7 @@ def test_system_lists_the_boards_own_fields():
 @pytest.mark.parametrize("view,text", [
     ("network", "No interface, Wi-Fi or TCP connect readings"),
     ("storage", "No filesystem or disk I/O readings"),
-    ("thermal", "No temperature, power or fan readings")])
+    ("thermal", "No temperature, power, fan or battery readings")])
 def test_a_view_with_nothing_to_show_says_so(view, text):
     bare = dict(FULL, temperature={}, power={}, fans=[], network=None, disk_io=None)
     lines = plain(screen(bare, None, 79, 24, Style(), LIVE, {}, view))

@@ -9,7 +9,8 @@ readiness). Checked against the repository and devices whenever work resumes. St
 progress, waiting for validation, blocked (access), waiting for approval. Merging, production rollout
 and releases always wait for the owner's approval.
 
-Last update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08a7fb5a`
+Last update: 2026-10-11 (deferred work after the battery group; the staged plan below is unchanged).
+Earlier update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08a7fb5a`
 (`origin/main`, #32–#39 already merged before this resumed task). The table below records historical
 implementation; merging alone does **not** complete the expanded validation requirements.
 
@@ -163,6 +164,41 @@ Production rollout and release publication remain unapproved.
 | 8 | Integration, release readiness | merged with this page | #39 | integrated service on Orin/Pi ([release-readiness.md](../release-readiness.md)) |
 
 Not rolled out: #32–#38 (the devices run `8525942`, #31). Rolling them out is a separate decision.
+
+## Deferred after the battery group (2026-10-11)
+
+Left out of `feat(collector): report batteries and external power supplies` on purpose, recorded here so
+the reasons do not have to be rediscovered. None of them is a defect in what shipped.
+
+| Item | What it would take | Why it waited |
+| --- | --- | --- |
+| Battery history series | `history.py`: `observation_points` for the group, a series id scheme and a `PRIORITY` entry, plus a section in the web page's history view | Charge over time is the most useful graph a battery has, but it reaches into history and both viewers; the group's own `observation.id` and ages already carry the current reading |
+| A battery level in `[thresholds]` | `DEFAULTS["thresholds"]`, `levels()` and its range check, the CLI's `LIMITS`, the web page's `LIMITS` — and an inverted comparison | For a battery the **low** reading is the bad one, the opposite of every level `level()` compares, so it is not a new row in an existing table but a second kind of threshold. The viewers show the charge without a warning colour until that is designed |
+| `temp`, `time_to_empty_now`, `time_to_full_now` | Three more standard `power_supply` attributes in `collector/battery.py`; absent ones already cost nothing | `temp` is a temperature and `/api/stats` already has a `temperature` table, so where it belongs is a design question, not a field to add. The two time estimates are a driver's own extrapolation, not a reading |
+| What reading a battery costs the battery | A power measurement on a battery-powered host, with the group off and on | It is the reason the default interval is 60 s rather than the 10 s floor, and it is the one number behind that choice that is not measured |
+| Battery in a fleet server's own history | `platmon-hub`: its history projection lists the groups it stores (`storage`, `wifi`, `probe`), so the group is validated, shown on its dashboard and not persisted | Work in that repository, not this one. Nothing here blocks it: the group is accepted by its validator as it is |
+
+### A battery behind an external device
+
+A host can have its charge reported by a separate device — a power board, a controller — rather than by
+the kernel's class, with another program on the host already reading that device. Such a source would sit
+ahead of `/sys/class/power_supply` in the same group, chosen the way the GPU's sources already are
+([api.md](../api.md), "Where one value has several sources"), with `provider` saying which one answered
+and the field model this group defines staying as it is.
+
+It would stay a source platmon **reads**, not one that pushes to it. Three reasons:
+
+- A pushed value has an age platmon never observed. `Sampler._check` requires every number in a snapshot
+  to carry a read span from that collection and falls the whole snapshot back to
+  `cycle_start_upper_bound` otherwise; a group's `data_age_ms` makes the same promise for its own data.
+- The HTTP frontend is read-only GET. A write path asks who may write, and platmon has no answer: an
+  injected charge level is a safety-adjacent falsehood on a vehicle, and authentication is not in scope.
+- `collector/jetson.py` already reads another program's file (`/var/lib/nvpmodel/status`), so the pattern
+  exists and needs no new mechanism.
+
+Deferred until a second real source exists, so that the format is settled by the field model rather than
+by one device's payload. The external device keeps whatever else it reports — motion, actuators, anything
+else on its bus — out of platmon: only the fields this group defines would be read.
 
 ## Rollouts
 

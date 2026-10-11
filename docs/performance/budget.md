@@ -172,3 +172,42 @@ here rather than quietly exempted, so the next host that shows one is compared a
 Not measured: the power cost of waking an NVMe drive once a second, which matters on a battery-powered
 host. If that is judged to matter, the low-frequency group becomes the better trade and this decision
 should be revisited.
+
+## Battery as a low-frequency group (2026-10-11)
+
+The same phenomenon as the section above, on a feature that was not shipped yet, so the measurement
+decided where it goes before any of it was written.
+
+Measured on the same x86_64 PC. A battery's attributes all come from one firmware call behind the ACPI
+driver's cache (`/sys/module/battery/parameters/cache_time`, 1000 ms):
+
+| | result |
+| --- | --- |
+| one reading of a whole battery (10 attributes) | **101.20 ms** elapsed, **0.594 ms** thread CPU (99.4 % waiting) |
+| the burst, attribute by attribute | first 101.48 ms, the other nine 0.008–0.058 ms — one call covers them all |
+| a read inside the cache window (0.2 s gap) | 0.149 ms |
+| a read after it (1.0 s gap and longer) | 101.4 ms |
+| `online` of a Mains or USB supply | 0.12–0.17 ms — external power is cheap to check |
+
+The core interval of 1 s sits exactly on that 1000 ms cache, so a battery read in the core cycle would
+pay the full call on **every** collection: +101 ms on an 18.8 ms collection, and at `interval = 0.1` it
+would be the first case in this file where a collection cannot hold its cadence.
+
+As a low-frequency group on its own thread instead:
+
+| group interval | CPU | core cycle |
+| --- | --- | --- |
+| 10 s | 0.0059 pp | untouched |
+| 30 s | 0.0020 pp | untouched |
+| **60 s (the default)** | **0.0010 pp** | untouched |
+
+**Shipped on by default at 60 s**, with `[battery] enabled = no` to turn it off and a configured range of
+10 to 3600 s — the floor keeps any configuration away from the 1 s cache. 60 s rather than the floor for
+two reasons: battery state changes slowly, and reading a battery costs the battery, because each reading
+wakes the firmware of the device whose charge is being reported. That second cost is **not measured**; the
+interval is chosen conservatively because of it, not because of CPU.
+
+Why this one fits where temperature did not: it is a new field, so nothing leaves `/api/stats`, no viewer
+reading flickers and no history series is starved; and a slow cadence is right for the data rather than a
+compromise, because a battery's charge does not move in a second. The group's own `observation.id`,
+`data_age_ms` and `stale_after_ms` state its age, which is what `/api/observations` is for.
