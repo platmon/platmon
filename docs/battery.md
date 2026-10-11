@@ -101,3 +101,8 @@ No charge or discharge control, no calibration, no battery threshold in `[thresh
 low reading is the bad one, the opposite of every other level platmon colours, so the viewers show the
 charge without a warning colour. No battery history series. No `temp`, `time_to_empty_now` or
 `time_to_full_now`, and no serial number or identifying string.
+
+Only the kernel's class is read. A host whose charge is reported by an external device rather than by
+`/sys/class/power_supply` is not covered; what adding such a source would take, and why it would stay a
+path platmon reads rather than one it is pushed to, is in
+[development/remaining-work.md](development/remaining-work.md).
