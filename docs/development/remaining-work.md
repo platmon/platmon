@@ -200,22 +200,6 @@ Deferred until a second real source exists, so that the format is settled by the
 by one device's payload. The external device keeps whatever else it reports — motion, actuators, anything
 else on its bus — out of platmon: only the fields this group defines would be read.
 
-### Other deferred work recorded on the same day
-
-Not part of the battery group; written down because nothing else records it.
-
-- **An intermittent identity can lose its history slot for good.** `history.py` `_fitting` breaks ties so
-  that established series win (`sid not in self._series`), which is right for a stable channel and starves
-  one that is not present every time once `MAX_SERIES` is reached. Measured with an artificially omitted
-  channel: a series that exists at every publication keeps 110/110 points, the same channel published once
-  in five gets no series at all. Whether a channel that comes and goes on its own today — an inactive
-  thermal zone returning `ENODATA` — is already losing its history on a host at the series cap is
-  **unconfirmed**, and is the part worth measuring first.
-- **When the device-wake sensors are worth acting on.** The decision to leave them as they are is recorded
-  in [performance/budget.md](../performance/budget.md). It should be revisited if a host has several such
-  channels at once (each NVMe drive carries its own, and eight would be about 76 ms a collection), if a
-  supported board needs an interval under 0.2 s and has one, or once the power cost above is measured.
-
 ## Rollouts
 
 - Orin: switched to `8525942` (#31) on 2026-10-09 14:09 KST at the owner's request. Healthy, `/api/status`
