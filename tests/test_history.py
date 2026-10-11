@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from collector.history import History, points_of
+from collector.history import History, observation_points, points_of
 from collector.sampler import Sampler
 from frontends.server import make_handler
 from test_sampler import Clock, fake
@@ -17,6 +17,7 @@ S = 10**9
 def stats(n, rx=100.0, ns="netns1:a", ifindex=2, disk_rates=True):
     return {"cpu": [{"id": 0, "usage": 10.0 + n}, {"id": 1, "usage": None}], "memory": {"used": 1000 + n},
             "temperature": {"cpu": 40.0, "a/b": 41.0},
+            "power": {"VDD_IN": 5.25, "VDD_CPU_GPU_CV": 1.5},
             "network": {"scope": {"id": ns}, "interfaces": [
                 {"name": "eth0", "ifindex": ifindex, "rates": {"rx_bytes_per_s": rx, "tx_bytes_per_s": 0.0}},
                 {"name": "wlan0", "ifindex": 3, "rates": None, "reason": "warmup"},
@@ -26,11 +27,14 @@ def stats(n, rx=100.0, ns="netns1:a", ifindex=2, disk_rates=True):
 
 
 def test_series_ids_follow_identities_and_gaps_are_none():
-    meta = {"/temperature/cpu": {"id": "src1:abc"}, "/temperature/a~1b": {"id": None}}
+    meta = {"/temperature/cpu": {"id": "src1:abc"}, "/temperature/a~1b": {"id": None},
+            "/power/VDD_IN": {"id": "src1:rail"}}
     p = points_of(stats(1), meta)
     assert p["cpu/0/usage"] == 11.0 and p["cpu/1/usage"] is None
     assert p["memory/used_bytes"] == 1001
     assert p["temperature/src1:abc"] == 40.0 and p["temperature/name:a/b"] == 41.0  # no id: by name, marked so
+    # a power rail is a named sensor value like a temperature, and is identified the same way
+    assert p["power/src1:rail"] == 5.25 and p["power/name:VDD_CPU_GPU_CV"] == 1.5
     assert p["network/netns1:a/2/eth0/rx_bytes_per_s"] == 100.0
     assert p["network/netns1:a/3/wlan0/rx_bytes_per_s"] is None  # warmup: a gap, not 0
     assert not any("/odd/" in k for k in p)  # no ifindex: no identity to join points on
@@ -77,12 +81,13 @@ def test_series_limit_counts_what_it_drops():
     assert h.view(11 * S)[1] == dropped
 
 
-def busy_host(warmup=False, cpus=22, temps=31, interfaces=4):
+def busy_host(warmup=False, cpus=22, temps=31, interfaces=4, rails=3):
     """As many identities as a 22-core PC with 31 temperature channels: 64 core series, 69 with the
     low-frequency groups below. warmup: the first snapshot, where no CPU has been measured yet."""
     return {"cpu": [] if warmup else [{"id": i, "usage": float(i)} for i in range(cpus)],
             "memory": {"used": 1000},
             "temperature": {f"sensor{i}": 40.0 + i for i in range(temps)},
+            "power": {f"rail{i}": 1.0 + i for i in range(rails)},
             "network": {"scope": {"id": "netns1:a"}, "interfaces": [
                 {"name": f"eth{i}", "ifindex": i + 1, "rates": {"rx_bytes_per_s": 1.0, "tx_bytes_per_s": 2.0}}
                 for i in range(interfaces)]},
@@ -93,6 +98,44 @@ def busy_host(warmup=False, cpus=22, temps=31, interfaces=4):
 def fs(minor):
     return {"major": 259, "minor": minor, "device": f"nvme0n1p{minor}", "fstype": "ext4",
             "source": f"/dev/nvme0n1p{minor}", "used_bytes": 10, "available_bytes": 20}
+
+
+def test_battery_points_carry_the_charge_and_the_draw():
+    """What a consumption reading is made of on the battery's side: the charge the gauge counts, so a
+    drain is a difference over the window, and the draw where the driver reports it. The bay's name is
+    the identity, so a cell swapped into the same bay continues that bay's series."""
+    data = {"batteries": [
+        {"name": "BAT1", "present": True, "percent": 89, "charge_now_uah": 3026000,
+         "energy_now_uwh": None, "power_uw": None},
+        {"name": "BAT2", "present": False, "percent": None, "charge_now_uah": None,
+         "energy_now_uwh": None, "power_uw": None}], "external": [{"name": "ADP1", "online": True}]}
+    p = observation_points("battery", data)
+    assert p["observation/battery/BAT1/percent"] == 89
+    assert p["observation/battery/BAT1/charge_now_uah"] == 3026000
+    # the other gauge family, an unreported draw and an empty bay get no series at all: one that can
+    # never hold a value would take a slot from one that can. History gaps a series that goes missing.
+    assert "observation/battery/BAT1/energy_now_uwh" not in p
+    assert "observation/battery/BAT1/power_uw" not in p
+    assert not any("BAT2" in sid for sid in p)
+    assert not any("ADP1" in sid for sid in p)  # external power stores no charge, so it has no series
+
+
+def test_a_battery_observation_reaches_the_history():
+    h = History(retention=60, interval=1.0)
+    for n in (1, 2):
+        h.append_observation("battery", 60, {
+            "id": n, "started": n * S, "completed": n * S, "collector": {"state": "ok"},
+            "data": {"batteries": [{"name": "BAT1", "present": True, "percent": 90 - n,
+                                    "charge_now_uah": 3000000 - n, "energy_now_uwh": None,
+                                    "power_uw": None}], "external": []}})
+    h.append_observation("battery", 60, {  # the gauge stops answering: the series stays, with a gap
+        "id": 3, "started": 3 * S, "completed": 3 * S, "collector": {"state": "partial"},
+        "data": {"batteries": [{"name": "BAT1", "present": True, "percent": 87,
+                                "charge_now_uah": None, "energy_now_uwh": None, "power_uw": None}],
+                 "external": []}})
+    series, _ = h.view(3 * S)
+    assert [v for _, _, v in series["observation/battery/BAT1/percent"]] == [89, 88, 87]
+    assert [v for _, _, v in series["observation/battery/BAT1/charge_now_uah"]] == [2999999, 2999998, None]
 
 
 def test_every_cpu_core_keeps_its_series_when_sensors_outnumber_the_limit():
@@ -108,16 +151,17 @@ def test_every_cpu_core_keeps_its_series_when_sensors_outnumber_the_limit():
     h.append({"sequence": 1, "started": S, "stats": busy_host(warmup=True), "sensor_meta": {}})
     h.append({"sequence": 2, "started": 2 * S, "stats": busy_host(), "sensor_meta": {}})
     series, dropped = h.view(2 * S)
-    assert len(series) == 64 and dropped == 5
+    assert len(series) == 64 and dropped == 8
     assert all(f"cpu/{i}/usage" in series for i in range(22))
-    assert len([sid for sid in series if sid.startswith("temperature/")]) == 26  # 31 channels, 26 slots left
+    assert len([sid for sid in series if sid.startswith("power/")]) == 3  # the rails keep theirs
+    assert len([sid for sid in series if sid.startswith("temperature/")]) == 23  # 31 channels, 23 slots left
     assert len([sid for sid in series if sid.startswith("network/")]) == 8
     assert len([sid for sid in series if sid.startswith("disk_io/")]) == 2
     assert len([sid for sid in series if sid.startswith("observation/")]) == 5  # the slow groups keep theirs
     assert "memory/used_bytes" in series
     h.append({"sequence": 3, "started": 3 * S, "stats": busy_host(), "sensor_meta": {}})
     series, dropped = h.view(3 * S)  # a stable choice: no series takes turns with another
-    assert dropped == 5 and len(series) == 64 and all(f"cpu/{i}/usage" in series for i in range(22))
+    assert dropped == 8 and len(series) == 64 and all(f"cpu/{i}/usage" in series for i in range(22))
     assert all(len(points) == 2 for sid, points in series.items() if sid.startswith("cpu/"))
 
 

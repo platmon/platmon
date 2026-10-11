@@ -78,9 +78,13 @@ block. Rails and charge share a view because that is how consumption is read: th
 against the charge that window cost.
 
 A narrow terminal gives up the charge bar and then wraps the readings onto their own lines; it does not
-drop one. Neither viewer colours the charge, for the reason in Not included. The view has no Recent
-history panel yet, because the battery has no history series
-([development/remaining-work.md](development/remaining-work.md)).
+drop one. Neither viewer colours the charge, for the reason in Not included.
+
+The view's Recent history panel draws both the power rails and this group: the charge, the gauge's own
+count in µAh or µWh, and the draw where the driver reports one ([history.md](history.md)). That is what a
+consumption reading is made of — the draw over a window against the charge that window cost — so the two
+are graphed on the same view. The history is in memory only and keeps the last few minutes; a fleet
+server is the store for longer than that.
 
 ## Diagnostics
 

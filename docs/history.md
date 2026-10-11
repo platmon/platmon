@@ -38,6 +38,7 @@ collection started (elapsed clock, as of the answer; wall-clock steps do not cha
 | `npu/usage` | NPU usage % | - (one NPU is reported, [api.md](api.md#npu)) |
 | `memory/used_bytes` | used memory | - |
 | `temperature/<source id>` (or `temperature/name:<key>` without an id) | °C | `sensor_meta` source id ([api.md](api.md#sensor-sources-and-read-times)) |
+| `power/<source id>` (or `power/name:<key>` without an id) | W | the same, for the power rails: a rail is a named sensor value like a temperature channel |
 | `network/<namespace id>/<ifindex>/<name>/rx_bytes_per_s`, `…/tx_bytes_per_s` | bytes/s | namespace, index and name together ([network.md](network.md#scope-and-identity)); interfaces without a known index are not kept |
 | `disk_io/<major>:<minor>/<name>/read_bytes_per_s`, `…/write_bytes_per_s` | bytes/s | device number and name ([disk-io.md](disk-io.md)) |
 
@@ -58,6 +59,7 @@ Low-frequency series use **their own** observation IDs and start times:
 | `observation/storage/<major>:<minor>/<token>/used_bytes` and `available_bytes` | bytes; token hashes device number/name, filesystem type and source (not a universal filesystem UUID) |
 | `observation/wifi/<namespace>/<ifindex>/<name>/signal_dbm` | dBm when reported and connected; unknown namespace/index omitted, disconnect is null |
 | `observation/probe/<address>:<port>/connect_ms` | TCP connect ms; timeout/failure is null; IPv6 address bracketed |
+| `observation/battery/<name>/percent`, `…/charge_now_uah`, `…/energy_now_uwh`, `…/power_uw` | percent, µAh, µWh, µW as the kernel counts them; the bay's name is the identity, so a cell swapped into the same bay continues its series. Only the fields a reading has get a series: a gauge counts charge or energy and not both, a driver may report no instantaneous power, and an empty bay reports none of them — a series that could never hold a value would take a slot from one that can. A field that was there and goes missing keeps its series and takes a gap |
 
 A completed observation already older than three group intervals contributes null, never a current
 value. Partial groups retain their valid numbers; missing/error values are gaps. `series_intervals_ms`
@@ -90,7 +92,7 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
 
 ## Web page
 
-With history on, the Resources, Network, Storage and Temperature tabs show a "Recent history" panel with that topic's CPU, memory,
+With history on, the Resources, Network, Storage, Temperature and Power & battery tabs show a "Recent history" panel with that topic's CPU, memory,
 GPU, NPU, temperature, network, disk or low-frequency series: one graph per series, bounded by the endpoint's own
 series limit. A row of buttons above the graphs lists the kinds of series that view has with how many each
 covers ("CPU cores 22", "RAM 1"); a button turns its kind off and on, and a view with only one kind has no

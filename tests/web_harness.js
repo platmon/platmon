@@ -28,7 +28,8 @@ Object.defineProperty(globalThis, 'performance', {value: {now: () => now}, confi
 
 const SNAP = {platform: 'Linux', model: 'Test', uptime: 60, power_mode: null, system: {os: 'Test OS'},
   cpu: [{id: 0, usage: 1, freq: null}], gpu: null, memory: {total: 8, used: 2, swap_total: 0, swap_used: 0},
-  disk: {total: 10, used: 5}, temperature: {}, power: {}, fans: []};
+  disk: {total: 10, used: 5}, temperature: {}, power: {VDD_IN: 5.5}, fans: [],
+  sensor_meta: {'/power/VDD_IN': {id: 'src1:rail', provider: 'hwmon', unit: 'watt'}}};
 const meta = (id, sequence, data_age_ms) => ({...SNAP, schema_version: 1, collectors: {core: {state: 'ok', reason: null}},
   sample: {instance_id: id, sequence, data_age_ms, age_ms: data_age_ms - 250, duration_ms: 250}});
 const reply = (status, body) => ({ok: status >= 200 && status < 300, status,
@@ -96,7 +97,11 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
     'cpu/0/usage': [[1, 3000, 5]],
     'observation/probe/127.0.0.1:80/connect_ms': [[1, 10000, 1], [2, 9000, 2], [3, 0, 3]],
     'observation/wifi/ns:a/2/wlan0/signal_dbm': [[1, 2000, -64]],
-    'observation/storage/8:1/token/used_bytes': [[1, 3000, 2 ** 30]], 'unknown/series': [[1, 1, 1]]}}));
+    'observation/storage/8:1/token/used_bytes': [[1, 3000, 2 ** 30]],
+    'power/src1:rail': [[1, 3000, 5.25], [2, 2000, 5.5]], 'power/name:VDD_SOC': [[1, 3000, 1.5]],
+    'observation/battery/BAT1/percent': [[1, 3000, 90], [2, 2000, 89]],
+    'observation/battery/BAT1/charge_now_uah': [[1, 3000, 3026000]],
+    'unknown/series': [[1, 1, 1]]}}));
   answers.push(ok(SNAP));
   // Exercise all existing row-format contracts independently of which view is selected.
   // The separate view harness checks that the real polling path renders only the active view.

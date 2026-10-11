@@ -490,12 +490,14 @@ function storageRows() {
 // Overview does not fetch history. A null is a gap in the line, never 0.
 let hist = null, histAt = 0, histAsked = -Infinity, histSupported = true, histRequest = null;
 const HIST_PREFIXES = {resources: ['cpu/', 'gpu/', 'npu/', 'memory/'], network: ['network/', 'observation/wifi/', 'observation/probe/'],
-  storage: ['disk_io/', 'observation/storage/'], thermal: ['temperature/']};
+  storage: ['disk_io/', 'observation/storage/'], thermal: ['temperature/'],
+  power: ['power/', 'observation/battery/']};
 // One button per kind of series a view can draw, in this order, labelled with how many it covers. A
 // viewer turns a kind off to take its graphs out of the list; single series are not picked one at a time.
 const HIST_GROUPS = [['cpu/', 'CPU cores'], ['gpu/', 'GPU'], ['npu/', 'NPU'], ['memory/', 'RAM'], ['network/', 'Interfaces'],
   ['observation/wifi/', 'Wi-Fi'], ['observation/probe/', 'TCP connect'], ['disk_io/', 'Disk I/O'],
-  ['observation/storage/', 'Filesystems'], ['temperature/', 'Temperature']];
+  ['observation/storage/', 'Filesystems'], ['temperature/', 'Temperature'], ['power/', 'Power rails'],
+  ['observation/battery/', 'Battery']];
 const histOff = new Set();  // kinds a viewer turned off; every kind of a view starts on
 const wantsHistory = () => !!HIST_PREFIXES[activeTab];
 const historyMatches = id => (HIST_PREFIXES[activeTab] || []).some(prefix => id.startsWith(prefix));
@@ -505,9 +507,15 @@ const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^observation\/storage\/([^/]+)\/[^/]+\/(used_bytes|available_bytes)$/, m => `FS ${m[1]} ${m[2] === 'used_bytes' ? 'used' : 'free'}`],
   [/^observation\/wifi\/[^/]+\/\d+\/([^/]+)\/signal_dbm$/, m => `${m[1]} signal`],
   [/^observation\/probe\/([^/]+)\/connect_ms$/, m => `TCP ${m[1]}`],
+  [/^observation\/battery\/([^/]+)\/percent$/, m => `${m[1]} charge`],
+  [/^observation\/battery\/([^/]+)\/charge_now_uah$/, m => `${m[1]} charge now`],
+  [/^observation\/battery\/([^/]+)\/energy_now_uwh$/, m => `${m[1]} energy now`],
+  [/^observation\/battery\/([^/]+)\/power_uw$/, m => `${m[1]} draw`],
   [/^memory\/used_bytes$/, () => 'RAM used'],
   [/^temperature\/name:(.+)$/, m => 'temp ' + m[1]],
   [/^temperature\/(.+)$/, m => 'temp ' + sensorName('temperature', m[1])],
+  [/^power\/name:(.+)$/, m => 'rail ' + m[1]],
+  [/^power\/(.+)$/, m => 'rail ' + sensorName('power', m[1])],
   [/^network\/[^/]+\/\d+\/([^/]+)\/(rx|tx)_bytes_per_s$/, m => `${m[1]} ${m[2]}`],
   [/^disk_io\/[^/]+\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`]];
 // History keys a sensor by its source id (docs/history.md); its name is the sensor_meta pointer with that id
@@ -517,6 +525,10 @@ function sensorName(group, sid) {
   return ptr ? ptr.slice(group.length + 2).replace(/~1/g, '/').replace(/~0/g, '~') : sid;
 }
 const histValue = (id, v) => id.startsWith('temperature') ? v.toFixed(1) + ' °C'
+  : id.startsWith('power/') ? v.toFixed(2) + ' W'
+  : id.endsWith('/percent') ? v.toFixed(0) + '%'
+  : id.endsWith('_uah') ? (v / 1e3).toFixed(0) + ' mAh' : id.endsWith('_uwh') ? (v / 1e3).toFixed(0) + ' mWh'
+  : id.endsWith('_uw') ? (v / 1e6).toFixed(2) + ' W'
   : id.startsWith('cpu/') || id.startsWith('gpu/') || id.startsWith('npu/') ? v.toFixed(1) + '%'
   : id.includes('/wifi/') ? v.toFixed(1) + ' dBm' : id.includes('/probe/') ? v.toFixed(1) + ' ms'
   : id.startsWith('memory') || id.includes('/storage/') ? gib(v) : perS(v);
