@@ -1,5 +1,50 @@
 # Release readiness
 
+## 1.2.0 release gate (2026-10-11)
+
+Changes since 1.1.0: batteries and external power supplies as the low-frequency group `battery` (#68),
+the Temperature / Power & battery view split (#69), a thermal zone reported once instead of twice (#67)
+and a request deadline on the HTTP frontend (#67). A minor release by the repository's rule: the
+additions are a new `/api/observations` group within schema **2**, a new `[battery]` config section and
+a new view, all compatible. `/api/stats` keeps every documented key, unit and type and
+`schema_version` 1; what changes there is the membership of `temperature`, which the API already
+declines to promise (a channel that cannot be read is left out). No endpoint, status code, 503 rule,
+`no-store` header or packaging layout changes.
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| `pytest` at the release commit, locally | 897 passed, 2 skipped (the Python 3.14 profile modes) |
+| CI on Python 3.9 and 3.13, plus the package job | pass on #67, #68, #69, #70 and on merged `main` at each |
+| `scripts/package.py` then `scripts/check_package.py` | `platmon_1.2.0-1_all.deb` smoke pass (server, CLI, API, web, SVG) |
+| `SHA256SUMS` of the built files | `sha256sum -c` OK for the `.deb`, the archive and `BUILD.json` |
+| dpkg install, upgrade and downgrade | the CI package job (`scripts/check_package_install.py`) on every change above |
+| x86_64 PC (Ubuntu 26.04, kernel 7.0, 22 cores, 28 temperature channels after #67, NVMe, Intel Wi-Fi, one battery) | the package installed and restarted as the real systemd service over four revisions (1.1.0-1 → -2 → -3 → -4) with the config replaced without a prompt; `/api/observations` served the `battery` group `ok` with `duration_ms` 101.8 on its own thread, and the core collection unchanged |
+| the battery group's cost, on that PC | one reading 101.20 ms elapsed and 0.594 ms thread CPU, behind the ACPI driver's 1000 ms cache; at the 60 s default about 0.001 pp of one core, with the core cycle untouched ([budget](performance/budget.md)) |
+| both viewers on that PC | the owner confirmed the battery in the `platmon` command and, after the polling fix (#70), in the web page; the page in this commit is byte-identical to the one they checked |
+| the fleet server's contract (`platmon-hub`) | its own `protocol.observations()` accepts the new group, its alert rule reports no optional-endpoint error, and `/api/observations` is 4.2 kB against its 512 kB bound |
+
+Not verified, and therefore the gates still open before this draft is published:
+
+- **No ARM device acceptance for 1.2.0.** As at 1.1.0, neither an Orin Nano nor a Raspberry Pi 4 was
+  available. The service's sandboxing, startup and the boards' own readings are unverified at this
+  version, and the 1.0.0 lifecycle evidence below does not carry over.
+- **No ARM CPU measurement with the battery group.** On a board with no power supply class the group
+  reports `unavailable` and its thread does one listing per interval, so the added cost should be
+  negligible there — but that is reasoning, not a measurement, and the 2.0 % target was last measured
+  per board at 1.0.0.
+- **No board with power rails ran the new Power & battery view.** `VDD_IN`, the fans and `MAXN_SUPER`
+  are covered by fixtures and by the x86 PC's empty rail set, not by a Jetson.
+- **The power cost of reading a battery is unmeasured.** It is the reason the default interval is 60 s
+  rather than the 10 s floor, and the one number behind that choice with no measurement under it.
+- **The power rails and the battery have no history series**, so neither appears in `/api/history` or in
+  the Power & battery view's Recent history panel, which the view therefore does not have. Recorded in
+  [remaining work](development/remaining-work.md); not a regression, and not closed by this release.
+
+Publishing the draft therefore needs the ARM package acceptance and a CPU window per board, recorded
+here as 1.0.0's were. The draft release and its artifacts are the review point, not a release decision.
+
 ## 1.1.0 release gate (2026-10-11)
 
 Changes since 1.0.0: generic GPU and NPU collectors (#63), the web page's history sections (#62), the
