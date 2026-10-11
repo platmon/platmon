@@ -80,9 +80,11 @@ against the charge that window cost.
 A narrow terminal gives up the charge bar and then wraps the readings onto their own lines; it does not
 drop one. Neither viewer colours the charge, for the reason in Not included.
 
-The view's Recent history panel draws the power rails, not the battery: the rails have a series each
-([history.md](history.md)) and the battery has none yet, so charge over time is not graphed. What adding
-it would take is in [development/remaining-work.md](development/remaining-work.md).
+The view's Recent history panel draws both the power rails and this group: the charge, the gauge's own
+count in µAh or µWh, and the draw where the driver reports one ([history.md](history.md)). That is what a
+consumption reading is made of — the draw over a window against the charge that window cost — so the two
+are graphed on the same view. The history is in memory only and keeps the last few minutes; a fleet
+server is the store for longer than that.
 
 ## Diagnostics
 

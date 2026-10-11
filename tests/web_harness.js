@@ -99,6 +99,8 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
     'observation/wifi/ns:a/2/wlan0/signal_dbm': [[1, 2000, -64]],
     'observation/storage/8:1/token/used_bytes': [[1, 3000, 2 ** 30]],
     'power/src1:rail': [[1, 3000, 5.25], [2, 2000, 5.5]], 'power/name:VDD_SOC': [[1, 3000, 1.5]],
+    'observation/battery/BAT1/percent': [[1, 3000, 90], [2, 2000, 89]],
+    'observation/battery/BAT1/charge_now_uah': [[1, 3000, 3026000]],
     'unknown/series': [[1, 1, 1]]}}));
   answers.push(ok(SNAP));
   // Exercise all existing row-format contracts independently of which view is selected.

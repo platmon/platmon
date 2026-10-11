@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from collector.history import History, points_of
+from collector.history import History, observation_points, points_of
 from collector.sampler import Sampler
 from frontends.server import make_handler
 from test_sampler import Clock, fake
@@ -98,6 +98,44 @@ def busy_host(warmup=False, cpus=22, temps=31, interfaces=4, rails=3):
 def fs(minor):
     return {"major": 259, "minor": minor, "device": f"nvme0n1p{minor}", "fstype": "ext4",
             "source": f"/dev/nvme0n1p{minor}", "used_bytes": 10, "available_bytes": 20}
+
+
+def test_battery_points_carry_the_charge_and_the_draw():
+    """What a consumption reading is made of on the battery's side: the charge the gauge counts, so a
+    drain is a difference over the window, and the draw where the driver reports it. The bay's name is
+    the identity, so a cell swapped into the same bay continues that bay's series."""
+    data = {"batteries": [
+        {"name": "BAT1", "present": True, "percent": 89, "charge_now_uah": 3026000,
+         "energy_now_uwh": None, "power_uw": None},
+        {"name": "BAT2", "present": False, "percent": None, "charge_now_uah": None,
+         "energy_now_uwh": None, "power_uw": None}], "external": [{"name": "ADP1", "online": True}]}
+    p = observation_points("battery", data)
+    assert p["observation/battery/BAT1/percent"] == 89
+    assert p["observation/battery/BAT1/charge_now_uah"] == 3026000
+    # the other gauge family, an unreported draw and an empty bay get no series at all: one that can
+    # never hold a value would take a slot from one that can. History gaps a series that goes missing.
+    assert "observation/battery/BAT1/energy_now_uwh" not in p
+    assert "observation/battery/BAT1/power_uw" not in p
+    assert not any("BAT2" in sid for sid in p)
+    assert not any("ADP1" in sid for sid in p)  # external power stores no charge, so it has no series
+
+
+def test_a_battery_observation_reaches_the_history():
+    h = History(retention=60, interval=1.0)
+    for n in (1, 2):
+        h.append_observation("battery", 60, {
+            "id": n, "started": n * S, "completed": n * S, "collector": {"state": "ok"},
+            "data": {"batteries": [{"name": "BAT1", "present": True, "percent": 90 - n,
+                                    "charge_now_uah": 3000000 - n, "energy_now_uwh": None,
+                                    "power_uw": None}], "external": []}})
+    h.append_observation("battery", 60, {  # the gauge stops answering: the series stays, with a gap
+        "id": 3, "started": 3 * S, "completed": 3 * S, "collector": {"state": "partial"},
+        "data": {"batteries": [{"name": "BAT1", "present": True, "percent": 87,
+                                "charge_now_uah": None, "energy_now_uwh": None, "power_uw": None}],
+                 "external": []}})
+    series, _ = h.view(3 * S)
+    assert [v for _, _, v in series["observation/battery/BAT1/percent"]] == [89, 88, 87]
+    assert [v for _, _, v in series["observation/battery/BAT1/charge_now_uah"]] == [2999999, 2999998, None]
 
 
 def test_every_cpu_core_keeps_its_series_when_sensors_outnumber_the_limit():

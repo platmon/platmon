@@ -13,6 +13,12 @@ API schema versions are independent of release versions.
   id exactly as a temperature channel is, so a renamed rail or a replaced chip starts a new series.
   Rails rank above the temperature channels when the 64-series limit is reached: a board labels a few
   of them against dozens of nearly identical temperature channels.
+- The battery joins them: `observation/battery/<name>/percent`, `charge_now_uah`, `energy_now_uwh` and
+  `power_uw` series, drawn on the same view, so a drain is a difference over a window rather than two
+  readings a minute apart. The bay's name is the identity, so a cell swapped into the same bay
+  continues its series. Only the fields a reading has get a series — a gauge counts charge or energy
+  and not both, a driver may report no instantaneous power, and an empty bay reports none of them — so
+  a series that could never hold a value does not take a slot from one that can.
 
 ## 1.2.0 — 2026-10-11
 

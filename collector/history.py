@@ -83,6 +83,18 @@ def observation_points(name, data):
                 continue  # a name alone is not an interface identity
             sid = f"observation/wifi/{ns}/{item['ifindex']}/{item['name']}/signal_dbm"
             out[sid] = item.get("signal_dbm") if item.get("connected") else None
+    elif name == "battery":
+        for cell in data.get("batteries") or []:
+            # the bay's name is the identity the kernel gives: a cell swapped into the same bay keeps it,
+            # so the series continues, which is what a reading of that bay's charge means.
+            base = f"observation/battery/{cell['name']}"
+            # only the fields this reading has: a gauge counts charge or energy and not both, a driver
+            # may report no instantaneous power, and an empty bay reports none of them. A series that
+            # cannot ever have a value would hold a slot against one that can. A field that was there
+            # and is missing now keeps its series and takes a gap, which History fills on its own.
+            for field in ("percent", "charge_now_uah", "energy_now_uwh", "power_uw"):
+                if cell.get(field) is not None:
+                    out[f"{base}/{field}"] = cell[field]
     elif name == "probe":
         for target in data.get("targets") or []:
             address = target["address"]
@@ -114,7 +126,7 @@ class History:
                      points_of(record["stats"], record.get("sensor_meta")), record.get("gap_before", False))
 
     def append_observation(self, name, interval, record):
-        if name not in ("storage", "wifi", "probe"):
+        if name not in ("storage", "wifi", "battery", "probe"):
             return
         values = observation_points(name, record["data"])
         stale = record["completed"] - record["started"] > round(3 * interval * 1e9)

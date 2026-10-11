@@ -239,6 +239,15 @@ def test_power_rail_history(steps):
     assert "rail VDD_SOC</span><span>1.50 W" in hist  # no id: the name the server published
 
 
+def test_battery_history(steps):
+    """The charge joins the rails on the same view: the draw over a window against the charge it cost.
+    µAh as the kernel counts it, shown in mAh."""
+    hist = steps["ok"]["hist"]
+    assert "<h3>Battery</h3>" in hist
+    assert "BAT1 charge</span><span>89%" in hist and "89% – 90%" in hist
+    assert "BAT1 charge now</span><span>3026 mAh" in hist
+
+
 def test_pressure_rows(steps):
     psi = steps["pressure"]["psi"]
     assert "io</span><span>3.0%</span><span><span class=\"muted\">0.5%" in psi
