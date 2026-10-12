@@ -38,6 +38,7 @@ platmon_version=$(python3 scripts/packaging/package.py --version)
 platmon_dist="dist/${platmon_version}-1"
 python3 scripts/packaging/package.py --output "$platmon_dist"
 python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_all.deb"
+lintian --no-cfg --info --pedantic --fail-on error,warning "$platmon_dist/platmon_${platmon_version}-1_all.deb"
 (cd "$platmon_dist" && sha256sum -c SHA256SUMS)
 ```
 
@@ -45,9 +46,19 @@ The fresh output directory contains `platmon_<version>-1_all.deb`, `platmon-<ver
 (input content hashes and versions) and `SHA256SUMS`. The source archive includes
 runtime, tests, installation/build scripts and documentation, excluding caches and
 private validation artifacts. It can rebuild the package without `.git`.
-`SOURCE_DATE_EPOCH` controls timestamps; the default is zero. With identical inputs,
+`SOURCE_DATE_EPOCH` controls timestamps; when unset, the builder uses the dated
+maintainer signature in `packaging/debian/changelog`. Update that date and its entries
+when changing packaging. The template's `@VERSION@` is replaced by the application
+version and requested revision, so version remains defined once. The default timestamp
+travels in the source archive and does not require Git or the current clock.
+With identical inputs,
 epoch and build tools, repeated builds produce identical artifacts. The builder
 refuses existing output filenames. Packaging revision: `--revision 2`.
+
+Install Lintian on the build host with `sudo apt install lintian`. CI rejects its
+errors and warnings for both packaging revisions. This checks the binary package;
+the source archive is an upstream distribution, not a Debian source package with
+`debian/rules` or a `.dsc` file.
 
 ## Install and update
 
@@ -67,6 +78,10 @@ including that release's application version and packaging revision.
 
 Code goes to `/usr/share/platmon/`, the client to `/usr/bin/platmon`, the vendor unit
 to `/usr/lib/systemd/system/platmon.service`, and config to `/etc/platmon/platmon.ini`.
+The CLI manual is available with `man platmon`. Compressed documentation and
+changelogs are in `/usr/share/doc/platmon/`; `copyright` references the system's
+Apache-2.0 license. Package metadata includes `md5sums` for non-conffile contents
+for tools such as `debsums`; release artifact verification uses `SHA256SUMS`.
 The code keeps its existing directory structure and relative web paths. The service
 retains DynamicUser, ProtectSystem, ProtectHome and NoNewPrivileges. Logs:
 `journalctl -u platmon`. Configure the listener and restart with
@@ -151,7 +166,7 @@ directories are never automatically deleted by subsequent updates or uninstall.
 ## Release procedure
 
 1. Update the single VERSION and changelog. Review the scoped change and run
-   `git diff --check`, `pytest -v`, the build and package checker.
+   `git diff --check`, `pytest -v`, the build, package checker and Lintian.
 2. Test fresh install, upgrade with an edited INI, downgrade, remove/purge and existing
    installation migration. CI uses an isolated container for dpkg lifecycle checks;
    actual systemd sandbox/startup and ARM device readings require real-device acceptance.

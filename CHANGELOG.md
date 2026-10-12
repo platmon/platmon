@@ -6,6 +6,11 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- Debian packages include a CLI manual, compressed upstream and packaging changelogs,
+  copyright metadata and file checksums. Default reproducible timestamps come from
+  the packaging changelog instead of 1970; `SOURCE_DATE_EPOCH` still overrides them.
+  CI checks both package revisions with Lintian and rejects errors and warnings.
+
 ## 1.2.1 — 2026-10-12
 
 - NVIDIA GPU usage and graphics clocks are collected through the driver's optional `nvidia-smi`

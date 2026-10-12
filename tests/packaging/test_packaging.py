@@ -1,5 +1,6 @@
 """Distribution and installation checks; no host installation or service changes."""
 import os
+import gzip
 import hashlib
 import json
 import shutil
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.packaging.package import build, version
+from scripts.packaging.package import build, packaging_epoch, version
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -136,6 +137,20 @@ def test_package_contents_and_config_ownership(package, tmp_path):
     assert os.access(root / "usr/bin/platmon", os.X_OK)
     for name in ("preinst", "postinst", "prerm", "postrm"):
         assert run("sh", "-n", str(root / "DEBIAN" / name)).returncode == 0
+    doc = root / "usr/share/doc/platmon"
+    changelog = gzip.decompress((doc / "changelog.Debian.gz").read_bytes()).decode()
+    assert changelog.startswith(f"platmon ({version()}-1) unstable;")
+    assert gzip.decompress((doc / "changelog.gz").read_bytes()) == (ROOT / "CHANGELOG.md").read_bytes()
+    assert "/usr/share/common-licenses/Apache-2.0" in (doc / "copyright").read_text()
+    assert gzip.decompress((root / "usr/share/man/man1/platmon.1.gz").read_bytes()).startswith(b".TH PLATMON 1")
+    checksums = {}
+    for line in (root / "DEBIAN/md5sums").read_text().splitlines():
+        digest, relative = line.split("  ")
+        assert hashlib.md5((root / relative).read_bytes(), usedforsecurity=False).hexdigest() == digest
+        checksums[relative] = digest
+    expected = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
+                and root / "DEBIAN" not in p.parents and p != root / "etc/platmon/platmon.ini"}
+    assert set(checksums) == expected
 
 
 def test_package_smoke_outside_checkout(package, tmp_path):
@@ -148,6 +163,7 @@ def test_checksums_and_repeated_builds_match(package, tmp_path):
     output = package.parent
     manifest = json.loads((output / "BUILD.json").read_text())
     assert manifest["version"] == version() and manifest["package_version"] == f"{version()}-1"
+    assert manifest["source_date_epoch"] == packaging_epoch() > 0
     for line in (output / "SHA256SUMS").read_text().splitlines():
         digest, name = line.split("  ")
         assert hashlib.sha256((output / name).read_bytes()).hexdigest() == digest
@@ -182,6 +198,22 @@ def test_source_archive_rebuilds_without_git(package, tmp_path):
     result = run(sys.executable, "-m", "pytest", "--collect-only", "-q", "tests/benchmarks",
                  cwd=root, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_revision_and_epoch_override_reach_package_metadata(tmp_path):
+    epoch = 1780000000
+    env = dict(os.environ, SOURCE_DATE_EPOCH=str(epoch))
+    result = run(sys.executable, str(ROOT / "scripts/packaging/package.py"),
+                 "--revision", "2", "--output", str(tmp_path / "dist"), env=env)
+    assert result.returncode == 0, result.stderr
+    package = tmp_path / "dist" / f"platmon_{version()}-2_all.deb"
+    root = tmp_path / "extracted"
+    assert run("dpkg-deb", "-R", str(package), str(root)).returncode == 0
+    manifest = json.loads((package.parent / "BUILD.json").read_text())
+    assert manifest["source_date_epoch"] == epoch
+    changelog = root / "usr/share/doc/platmon/changelog.Debian.gz"
+    assert gzip.decompress(changelog.read_bytes()).decode().startswith(f"platmon ({version()}-2)")
+    assert int(changelog.stat().st_mtime) == epoch
 
 
 @pytest.mark.parametrize("revision", ["0", "01", "-1", "1/2", "x"])
