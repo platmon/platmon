@@ -44,6 +44,37 @@ def test_install_cli_user(tmp_path):
     assert "someone else's" in target.read_text()
 
 
+def test_source_uninstall_removes_cli_from_relocated_checkout(tmp_path):
+    """Only temporary paths and fake privilege checks are used; no host service is touched."""
+    repo = tmp_path / "repo"
+    uninstall = repo / "deploy/systemd/uninstall.sh"
+    uninstall.parent.mkdir(parents=True)
+    prefix = tmp_path / "installed"
+    prefix.mkdir()
+    (prefix / "old-code").write_text("previous installation")
+    text = (ROOT / "deploy/systemd/uninstall.sh").read_text()
+    text = text.replace("unit=/etc/systemd/system/platmon.service", f"unit={tmp_path / 'unit'}")
+    text = text.replace("/opt/platmon", str(prefix))
+    uninstall.write_text(text)
+    cli = repo / "scripts/install-cli.sh"
+    cli.parent.mkdir()
+    cli.write_text('#!/bin/sh\n[ "$1" = --uninstall ] || exit 1\nprintf "%s\\n" "$1" > "$CLI_CALLS"\n')
+    cli.chmod(0o755)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, command in (("id", "echo 0"), ("dpkg-query", "exit 1")):
+        stub = bin_dir / name
+        stub.write_text("#!/bin/sh\n" + command + "\n")
+        stub.chmod(0o755)
+    calls = tmp_path / "cli-calls"
+    env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"], CLI_CALLS=str(calls))
+    result = subprocess.run(["bash", str(uninstall)], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert not prefix.exists()
+    assert calls.exists(), result.stderr
+    assert calls.read_text() == "--uninstall\n"
+
+
 @pytest.mark.parametrize("mode, listener, expected", [
     ("host", "localhost 9797", "look at it with: platmon\n"),
     ("host", "localhost 19799", "look at it with: platmon localhost:19799"),

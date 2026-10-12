@@ -23,7 +23,7 @@ if [ -f "$unit" ]; then
 fi
 rm -rf /opt/platmon
 echo "platmon service removed (unit and /opt/platmon)"
-"$(dirname "$0")/../install-cli.sh" --uninstall || true
+"$(dirname "$0")/../../scripts/install-cli.sh" --uninstall || true
 
 if [ "${1:-}" = --purge ]; then
     rm -rf /etc/platmon
