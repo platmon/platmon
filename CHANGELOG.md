@@ -6,6 +6,8 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+## 1.2.1 — 2026-10-12
+
 - NVIDIA GPU usage and graphics clocks are collected through the driver's optional `nvidia-smi`
   command when no supported DRM reader is available, including on WSL2. The service also finds the
   WSL command outside PATH. Queries time out after 0.5 seconds; unsupported fields remain null and
