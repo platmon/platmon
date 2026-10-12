@@ -11,7 +11,8 @@ One collector core runs on the device as a background service with an HTTP API; 
 - No dependencies: Python 3.9+ standard library only
 - Reads `/proc` and `/sys` directly (CPU, GPU, NPU, memory, disk, temperatures, power rails, fans); the
   GPU from the board where it has its own source, otherwise from the DRM class (Intel `i915`, `amdgpu`),
-  and the NPU from the accel class (Intel `intel_vpu`)
+  and the NPU from the accel class (Intel `intel_vpu`); NVIDIA GPUs, including WSL2, use the
+  driver's optional `nvidia-smi` command when no supported DRM reader is available
 - Shows the OS release, kernel, architecture and hostname (plus the L4T release on Jetson)
 - Detects the platform (Jetson Orin / Xavier, Raspberry Pi, PC, Linux) and hides what the board lacks
 

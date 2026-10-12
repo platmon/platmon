@@ -1,6 +1,7 @@
 """collector/gpu.py: the DRM class read per driver, the i915 share measured between two collections,
 and what a card whose driver publishes nothing still says. Fake trees and a fake clock; no host data."""
 import errno
+import subprocess
 
 import pytest
 
@@ -164,3 +165,105 @@ def test_the_collector_uses_it_and_a_board_source_comes_first(tmp_path, monkeypa
     monkeypatch.setattr(collector, "BOARD", Board)
     stats = collector.collect(gpu=Gpu(clock=Clock(), root=intel(tmp_path)))
     assert stats["gpu"] == {"usage": 12.0, "freq": None, "max_freq": None}
+
+
+def nvidia_query(monkeypatch, output="GPU-test, 12.5, 210, 3105\n", error=None, returncode=0):
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        if error:
+            raise error
+        return subprocess.CompletedProcess(args, returncode, output, "driver error")
+
+    monkeypatch.setattr("collector.gpu.subprocess.run", run)
+    return calls
+
+
+@pytest.mark.parametrize("cards", [{}, {"card0": {}}, {"card0": {"driver": "nvidia"}}])
+def test_nvidia_with_no_drm_or_an_unreadable_card(tmp_path, monkeypatch, cards):
+    calls = nvidia_query(monkeypatch)
+    group = sysfs.Group("gpu", sysfs.Trace(Clock()))
+    gpu = Gpu(root=fake_drm(tmp_path, cards), nvidia_smi="/usr/lib/wsl/lib/nvidia-smi")
+    assert gpu.sample(group) == {"usage": 12.5, "freq": 210000000, "max_freq": 3105000000,
+                                 "driver": "nvidia", "provider": "nvidia-smi"}
+    assert group.status()["state"] == "ok"
+    assert calls[0][0] == ["/usr/lib/wsl/lib/nvidia-smi",
+                          "--query-gpu=uuid,utilization.gpu,clocks.current.graphics,clocks.max.graphics",
+                          "--format=csv,noheader,nounits"]
+    assert calls[0][1]["timeout"] == 0.5
+    assert calls[0][1].get("shell", False) is False
+    assert set(group.sensors) == {"usage", "freq", "max_freq"}
+    assert all(s["provider"] == "nvidia-smi" and s["identity_basis"] == "device_channel"
+               and s["span"] is not None for s in group.sensors.values())
+    assert len({s["id"] for s in group.sensors.values()}) == 3
+
+
+def test_nvidia_does_not_replace_readable_drm(tmp_path, monkeypatch):
+    calls = nvidia_query(monkeypatch)
+    gpu = Gpu(root=intel(tmp_path), nvidia_smi="nvidia-smi")
+    assert gpu.sample(sysfs.Group("gpu"))["driver"] == "i915"
+    assert calls == []
+
+
+@pytest.mark.parametrize("output, state, usage", [
+    ("GPU-test, 0, 0, [N/A]\n", "ok", 0.0),
+    ("GPU-test, N/A, [Not Supported], N/A\n", "unavailable", None),
+    ("GPU-test, nan, 210, 3105\n", "partial", None),
+    ("GPU-test, inf, 210, 3105\n", "partial", None),
+    ("GPU-test, 101, 210, 3105\n", "partial", None),
+    ("GPU-test, -1, 210, 3105\n", "partial", None),
+    ("GPU-test, bad, 210, 3105\n", "partial", None),
+    ("GPU-test, 0, 1e308, 3105\n", "partial", 0.0),
+])
+def test_nvidia_unavailable_and_invalid_fields(tmp_path, monkeypatch, output, state, usage):
+    nvidia_query(monkeypatch, output)
+    group = sysfs.Group("gpu")
+    entry = Gpu(root=str(tmp_path), nvidia_smi="nvidia-smi").sample(group)
+    assert entry["usage"] == usage
+    assert group.status()["state"] == state
+
+
+@pytest.mark.parametrize("output, reason", [("", "not_detected"),
+    ("broken response", "invalid_data"), ("GPU-test, 0, 210\n", "invalid_data"),
+    ("N/A, 0, 210, 3105\n", "invalid_data")])
+def test_nvidia_bad_or_empty_response(tmp_path, monkeypatch, output, reason):
+    nvidia_query(monkeypatch, output)
+    group = sysfs.Group("gpu")
+    assert Gpu(root=str(tmp_path), nvidia_smi="nvidia-smi").sample(group) is None
+    assert group.status()["reason"] == reason
+
+
+@pytest.mark.parametrize("error, returncode, reason", [
+    (subprocess.TimeoutExpired("nvidia-smi", 0.5), 0, "io_error"),
+    (PermissionError(errno.EACCES, "denied"), 0, "permission_denied"),
+    (FileNotFoundError(errno.ENOENT, "gone"), 0, "io_error"),
+    (None, 9, "io_error"),
+])
+def test_nvidia_failed_query_does_not_reuse_values(tmp_path, monkeypatch, error, returncode, reason):
+    gpu = Gpu(root=str(tmp_path), nvidia_smi="nvidia-smi")
+    nvidia_query(monkeypatch)
+    assert gpu.sample(sysfs.Group("gpu"))["usage"] == 12.5
+    nvidia_query(monkeypatch, error=error, returncode=returncode)
+    group = sysfs.Group("gpu")
+    assert gpu.sample(group) is None
+    assert group.status()["reason"] == reason
+
+
+def test_nvidia_selection_and_identity_survive_query_order(tmp_path, monkeypatch):
+    gpu = Gpu(root=str(tmp_path), nvidia_smi="nvidia-smi")
+    rows = ["GPU-b, 90, 100, 1000", "GPU-a, 10, 200, 2000"]
+    identities = []
+    for output in ("\n".join(rows), "\n".join(reversed(rows))):
+        nvidia_query(monkeypatch, output)
+        group = sysfs.Group("gpu", sysfs.Trace(Clock()))
+        assert gpu.sample(group)["usage"] == 10.0
+        identities.append(group.sensors["usage"]["id"])
+    assert identities[0] == identities[1]
+
+
+def test_nvidia_wsl_discovery_without_path(monkeypatch):
+    monkeypatch.setattr("collector.gpu.shutil.which", lambda name: None)
+    monkeypatch.setattr("collector.gpu.os.path.isfile", lambda path: path == "/usr/lib/wsl/lib/nvidia-smi")
+    monkeypatch.setattr("collector.gpu.os.access", lambda path, mode: True)
+    assert Gpu()._nvidia_smi == "/usr/lib/wsl/lib/nvidia-smi"
