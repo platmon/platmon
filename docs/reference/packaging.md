@@ -59,6 +59,9 @@ Install Lintian on the build host with `sudo apt install lintian`. CI rejects it
 errors and warnings for both packaging revisions. This checks the binary package;
 the source archive is an upstream distribution, not a Debian source package with
 `debian/rules` or a `.dsc` file.
+Revision 1 includes a scoped Lintian override for `initial-upload-closes-no-bugs`:
+this upstream distribution is not an upload to the Debian archive and has no Debian
+Intent To Package bug. Other policy errors and warnings remain checked.
 
 ## Install and update
 

@@ -132,6 +132,9 @@ def build(output, revision="1", root=ROOT, epoch=None):
         copy_file(root / "packaging/debian/copyright", doc / "copyright")
         write_gzip((root / "packaging/debian/platmon.1").read_bytes(),
                    stage / "usr/share/man/man1/platmon.1.gz", epoch)
+        if revision == "1":
+            copy_file(root / "packaging/debian/lintian-overrides",
+                      stage / "usr/share/lintian/overrides/platmon")
         control = stage / "DEBIAN"
         control.mkdir()
         for name in ("preinst", "postinst", "prerm", "postrm", "conffiles"):
