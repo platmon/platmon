@@ -1,6 +1,6 @@
 """Passive network counters: per-interface totals of this process's network namespace from /proc/self/net/dev,
 and rates over the elapsed time between two consecutive readings. Read once per collection by the service's
-sampler thread; nothing is sent or probed. Contract: docs/network.md.
+sampler thread; nothing is sent or probed. Contract: docs/reference/network.md.
 """
 import hashlib
 import json
@@ -9,6 +9,7 @@ import socket
 import time
 
 from .sysfs import reason_of
+from .counters import counter, read_file
 
 PROVIDER = "proc_net_dev"
 SCOPE = "process_network_namespace"
@@ -18,7 +19,6 @@ NETNS = "/proc/self/ns/net"
 HEADER = ("bytes packets errs drop fifo frame compressed multicast".split(),
           "bytes packets errs drop fifo colls carrier compressed".split())
 COUNTERS = ("bytes", "packets", "errors", "dropped")  # per direction: positions 0-3 of its 8 fields
-MAX_COUNTER = 2**64 - 1
 IFNAMSIZ = 16  # Linux: a name is at most 15 bytes
 
 
@@ -31,14 +31,6 @@ def valid_name(name):
     here, so a name never puts control characters into the API or the log."""
     return (0 < len(name.encode()) < IFNAMSIZ and name not in (".", "..") and name.isprintable()
             and not any(c in "/:" or c.isspace() for c in name))
-
-
-def counter(text):
-    """An unsigned 64-bit counter in ASCII digits; ValueError otherwise (sign, decimals, other digits)."""
-    value = int(text) if text.isascii() and text.isdigit() else -1
-    if not 0 <= value <= MAX_COUNTER:
-        raise ValueError(text)
-    return value
 
 
 def parse(text):
@@ -81,11 +73,6 @@ def namespace_id(stat):
     return "netns1:" + hashlib.sha256(text.encode()).hexdigest()
 
 
-def read_file(path):
-    with open(path, "rb") as f:
-        return f.read()
-
-
 class NetworkCounters:
     """Kept by the service between collections, like common.CpuCounters: each sample() reads the counters
     once and compares every interface with its previous successful reading of the same namespace, index
@@ -101,7 +88,7 @@ class NetworkCounters:
         self._ns = None    # ((st_dev, st_ino), id) of the last successful lookup: the id is not hashed again
 
     def sample(self, group):
-        """(network output, read span or None). Read problems are noted in group (a sysfs.Group); a broken
+        """(network output, read span or None). Read problems are noted in group (a metadata.Group); a broken
         file gives no interfaces and clears every baseline. An unexpected exception clears them too and is
         raised, for the caller's guard."""
         try:

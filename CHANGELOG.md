@@ -14,7 +14,7 @@ API schema versions are independent of release versions.
   failures never reuse previous readings. GPU UUIDs identify history sources and choose one GPU
   consistently when more than one is present. Python runtime dependencies remain unchanged.
 - Power rails are kept in the recent history, as `power/<source id>` series in watts
-  (docs/history.md), and drawn in the web page's Power & battery view. They were the only numeric
+  (docs/reference/history.md), and drawn in the web page's Power & battery view. They were the only numeric
   group of `/api/stats` with no series at all, which left the rails — what a consumption reading is
   made of — impossible to read back over a window. A rail is identified by its `sensor_meta` source
   id exactly as a temperature channel is, so a renamed rail or a replaced chip starts a new series.
@@ -30,7 +30,7 @@ API schema versions are independent of release versions.
 ## 1.2.0 — 2026-10-11
 
 - Batteries and external power supplies are reported, as a low-frequency group `battery` at
-  `/api/observations` (docs/battery.md), on by default every 60 seconds. Per battery: charge percent,
+  `/api/observations` (docs/reference/battery.md), on by default every 60 seconds. Per battery: charge percent,
   the driver's status, the charge or energy family its gauge counts, voltage, current or power, cycle
   count and the wear its full charge shows against the design charge; per external supply, whether it
   is online. The web page shows them in a Battery card, the `platmon` live view in its Power & battery

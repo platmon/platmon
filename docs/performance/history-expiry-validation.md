@@ -110,7 +110,7 @@ internal points remain 21 at 1200/1800 s instead of growing to 40/60 under a 600
 
 ### Orin compose and support boundaries
 
-Existing Dockerfile + compose/Jetson override, local socket `unix:///var/run/docker.sock`,
+Existing deploy/docker/Dockerfile + compose/Jetson override, local socket `unix:///var/run/docker.sock`,
 ARM daemon 29.8.1 on the same 5.15.199-tegra kernel. Unique project/network
 `platmon-expiry-aac7ed7`, image `platmon:validation-aac7ed7`, loopback port 19871. Container
 Python 3.13.16, UID 65534, read-only rootfs and configured host mounts, cap-drop ALL, no-new-privileges; health is healthy.

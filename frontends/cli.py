@@ -3,7 +3,7 @@
 Standalone (standard library only); scripts/install-cli.sh installs it as the `platmon` command.
 
 Usage: platmon [host[:port]] [interval_sec] [--once]   (default localhost:9797, 1s)
-The service itself runs in the background: scripts/systemd/install.sh or scripts/docker/start.sh.
+The service itself runs in the background: deploy/systemd/install.sh or deploy/docker/start.sh.
 
 On an interactive terminal the live view is screen(): colored levels, a layout fitted to the terminal size,
 redrawn in place on the alternate screen. It shows one view at a time, as the web page's tabs do (VIEWS);
@@ -325,7 +325,7 @@ def render(s, obs=None):
 # The web page's defaults; use_levels() replaces them with the server's [thresholds] (/api/status "levels").
 LIMITS = {"cpu": (80, 90), "gpu": (80, 90), "memory": (80, 90), "filesystem": (80, 90), "temperature": None}
 # Servers from #57 on send the temperature level they use; this copy of platmon.py BOARD_TEMPERATURE serves
-# older ones that send none (tests/test_cli_screen.py checks that the two match).
+# older ones that send none (tests/frontends/test_cli_screen.py checks that the two match).
 TEMP_LIMITS = {"Jetson Orin": (85, 95), "Raspberry Pi": (75, 80)}
 SPARK_POINTS = 24
 WIDE = 100  # columns from which everything is on one screen; below, the overview and a few rows
@@ -1246,14 +1246,14 @@ def explain(addr, e):
     reason = getattr(e, "reason", e)
     if addr.rsplit(":", 1)[0] in ("localhost", "127.0.0.1"):
         return (f"platmon is not running on {addr} ({reason})\n"
-                "  start the service from the platmon repo: scripts/systemd/install.sh or scripts/docker/start.sh")
+                "  start the service from the platmon repo: deploy/systemd/install.sh or deploy/docker/start.sh")
     return f"cannot reach platmon at {addr} ({reason})\n  check that its service runs there and the port is reachable"
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="platmon", description="Live view of a platmon service (this device by default).",
-                                epilog="The service runs in the background: scripts/systemd/install.sh or "
-                                       "scripts/docker/start.sh in the platmon repo. In the live view 1-7, Tab "
+                                epilog="The service runs in the background: deploy/systemd/install.sh or "
+                                       "deploy/docker/start.sh in the platmon repo. In the live view 1-7, Tab "
                                        "or the arrow keys switch views and q quits. NO_COLOR=1 turns colors off; "
                                        "PLATMON_ASCII=1 draws with ASCII only.")
     p.add_argument("host", nargs="?", default="localhost", help=f"host[:port], default localhost:{PORT}")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """platmon server: start the collector core once, then the outputs enabled in the config (today: the HTTP API
-and web page). It runs as a background service (scripts/systemd, scripts/docker); look at it with the `platmon`
+and web page). It runs as a background service (deploy/systemd, deploy/docker); look at it with the `platmon`
 command (frontends/cli.py), a browser, or http://<host>:9797/text.
 
 Usage: python3 platmon.py [config.ini] [--frontends http]
@@ -18,12 +18,12 @@ from collector.common import CpuCounters
 from collector.disk_io import DiskCounters
 from collector.gpu import Gpu
 from collector.npu import Npu
-from collector.history import History
+from runtime.history import History
 from collector.network import NetworkCounters
 from collector.probe import Probe, parse_targets
 from collector.pressure import Pressure
-from collector.sampler import Sampler, pick_clock
-from collector.slow import Observations, Slow
+from runtime.sampler import Sampler, pick_clock
+from runtime.slow import Observations, Slow
 from collector.storage import Storage
 from collector.wifi import Wifi
 from frontends import server
@@ -108,7 +108,7 @@ def levels(cfg, platform=None):
 
 def load_config(path=None, frontends=None):
     """Defaults < config file < frontends (list of names; enables exactly those). Raises ValueError, also when
-    the result would start nothing: scripts/systemd/install.sh relies on this to refuse before changing anything."""
+    the result would start nothing: deploy/systemd/install.sh relies on this to refuse before changing anything."""
     cfg = configparser.ConfigParser(interpolation=None)
     cfg.read_dict({s: {k: ("yes" if v else "no") if isinstance(v, bool) else str(v) for k, v in o.items()}
                    for s, o in DEFAULTS.items()})
@@ -162,7 +162,7 @@ def main(argv=None):
     network = NetworkCounters(clock[0], max_gap=max(3 * interval, 5.0)) if cfg["network"].getboolean("enabled") else None
     # per physical disk I/O counters of the host, the same way
     disk_io = DiskCounters(clock[0], max_gap=max(3 * interval, 5.0)) if cfg["disk_io"].getboolean("enabled") else None
-    # pressure stall information, where the kernel provides it (see docs/pressure.md)
+    # pressure stall information, where the kernel provides it (see docs/reference/pressure.md)
     pressure = Pressure(clock[0]) if cfg["pressure"].getboolean("enabled") else None
     # the GPU of the standard DRM class, kept between collections because i915 publishes idle time
     graphics = Gpu(clock[0], max_gap=max(3 * interval, 5.0))
@@ -181,7 +181,7 @@ def main(argv=None):
             if cfg[name].getboolean("enabled")
             and (name != "probe" or parse_targets(cfg["probe"].get("targets")))]
     observations = Observations(slow, sampler.instance_id, clock[1])
-    # recent numbers of the published snapshots, in memory only (docs/history.md)
+    # recent numbers of the published snapshots, in memory only (docs/reference/history.md)
     history = None
     if cfg["history"].getboolean("enabled"):
         history = History(cfg["history"].getfloat("retention"), interval)

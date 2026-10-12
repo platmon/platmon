@@ -2,7 +2,7 @@
 (/sys/class/drm/cardN). What a card publishes depends on its driver, so one short reader per driver turns
 its attributes into the same fields; NVIDIA is queried when no supported DRM reader is available.
 Other cards are still reported with their driver name and no numbers. Tegra's GPU keeps its own
-source in collector/jetson.py, which is used first where it answers. Contract: docs/api.md.
+source in collector/jetson.py, which is used first where it answers. Contract: docs/reference/api.md.
 """
 import csv
 import math
@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import time
 
+from . import metadata
 from . import sysfs
 from .sysfs import driver_of, entries
 
@@ -110,7 +111,7 @@ class Gpu:
                     value = group.note(attr, "invalid_data")
             entry[key] = None if value is None else group.got(
                 round(value, 1) if key == "usage" else round(value * 10**6))
-            source = sysfs.source("nvidia-smi", "percent" if key == "usage" else "hertz",
+            source = metadata.source("nvidia-smi", "percent" if key == "usage" else "hertz",
                                   "device_channel", device=uuid.strip(), channel=attr)
             group.sensor(key, source, span if value is not None else None)
         return entry
@@ -155,4 +156,4 @@ class Gpu:
         if group.trace is None:
             return None
         rel = sysfs.canonical(path, self._root)
-        return sysfs.source("drm", unit, "resolved_path" if rel else "unresolved", path=rel)
+        return metadata.source("drm", unit, "resolved_path" if rel else "unresolved", path=rel)

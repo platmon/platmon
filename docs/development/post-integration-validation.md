@@ -1,7 +1,7 @@
 # Post-integration stabilization evidence (2026-10-09)
 
 Historical checkpoint for PR #45. Its changes are now incorporated into PR #46; consult
-[remaining-work.md](remaining-work.md) and [resumed results](../performance/resumed-integration-results.md)
+[remaining-work.md](remaining-work.md) and [resumed results](../performance/archive/resumed-integration-results.md)
 for the later ARM, Storage/Wi-Fi and container evidence. Earlier pending entries below are retained
 for provenance and are not the latest status.
 
@@ -44,7 +44,7 @@ before selecting a broader release candidate.
 | #42 after display fix | full local 655 passed / 3 skipped; focused History/Wi-Fi/web 53 passed |
 | #42 current CI | Python 3.9: 657 / 1; Python 3.13: 656 / 2; runs 37895515176, 37895520260 |
 | integrated code `ebf6509` | local 659 passed / 3 skipped; Python 3.9 CI 661 / 1, Python 3.13 660 / 2 (37895800355) |
-| web scripts | `node tests/web_harness.js frontends/web/index.html`, `web_optional_harness.js`, `web_history_age_harness.js`: pass |
+| web scripts | `node tests/frontends/web_harness.js frontends/web/index.html`, `web_optional_harness.js`, `web_history_age_harness.js`: pass |
 | whitespace | `git diff --check`: pass for each change |
 | browser | real Chromium 153, 1280 px and 390 px; both original #40 and combined History UI pass |
 | Pi systemd | `systemd-analyze verify` on the archived unit: pass; no installed unit changed or started |
@@ -79,7 +79,7 @@ rendering. The regression fails before the fix and passes after it. Collection/A
 Synthetic maximum History validation (64 series × 3602 points with gaps, one 600-point read/JSON):
 21,667,030 retained bytes, 27,937,318 peak bytes, 900,411-byte series JSON. These meet the 32/64 MiB
 allocation targets and preserve newest points/nulls. The earlier 22,505,990 / 28,765,190-byte result is
-retained in [history.md](../history.md). Neither result is daemon RSS or ARM retention evidence.
+retained in [history.md](../reference/history.md). Neither result is daemon RSS or ARM retention evidence.
 
 ## ARM evidence and open gates
 
@@ -136,7 +136,7 @@ Production remains `85259427f20ba09c9541c52970243fc07645d21d`. Orin's container
 unchanged in the captured states, as are their INI, instance IDs and power/governor settings. Orin's
 container is healthy. All original images and rollback directories remain. Existing rollback details
 are retained in [remaining-work.md](remaining-work.md#rollouts) and
-[release-readiness.md](../release-readiness.md#upgrade-and-rollout-for-after-approval-not-done).
+[release-readiness.md](../releases/readiness.md#upgrade-and-rollout-for-after-approval-not-done).
 
 Local raw evidence is under `.validation/post-integration-evidence/` and `.validation/pr40-browser/`.
 No private state dump is committed. Release selection must reconcile the pending board work and other

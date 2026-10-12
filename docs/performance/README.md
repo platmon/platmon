@@ -2,7 +2,7 @@
 
 Measurements of what the platmon service costs on the boards (Jetson Orin Nano, Raspberry Pi 4). Each
 report records the exact commit it measured; later code changes do not update old numbers. Start with the
-budget, then the current evidence. The release decision itself is in [release readiness](../release-readiness.md).
+budget, then the current evidence. The release decision itself is in [release readiness](../releases/readiness.md).
 
 ## Target
 
@@ -14,7 +14,7 @@ budget, then the current evidence. The release decision itself is in [release re
 - [history-expiry-validation.md](history-expiry-validation.md): the final validated runtime (`aac7ed7`),
   default and all-on CPU per board, history retention and memory. The default configuration has since
   turned every feature on; that configuration's 1.0.0 gate (every window <= 2.0 % on both boards) is in
-  [release readiness](../release-readiness.md#100-release-gate-2026-10-10).
+  [release readiness](../releases/readiness.md#100-release-gate-2026-10-10).
 - [network-product.md](network-product.md), [disk-io-product.md](disk-io-product.md): what Network and
   Disk I/O add to the default configuration.
 - [low-frequency.md](low-frequency.md): what Storage, Wi-Fi, the TCP connect probe and history cost.
@@ -26,12 +26,12 @@ budget, then the current evidence. The release decision itself is in [release re
 
 Kept for their raw data and history; their conclusions were replaced by the reports above.
 
-- [final-candidate-plan.md](final-candidate-plan.md), [final-candidate-results.md](final-candidate-results.md):
+- [final-candidate-plan.md](archive/final-candidate-plan.md), [final-candidate-results.md](archive/final-candidate-results.md):
   a candidate baseline from before the recovery-gap correction.
-- [recovery-gap-validation.md](recovery-gap-validation.md): replaced by history-expiry-validation.md after
+- [recovery-gap-validation.md](archive/recovery-gap-validation.md): replaced by history-expiry-validation.md after
   a further retention defect.
-- [resumed-integration-plan.md](resumed-integration-plan.md),
-  [resumed-integration-results.md](resumed-integration-results.md): the integration run before the final
+- [resumed-integration-plan.md](archive/resumed-integration-plan.md),
+  [resumed-integration-results.md](archive/resumed-integration-results.md): the integration run before the final
   candidate.
 
 ## Background studies

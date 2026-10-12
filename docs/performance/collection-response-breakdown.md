@@ -56,7 +56,7 @@ The reference runs reproduce D0: Orin B0 with one client 1.73 % (D0 1.75 %), Ras
   `from ... import`), restored on exit. Per unit (a collection on the sampler thread, a request on its
   worker thread, an accept on the listener thread) each stage records calls, inclusive elapsed time,
   inclusive thread CPU and self CPU (inclusive minus the stages nested in it). A stage that recurses into
-  itself counts once. `copy.deepcopy` and `json.dumps` are wrapped only where `collector.sampler` and
+  itself counts once. `copy.deepcopy` and `json.dumps` are wrapped only where `runtime.sampler` and
   `frontends.server` call them, so deepcopy's own recursion and the bench's own JSON are not counted.
   Totals go to fixed-size buffers when a unit ends, never per call.
 - **stages-lite**: the same without the per-value wrappers (`Group.read`, `Group.sensor`,

@@ -1,6 +1,6 @@
-"""Power supplies, a low-frequency observation (collector/slow.py): what the kernel last knew about each
+"""Power supplies, a low-frequency observation (runtime/slow.py): what the kernel last knew about each
 battery and each external supply, from /sys/class/power_supply. Passive: nothing is switched, charged,
-calibrated or reset, and no identifying string (serial number) is read. Contract: docs/battery.md.
+calibrated or reset, and no identifying string (serial number) is read. Contract: docs/reference/battery.md.
 
 Read on its own slow cadence, not in the core cycle. On an ACPI host every attribute of a battery comes
 from one firmware call behind the driver's 1 s cache (/sys/module/battery/parameters/cache_time): one
@@ -70,7 +70,7 @@ def unsigned(value):
 
 
 class Battery:
-    """observe(group) for collector/slow.py. The class directory is injectable for tests."""
+    """observe(group) for runtime/slow.py. The class directory is injectable for tests."""
 
     def __init__(self, root=ROOT):
         self._root = root

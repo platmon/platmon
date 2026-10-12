@@ -181,7 +181,7 @@ path, nl80211, RTT and container scope remain unverified.
 ### What runs
 
 `benchmarks/cadence.py serve` runs the product code of the fixed baseline unchanged, in one process:
-`collector.collect_recorded`, `collector.sampler.Sampler` and the HTTP handler of
+`collector.collect_recorded`, `runtime.sampler.Sampler` and the HTTP handler of
 `frontends/server.make_handler`, on `127.0.0.1`. The bench only wraps them:
 
 - **B0 (baseline)**: the product collection, followed by a timed no-op callback.
@@ -274,7 +274,7 @@ shortens every window for a smoke test of the tool; such runs are not results.
 - **Container scope.** Not run (time budget; lowest priority). In a bridge-network container
   `/proc/net/dev` lists the container's interfaces, not the host's, while `/proc/diskstats` is host-wide;
   how the product would observe host network I/O from a container is an open design question, and the
-  production compose files were not changed. To compare: build from the Dockerfile under a separate
+  production compose files were not changed. To compare: build from the deploy/docker/Dockerfile under a separate
   project, image tag and port, run `cadence.py run --phase final --final 2` inside, and record the
   interface and mount lists next to the numbers.
 - **PSI** on a kernel that has it (`/proc/pressure/*`): rerun `--phase matrix --intervals 1,2` there.

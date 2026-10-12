@@ -1,7 +1,0 @@
-# Jetson extras on top of compose.yaml: nvpmodel power mode.
-# docker compose -f compose.yaml -f compose.jetson.yaml up -d
-services:
-  platmon:
-    volumes:
-      - /var/lib/nvpmodel:/var/lib/nvpmodel:ro
-      - /etc/nvpmodel.conf:/etc/nvpmodel.conf:ro

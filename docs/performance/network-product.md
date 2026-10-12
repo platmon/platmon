@@ -1,6 +1,6 @@
 # Product Network off / on
 
-What the product's own Network collection ([../network.md](../network.md)) costs, measured as the same
+What the product's own Network collection ([../network.md](../reference/network.md)) costs, measured as the same
 product and bench code with `[network]` off (A) and on (B). Not the passive prototype: in these runs
 `benchmarks/passive.py` is never called, and its earlier numbers
 ([passive-cost-rebaseline.md](passive-cost-rebaseline.md), Network part 0.026 / 0.047 pp) are not used as

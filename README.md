@@ -23,9 +23,11 @@ command. Download a release's files from the GitHub Releases page (verify `SHA25
 the package from this checkout:
 
 ```sh
-python3 scripts/package.py --output dist/1.0.0-1
-python3 scripts/check_package.py dist/1.0.0-1/platmon_1.0.0-1_all.deb
-sudo apt install ./dist/1.0.0-1/platmon_1.0.0-1_all.deb
+platmon_version=$(python3 scripts/packaging/package.py --version)
+platmon_dist="dist/${platmon_version}-1"
+python3 scripts/packaging/package.py --output "$platmon_dist"
+python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_all.deb"
+sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_all.deb"
 platmon --version
 platmon --once
 ```
@@ -33,7 +35,7 @@ platmon --once
 Requires the host's Python 3.9+ and systemd. The package preserves edited
 `/etc/platmon/platmon.ini`; use APT to update, remove or purge it. Code is installed in
 `/usr/share/platmon`, and the client in `/usr/bin/platmon`. Existing source/Docker installs
-need the explicit migration procedure before installation. See [packaging and releases](docs/packaging.md)
+need the explicit migration procedure before installation. See [packaging and releases](docs/reference/packaging.md)
 for versions, checksums, migration, rollback and validation. Other Linux systems can use
 the versioned source archive and source scripts below.
 
@@ -67,17 +69,17 @@ from the data already in hand. `NO_COLOR=1` turns colors off; `PLATMON_ASCII=1` 
 the plain screen with every section, the same as `/text`; `--view` is for the live view only.
 
 If the service is not running, `platmon` says so and how to start it. On the device the command comes
-with the service: the Debian package puts it in `/usr/bin`, `scripts/systemd/install.sh` in `/usr/local/bin`, `scripts/docker/start.sh` in
+with the service: the Debian package puts it in `/usr/bin`, `deploy/systemd/install.sh` in `/usr/local/bin`, `deploy/docker/start.sh` in
 `~/.local/bin` (no sudo), and both update it when run again. On a PC that only watches devices, install
 just the command with `scripts/install-cli.sh` (or `--user`, no sudo); it is one standard-library Python
 file (`frontends/cli.py`).
 
 In a browser: `http://<host>:9797`. Without Python, from any machine with curl (Windows and macOS too):
 `watch -n1 curl -s <host>:9797/text` shows the same screen as `platmon`. Raw data: `http://<host>:9797/api/stats`, collector state:
-`http://<host>:9797/api/status` (fields and freshness rules: [docs/api.md](docs/api.md); per-interface
-network counters: [docs/network.md](docs/network.md); disk I/O counters: [docs/disk-io.md](docs/disk-io.md); storage capacity: [docs/storage.md](docs/storage.md); Wi-Fi signal:
-[docs/wifi.md](docs/wifi.md); battery and external power: [docs/battery.md](docs/battery.md); TCP connect probe to configured targets: [docs/probe.md](docs/probe.md); recent history:
-[docs/history.md](docs/history.md); pressure stall information: [docs/pressure.md](docs/pressure.md)). The API has no
+`http://<host>:9797/api/status` (fields and freshness rules: [docs/reference/api.md](docs/reference/api.md); per-interface
+network counters: [docs/reference/network.md](docs/reference/network.md); disk I/O counters: [docs/reference/disk-io.md](docs/reference/disk-io.md); storage capacity: [docs/reference/storage.md](docs/reference/storage.md); Wi-Fi signal:
+[docs/reference/wifi.md](docs/reference/wifi.md); battery and external power: [docs/reference/battery.md](docs/reference/battery.md); TCP connect probe to configured targets: [docs/reference/probe.md](docs/reference/probe.md); recent history:
+[docs/reference/history.md](docs/reference/history.md); pressure stall information: [docs/reference/pressure.md](docs/reference/pressure.md)). The API has no
 authentication. Run it on trusted networks only.
 
 If another machine cannot reach the service while the device itself answers (`curl -s localhost:9797/api/status`),
@@ -125,12 +127,23 @@ reports are current and which are superseded: [docs/performance](docs/performanc
 ### Layout
 
 ```
-platmon.py   server: config -> one collector core -> HTTP API and web page
-collector/   core: collect() (common.py for any Linux, jetson.py for Jetson) and the background Sampler
-frontends/   server.py (HTTP + web/), cli.py (terminal client, installed as `platmon`)
-scripts/     systemd/ and docker/ start/stop scripts, install-cli.sh
-tests/
+platmon.py          server configuration and startup
+collector/         platform detection, metric readers, collection records and metadata
+runtime/           background sampling, low-frequency observations and recent history
+frontends/         HTTP server, standalone terminal client and web HTML/CSS/JavaScript
+deploy/systemd/    source installation scripts and service unit
+deploy/docker/     Dockerfile, Compose configuration and start/stop scripts
+packaging/debian/  Debian control files and lifecycle hooks
+scripts/packaging/ package build and verification tools
+scripts/           standalone CLI installer
+benchmarks/        performance measurement tools
+tests/             collector/, runtime/, frontends/, packaging/ and benchmarks/
+docs/              reference/, development/, releases/ and performance/
 ```
+
+See the [architecture guide](docs/development/architecture.md) for module boundaries and the
+[documentation index](docs/README.md) for user contracts and development evidence. Source checkout
+commands use the paths above; installed commands, service names and configuration paths are unchanged.
 
 ### Run at boot
 
@@ -140,17 +153,17 @@ one way while the other is running (or, for systemd, still enabled at boot).
 **systemd from source** (the scripts ask for sudo; packaged installs use APT/systemctl):
 
 ```sh
-scripts/systemd/install.sh              # install or update (after git pull), enable at boot, start, add `platmon`
-scripts/systemd/start.sh                # start, or restart to apply config changes; checks /api/stats
-scripts/systemd/stop.sh                 # stop for now; still enabled, so it starts again at boot
-scripts/systemd/uninstall.sh            # stop, disable, remove /opt/platmon, the unit and `platmon`; keeps the config
-scripts/systemd/uninstall.sh --purge    # ... and remove /etc/platmon too
+deploy/systemd/install.sh              # install or update (after git pull), enable at boot, start, add `platmon`
+deploy/systemd/start.sh                # start, or restart to apply config changes; checks /api/stats
+deploy/systemd/stop.sh                 # stop for now; still enabled, so it starts again at boot
+deploy/systemd/uninstall.sh            # stop, disable, remove /opt/platmon, the unit and `platmon`; keeps the config
+deploy/systemd/uninstall.sh --purge    # ... and remove /etc/platmon too
 ```
 
 `install.sh` stages the complete code, then stops and replaces `/opt/platmon` and installs a
 unit adapted to that path in `/etc/systemd/system/`. A failed replacement or readiness check
 restores the previous code/unit; a successful update keeps the previous files in the printed
-recovery directory. See [rollback](docs/packaging.md#rollback). It creates
+recovery directory. See [rollback](docs/reference/packaging.md#rollback). It creates
 `/etc/platmon/platmon.ini` from `platmon.ini` only if that file does not exist yet, so your edits are
 kept. It checks the config first and changes nothing if it is invalid. Logs: `journalctl -u platmon`.
 The default port was 8080 before; an existing `/etc/platmon/platmon.ini` keeps its port, so edit it
@@ -161,18 +174,19 @@ The default port was 8080 before; an existing `/etc/platmon/platmon.ini` keeps i
 No image is published: build it yourself on the device (see "Container image licensing" below).
 `up` builds the image `platmon:local` from this checkout the first time; add `--build` after a `git pull`.
 On native Linux Docker Engine, the container uses host networking so Network and Wi-Fi see the
-host interfaces. It also needs read-only host mounts (all set in `compose.yaml`):
+host interfaces. It also needs read-only host mounts (all set in `deploy/docker/compose.yaml`):
 
 ```sh
-scripts/docker/start.sh    # build and start; on Jetson adds compose.jetson.yaml (nvpmodel power mode); waits until healthy
-scripts/docker/stop.sh     # stop and remove the container (the image stays)
+deploy/docker/start.sh    # build and start; on Jetson adds deploy/docker/compose.jetson.yaml (nvpmodel power mode); waits until healthy
+deploy/docker/stop.sh     # stop and remove the container (the image stays)
 ```
 
 `start.sh` also installs the `platmon` command in `~/.local/bin`; `stop.sh` leaves it, since it can watch other devices too
 (`scripts/install-cli.sh --user --uninstall` removes it).
 
-Without the scripts: `BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose up -d --build` (Jetson: add
-`-f compose.yaml -f compose.jetson.yaml`). The variable keeps the image id stable when nothing changed;
+Without the scripts: `BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -f deploy/docker/compose.yaml up -d --build` (Jetson: add
+`-f deploy/docker/compose.jetson.yaml` after the base `-f` option). Run from the checkout root.
+The variable keeps the image id stable when nothing changed;
 without it some Docker versions give every build a new id, and the running container's image can be
 deleted out from under it.
 
@@ -189,7 +203,7 @@ deleted out from under it.
   namespace or require privileged mode. A bridge-network override sees only its own interfaces.
 - Storage reads the host root via `/host/root`. Separate filesystems such as `/boot/efi` or an
   external data disk need explicit read-only directory binds; the root bind stays non-recursive.
-  See [Docker observation scope](docs/docker-scope.md) for the audited coverage and remaining limits.
+  See [Docker observation scope](docs/reference/docker-scope.md) for the audited coverage and remaining limits.
 - Runs as an unprivileged user, needs no NVIDIA container runtime, and is marked unhealthy while
   `/api/stats` has no current data.
 
@@ -199,7 +213,7 @@ platmon itself is Apache-2.0 and uses only the Python standard library. The imag
 `python:3.13-slim`, is Debian-based and contains GPL/LGPL software (e.g. bash, coreutils, apt,
 glibc), as any Linux base image does. So:
 
-- This repository ships only the `Dockerfile` and compose files; it does **not** publish images.
+- This repository ships only the `deploy/docker/Dockerfile` and compose files; it does **not** publish images.
   Building and running the image on your own machine is not distribution.
 - If you push an image you built to a registry or hand it to others, you distribute those
   components and take on their license obligations (offering the corresponding source, keeping

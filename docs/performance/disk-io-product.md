@@ -1,6 +1,6 @@
 # Product Disk I/O off / on
 
-What the product's Disk I/O collection ([../disk-io.md](../disk-io.md)) costs on top of the current
+What the product's Disk I/O collection ([../disk-io.md](../reference/disk-io.md)) costs on top of the current
 default configuration, judged by [budget.md](budget.md). A and B are the same product and bench code with
 `[disk_io]` off (A) and on (B); Network is on in both arms (it is on by default), and the passive prototype
 is never called.

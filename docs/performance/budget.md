@@ -156,7 +156,7 @@ first two were measured on this host; the third was assessed against the API and
   "Hottest of N sensors" then alternates between 26 and 28, the `platmon` screen's TEMP line gains and
   loses two entries from second to second, and the channel loses its history entirely: an identity that
   is not present every time never wins a slot back once `MAX_SERIES` is reached, because established
-  series win ties (`collector/history.py`, `_fitting`).
+  series win ties (`runtime/history.py`, `_fitting`).
 - Carrying the last value forward keeps the key and stops the flicker, but every snapshot that carries
   one falls back to `cycle_start_upper_bound`, its `sensor_meta` says `read: null`, and the service logs
   `a value without a valid read` about 700 times an hour. The snapshot would stop saying when its own

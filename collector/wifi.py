@@ -1,6 +1,6 @@
-"""Wi-Fi signal, a low-frequency observation (collector/slow.py): what the kernel last knew about each
+"""Wi-Fi signal, a low-frequency observation (runtime/slow.py): what the kernel last knew about each
 wireless interface's link, from /proc/net/wireless. Passive: no scan, no reconnect, no setting changed;
-SSID, BSSID and nearby access points are never read. Contract: docs/wifi.md.
+SSID, BSSID and nearby access points are never read. Contract: docs/reference/wifi.md.
 
 Format (net/wireless/wext-proc.c): "name: status link[.] level[.] noise[.] ...", where '.' marks a value
 updated since the last read and level / noise are dBm (negative) when the driver reports dBm, otherwise a
@@ -49,7 +49,7 @@ def parse(text):
 
 
 class Wifi:
-    """observe(group) for collector/slow.py."""
+    """observe(group) for runtime/slow.py."""
 
     def __init__(self, read=None, netns=lambda: os.stat(NETNS), indexes=socket.if_nameindex, link=None):
         self._read = read or _read

@@ -1,6 +1,6 @@
 """HTTP frontend: JSON at /api/stats, the sampler's runtime status at /api/status, the terminal view as plain
 text at /text (for curl and watch) and, when web is enabled, the web viewer at /. Started by platmon.py.
-Contract: docs/api.md."""
+Contract: docs/reference/api.md."""
 import json
 import os
 import threading
@@ -10,6 +10,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .cli import VERSION, render
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+WEB_ASSETS = {
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+}
 BRAND_ASSETS = {
     "/assets/brand/platmon-logo-light.svg": "platmon-logo-light.svg",
     "/assets/brand/platmon-logo-dark.svg": "platmon-logo-dark.svg",
@@ -36,8 +40,8 @@ def history_query(history, query):
 
 
 def make_handler(sampler, web=True, observations=None, history=None, levels=None):
-    """observations: the service's collector.slow.Observations (low-frequency groups), or None.
-    history: its collector.history.History, or None (then /api/history is 404).
+    """observations: the service's runtime.slow.Observations (low-frequency groups), or None.
+    history: its runtime.history.History, or None (then /api/history is 404).
     levels: the warning and critical levels from [thresholds], for the web page and /api/status, or None for
     the clients' defaults."""
     page_values = {b"@VERSION@": VERSION.encode(), b"@LEVELS@": json.dumps(levels or {}).encode()}
@@ -102,6 +106,10 @@ def make_handler(sampler, web=True, observations=None, history=None, levels=None
                     body, ctype = f.read(), "text/html; charset=utf-8"
                 for mark, value in page_values.items():
                     body = body.replace(mark, value)
+            elif web and self.path in WEB_ASSETS:
+                filename, ctype = WEB_ASSETS[self.path]
+                with open(os.path.join(WEB_DIR, filename), "rb") as f:
+                    body = f.read()
             elif web and self.path in BRAND_ASSETS:
                 with open(os.path.join(WEB_DIR, "assets", "brand", BRAND_ASSETS[self.path]), "rb") as f:
                     body, ctype = f.read(), "image/svg+xml"

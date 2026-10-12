@@ -3,8 +3,10 @@ import fnmatch
 import os
 import re
 
+from . import metadata
 from . import sysfs
-from .sysfs import entries, guard, host_path, hwmon_chips
+from .sysfs import entries, host_path, hwmon_chips
+from .metadata import guard
 
 
 # GPU devfreq device names per BSP (NVIDIA L4T docs): Orin R36 17000000.gpu (verified on an Orin Nano),
@@ -17,12 +19,12 @@ GPU_LOAD = ("devices/platform/gpu.0/load", "devices/gpu.0/load")
 def gpu(root="/sys", group=None):
     """GPU load and clocks. freq/max_freq are None (not 0) when the clock cannot be read.
     The load comes from the first candidate that reads; the others' failures only count if none does."""
-    g = group or sysfs.Group("gpu")
+    g = group or metadata.Group("gpu")
     # a devfreq listing failure also hides the clocks, so it is reported even when another path gives the load
-    listing = sysfs.Group("gpu")
+    listing = metadata.Group("gpu")
     devices = entries(f"{root}/class/devfreq", listing)
     g.merge(listing)
-    tried = sysfs.Group("gpu", g.trace)  # load candidates that failed: reported only if none gives the load
+    tried = metadata.Group("gpu", g.trace)  # load candidates that failed: reported only if none gives the load
     devfreq = next((f"{root}/class/devfreq/{n}" for pattern in GPU_DEVFREQ for n in devices
                     if fnmatch.fnmatchcase(n, pattern)), None)
     loads = ([f"{devfreq}/device/load"] if devfreq else []) + [f"{root}/{p}" for p in GPU_LOAD]
@@ -42,7 +44,7 @@ def gpu(root="/sys", group=None):
         if g.trace is None:
             return None
         rel = sysfs.canonical(path, root)
-        return sysfs.source("gpu", unit, "resolved_path" if rel else "unresolved", path=rel)
+        return metadata.source("gpu", unit, "resolved_path" if rel else "unresolved", path=rel)
 
     g.sensor("usage", src("percent", used), tried.span)  # only the candidate that gave the load
 
@@ -87,7 +89,7 @@ def l4t_release(text):
 def tach_fans(root="/sys/class/hwmon", group=None):
     """pwm_tach reports fan speed in a non-standard "rpm" file; its pwm half is the pwmfan chip.
     A chip with an rpm file that cannot be read is still listed, with rpm None."""
-    g = group or sysfs.Group("fans")
+    g = group or metadata.Group("fans")
     fans = []
     with guard(g):
         chips = hwmon_chips(root, g)
@@ -100,13 +102,13 @@ def tach_fans(root="/sys/class/hwmon", group=None):
             fans.append(fan)
             if g.trace:
                 basis, where = ids.get(d, ("unresolved", {}))
-                g.sensor((id(fan), "rpm"), sysfs.source("hwmon", "rpm", basis, **where, attr="rpm"), g.span)
+                g.sensor((id(fan), "rpm"), metadata.source("hwmon", "rpm", basis, **where, attr="rpm"), g.span)
     return fans
 
 
 def extend(stats, groups=None):
     """Fills the Jetson fields; each part notes in its group what it could not read."""
-    g = groups or sysfs.groups("gpu", "fans", "power_mode", "board_info")
+    g = groups or metadata.groups("gpu", "fans", "power_mode", "board_info")
     stats["power_mode"] = stats["gpu"] = None
     with guard(g["power_mode"]):
         status = g["power_mode"].read("/var/lib/nvpmodel/status", "status", parse=pmode)

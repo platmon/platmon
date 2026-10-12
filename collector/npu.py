@@ -2,11 +2,12 @@
 accelerators (/sys/class/accel/accelN, DRM accel). As with the GPU, the class is standard and the
 numbers are not, so one short reader per driver turns what it publishes into the same fields; an
 accelerator whose driver has no reader here is still reported, with its driver name and no numbers.
-Contract: docs/api.md.
+Contract: docs/reference/api.md.
 """
 import re
 import time
 
+from . import metadata
 from . import sysfs
 from .sysfs import driver_of, entries
 
@@ -72,4 +73,4 @@ class Npu:
         if group.trace is None:
             return None
         rel = sysfs.canonical(path, self._root)
-        return sysfs.source("accel", unit, "resolved_path" if rel else "unresolved", path=rel)
+        return metadata.source("accel", unit, "resolved_path" if rel else "unresolved", path=rel)

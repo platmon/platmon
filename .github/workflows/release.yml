@@ -43,7 +43,7 @@ jobs:
           import os
           from pathlib import Path
           import re
-          from scripts.package import version
+          from scripts.packaging.package import version
           release = version()
           tag = os.environ["GITHUB_REF_NAME"]
           match = re.fullmatch(r"v" + re.escape(release) + r"(?:-([1-9][0-9]*))?", tag)
@@ -57,8 +57,8 @@ jobs:
       - name: Build fixed-version release files
         env:
           REVISION: ${{ steps.version.outputs.revision }}
-        run: python3 scripts/package.py --revision "$REVISION"
-      - run: python3 scripts/check_package.py dist/*.deb
+        run: python3 scripts/packaging/package.py --revision "$REVISION"
+      - run: python3 scripts/packaging/check_package.py dist/*.deb
       - name: Verify checksums
         working-directory: dist
         run: sha256sum -c SHA256SUMS
