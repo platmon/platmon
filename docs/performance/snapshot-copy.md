@@ -78,7 +78,7 @@ Sampler._attempt
 
 ## What had to stay true
 
-| | contract | how it is kept | test (`tests/test_snapshot_copy.py`) |
+| | contract | how it is kept | test (`tests/runtime/test_snapshot_copy.py`) |
 | --- | --- | --- | --- |
 | 1 | a caller changing nested values of `read()`'s stats does not reach others | `read()` deep-copies | `test_callers_changing_nested_values_do_not_reach_others` |
 | 2 | the same for `sensor_meta` and its `read` spans | the same copy covers it | `test_sensor_meta_ids_and_reads_match_and_stay_owned` |
@@ -88,7 +88,7 @@ Sampler._attempt
 | 6-8 | ready, degraded (failed attempt or optional group), last good, stale (503), starting | the same state code; no body exactly where `read()` gives none | `test_status_and_absence_match_read` (7 cases) |
 | 9 | the same snapshot read twice: ages from the request time | ages are computed per call, as before | `test_same_snapshot_twice_ages_move` |
 | 10 | JSON Pointers, source ids, identity bases, data age basis | the same values serialized | `test_sensor_meta_ids_and_reads_match_and_stay_owned` |
-| 11 | `/api/status`, `/text`, codes, headers | unchanged code paths; existing `tests/test_server.py` | all server tests pass unchanged (one test helper also skips the first-snapshot wait for `_stats_json`) |
+| 11 | `/api/status`, `/text`, codes, headers | unchanged code paths; existing `tests/frontends/test_server.py` | all server tests pass unchanged (one test helper also skips the first-snapshot wait for `_stats_json`) |
 | 12 | generic collectors: tuples, dict subclasses, shared objects | `read()` still deep-copies them as before; the HTTP JSON equals `json.dumps(read())` | `test_generic_collector_values`, `test_unserializable_values_fail_as_before` |
 | - | same bytes | with the same clock reading, `_stats_json()` equals `json.dumps(read()[0])` byte for byte, key order included | `test_stats_json_is_read_serialized` |
 | - | the snapshot is not changed by serving | the record before and after repeated reads is equal and the same object | `test_serializing_does_not_change_the_snapshot` |

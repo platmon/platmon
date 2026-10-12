@@ -17,7 +17,7 @@ Lightweight platform monitor (board/system status) for Jetson, Raspberry Pi, PCs
 - Forbidden: GPL, LGPL, AGPL (e.g. jetson-stats/jtop), unlicensed or unknown-license code.
 - Check the license before adding any dependency, including transitive ones. Do not copy code from forbidden sources.
 - Read system data directly from `/proc`, `/sys`, or `tegrastats` output. Call `tegrastats` at runtime; never bundle NVIDIA binaries.
-- Containers: ship only the `Dockerfile` and compose files; users build the image themselves. Never publish images (registry pushes, CI publishing): every base image carries GPL/LGPL userland. Use a plain Python base, never an NVIDIA L4T image. See README "Container image licensing".
+- Containers: ship only the `deploy/docker/Dockerfile` and compose files; users build the image themselves. Never publish images (registry pushes, CI publishing): every base image carries GPL/LGPL userland. Use a plain Python base, never an NVIDIA L4T image. See README "Container image licensing".
 
 ## Scope
 

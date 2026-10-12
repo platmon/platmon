@@ -126,7 +126,7 @@ mean of the four B0 runs; spread = largest - smallest run of one variant.
 ## Table 3 — passive parts, diagnostic
 
 B1, 0 clients, each guarded call timed on the `Passive` instance (`_guarded` included, so failed and
-unsupported lookups are timed too; nothing is read twice; tested in `tests/test_bench_cadence.py`). Means
+unsupported lookups are timed too; nothing is read twice; tested in `tests/benchmarks/test_bench_cadence.py`). Means
 of the two passive-parts runs; CPU % of one core = the window's summed thread CPU of that part / elapsed.
 
 | board | part | support | calls (per run) | CPU % (sum) | CPU mean ms | elapsed p50 / p95 ms | share of the parts |

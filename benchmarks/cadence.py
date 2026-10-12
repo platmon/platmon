@@ -51,7 +51,7 @@ PART_STATES = {"ok": 1, "unsupported": 2, "error": 3}
 LOCAL_FS = ("ext4", "ext3", "ext2", "xfs", "btrfs", "f2fs", "vfat", "exfat")  # statvfs allowlist by type
 
 
-# ---- calculations (tested in tests/test_bench_cadence.py) ----
+# ---- calculations (tested in tests/benchmarks/test_bench_cadence.py) ----
 
 def cpu_pct_one_core(start, end, elapsed_s):
     """Process CPU (user+system) over elapsed_s as % of ONE core; never divided by the CPU count."""
@@ -100,9 +100,11 @@ def sha256_files(paths):
 
 
 def source_hash():
-    """The product code the bench runs (collector, frontends, platmon.py)."""
-    return sha256_files(glob.glob(f"{ROOT}/collector/*.py") + glob.glob(f"{ROOT}/frontends/*.py")
-                        + glob.glob(f"{ROOT}/frontends/web/index.html") + [f"{ROOT}/platmon.py"])
+    """The product code the bench runs (collector, runtime, frontends, platmon.py)."""
+    return sha256_files(glob.glob(f"{ROOT}/collector/*.py") + glob.glob(f"{ROOT}/runtime/*.py")
+                        + glob.glob(f"{ROOT}/frontends/*.py")
+                        + glob.glob(f"{ROOT}/frontends/web/index.html")
+                        + glob.glob(f"{ROOT}/frontends/web/*.js") + glob.glob(f"{ROOT}/frontends/web/*.css") + [f"{ROOT}/platmon.py"])
 
 
 def bench_hash():
@@ -255,7 +257,7 @@ def serve(a):
     from collector.common import CpuCounters
     from collector.disk_io import DiskCounters
     from collector.network import NetworkCounters
-    from collector.sampler import Sampler, pick_clock
+    from runtime.sampler import Sampler, pick_clock
     from frontends import server
 
     cap = int((a.warmup + a.measure) / a.interval) + 64
@@ -402,11 +404,11 @@ def serve(a):
     installed.close()
     stats = sampler.read()[0] or {}
     if a.product_network:  # an off part is read once after the window, never inside it, for the scope only
-        from collector import sysfs
+        from collector import metadata
         net = (stats.get("network") or {"scope": {"id": None}, "interfaces": []} if a.product_network == "on"
-               else NetworkCounters().sample(sysfs.Group("network"))[0])
+               else NetworkCounters().sample(metadata.Group("network"))[0])
         disk = None if not a.product_disk else (stats.get("disk_io") or {"disks": []} if a.product_disk == "on"
-                                                 else DiskCounters().sample(sysfs.Group("disk_io"))[0])
+                                                 else DiskCounters().sample(metadata.Group("disk_io"))[0])
         scope = product_scope(stats, net, disk)
     else:
         scope = scope_of(stats, Passive()() if a.variant == "B0" else stats.get("_bench_passive", {}))

@@ -1,7 +1,7 @@
-"""Storage capacity, a low-frequency observation (collector/slow.py): the partitions of the physical disks
+"""Storage capacity, a low-frequency observation (runtime/slow.py): the partitions of the physical disks
 and the size, use and free space of local block-backed filesystems. Reads /proc/partitions and
 /proc/self/mountinfo once and calls statvfs once per filesystem; never reads a block device, mounts or
-changes anything. Contract: docs/storage.md.
+changes anything. Contract: docs/reference/storage.md.
 """
 import os
 import errno
@@ -93,7 +93,7 @@ def filesystem_capacity(path, device):
 
 
 class Storage:
-    """observe(group) for collector/slow.py. Paths and lookups are injectable for tests."""
+    """observe(group) for runtime/slow.py. Paths and lookups are injectable for tests."""
 
     def __init__(self, read=None, statvfs=filesystem_capacity, parent=parent_of, physical=is_physical):
         self._read, self._statvfs, self._parent, self._physical = read or read_text, statvfs, parent, physical

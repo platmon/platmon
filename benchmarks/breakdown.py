@@ -121,15 +121,16 @@ def _shim(module, **replace):
 def targets():
     """(owner, attribute, stage name) of every product call site timed in stages mode. A function imported
     by name into several modules is wrapped at each, under one stage name."""
-    import collector
-    from collector import common, jetson, sampler, sysfs
+    from collector import core as collector
+    from collector import common, jetson, metadata, sysfs
+    from runtime import sampler
     from frontends import server
     return [
         # collection, by part
         (collector, "_collect", "collect._collect"),
         (collector, "sensor_entries", "collect.sensor_entries"),
-        (sysfs, "groups", "collect.groups"),
-        (sysfs, "summarize", "collect.summarize"),
+        (metadata, "groups", "collect.groups"),
+        (metadata, "summarize", "collect.summarize"),
         (common, "collect", "common.collect"),
         (common.CpuCounters, "sample", "common.cpu_sample"),
         (common, "thermal_zones", "common.thermal_zones"),
@@ -141,9 +142,9 @@ def targets():
         (jetson, "gpu", "jetson.gpu"),
         (jetson, "tach_fans", "jetson.tach_fans"),
         # collection, by kind of work (nested inside the parts above)
-        (sysfs.Group, "read", "work.Group.read"),
-        (sysfs.Group, "sensor", "work.Group.sensor"),
-        (sysfs.Group, "status", "work.Group.status"),
+        (metadata.Group, "read", "work.Group.read"),
+        (metadata.Group, "sensor", "work.Group.sensor"),
+        (metadata.Group, "status", "work.Group.status"),
         (sysfs, "entries", "work.entries"),
         (common, "entries", "work.entries"),
         (jetson, "entries", "work.entries"),
@@ -152,7 +153,7 @@ def targets():
         (jetson, "hwmon_chips", "work.hwmon_chips"),
         (sysfs, "chip_identities", "work.chip_identities"),
         (sysfs, "canonical", "work.canonical"),
-        (sysfs, "source", "work.source"),
+        (metadata, "source", "work.source"),
         # Sampler
         (sampler.Sampler, "_provenance", "sampler._provenance"),
         (sampler.Sampler, "_check", "sampler._check"),

@@ -1,14 +1,14 @@
 # Low-frequency groups and history: cost
 
-What the opt-in groups of [../observations.md](../observations.md) (storage, Wi-Fi, TCP connect probe) and
-the recent history ([../history.md](../history.md)) cost, judged by [budget.md](budget.md). All of them are
+What the opt-in groups of [../observations.md](../reference/observations.md) (storage, Wi-Fi, TCP connect probe) and
+the recent history ([../history.md](../reference/history.md)) cost, judged by [budget.md](budget.md). All of them are
 **off by default**, so none of this enters the default configuration's 2.0 % target.
 
 Post-integration audit: the new #42 observation identity/gap implementation still needs real ARM
 retention and changed Wi-Fi cost evidence. Its cached latest-point age fix is in `9555c23`. A synthetic
 64 × 3602-point test with frequent gaps retained 21,667,030 bytes and peaked at 27,937,318 bytes including
 one 600-point read/JSON (900,411 bytes for the series object). This is Python 3.12 allocation accounting,
-**not ARM RSS**. The original 22.5/28.8 MB synthetic result remains in [history.md](../history.md).
+**not ARM RSS**. The original 22.5/28.8 MB synthetic result remains in [history.md](../reference/history.md).
 The new physical-board attempt was interrupted because another suite overlapped; no result from that
 attempt is counted. See [current validation gates](../development/post-integration-validation.md).
 All measured costs below remain attached to their original SHAs; Storage/Wi-Fi p95 misses are unchanged.
@@ -34,7 +34,7 @@ samples, with `benchmarks/slow_cost.py` on each board, natively, in its own proc
   pass over mountinfo, statvfs); Wi-Fi is mostly waiting: its elapsed time is 3–8 times its CPU time, the
   kernel asking the wireless driver for station data. Both run on their own group thread, so neither
   delays the 1 s core collection or HTTP answers (tested with a blocked group,
-  `tests/test_storage.py::test_http_answers_while_a_group_is_blocked_and_stale`); the criterion is recorded
+  `tests/collector/test_storage.py::test_http_answers_while_a_group_is_blocked_and_stale`); the criterion is recorded
   as not met, not waived. Both stay off by default.
 - Storage had one optimization round with a concrete cause (round 1, `eda772f`: every mountinfo line was
   unescaped and converted; round 2 converts only local disk filesystem lines): thread CPU mean 3.07 →
@@ -46,7 +46,7 @@ samples, with `benchmarks/slow_cost.py` on each board, natively, in its own proc
   143 KiB, `points=600` 424 KiB; the web page asks for 120 points every 10 s.
 
 The integrated service (all groups and history on, polled like the web page) is in
-[../release-readiness.md](../release-readiness.md).
+[../release-readiness.md](../releases/readiness.md).
 
 ## Runs
 
@@ -77,7 +77,7 @@ the runs is the same (round 1: a record before only). Raw files stay on the devi
 
 ## Resumed combined path
 
-The [2026-10-09 resumed results](resumed-integration-results.md) supersede earlier cost claims for
+The [2026-10-09 resumed results](archive/resumed-integration-results.md) supersede earlier cost claims for
 Storage descriptor verification, Wi-Fi carrier checks and low-frequency history. Runtime `e919baf`:
 20 Storage calls at 30 s and 60 Wi-Fi calls at 5 s per board; 660 s real history retention plus two
 integrated ABBA blocks. All remain optional. The finite retention run does not prove a long-term

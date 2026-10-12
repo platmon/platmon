@@ -1,11 +1,11 @@
 """Passive disk I/O counters: per physical disk totals from /proc/diskstats and rates over the elapsed time
 between two consecutive readings. Read once per collection by the service's sampler thread; nothing is
-written, probed or timed with a test load. Contract: docs/disk-io.md.
+written, probed or timed with a test load. Contract: docs/reference/disk-io.md.
 """
 import os
 import time
 
-from .network import counter, read_file
+from .counters import counter, read_file
 from .sysfs import reason_of
 
 PROVIDER = "proc_diskstats"

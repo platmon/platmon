@@ -20,8 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from benchmarks.cadence import bench_hash, dist, source_hash, statm_rss  # noqa: E402
-from collector.sampler import pick_clock  # noqa: E402
-from collector.slow import Slow  # noqa: E402
+from runtime.sampler import pick_clock  # noqa: E402
+from runtime.slow import Slow  # noqa: E402
 from collector.storage import Storage  # noqa: E402
 from collector.wifi import Wifi  # noqa: E402
 

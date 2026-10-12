@@ -7,8 +7,10 @@ import re
 import shutil
 import time
 
+from . import metadata
 from . import sysfs
-from .sysfs import DEVICE_TREE, HOST_ROOT, entries, guard, host_path, hwmon_chips, numbered, read
+from .sysfs import DEVICE_TREE, HOST_ROOT, entries, host_path, hwmon_chips, numbered, read
+from .metadata import guard
 
 
 def unique_key(table, key, d):
@@ -22,9 +24,9 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None, skip_devices=()
     hwmon children are already read elsewhere. A thermal zone's hwmon twin is left out by its path,
     because the kernel may name it after the zone type or after the zone itself (acpitz_0); the name
     stays the fallback for a tree whose paths do not resolve, e.g. a container's partial /sys mount.
-    groups: the temperature/power/fans sysfs.Group to note unreadable channels in; a channel that cannot be
+    groups: the temperature/power/fans metadata.Group to note unreadable channels in; a channel that cannot be
     read is left out (a fan's unreadable rpm or pwm is None), the others are kept."""
-    g = groups or sysfs.groups("temperature", "power", "fans")
+    g = groups or metadata.groups("temperature", "power", "fans")
     temp_g, power_g, fan_g = g["temperature"], g["power"], g["fans"]
     temps, power, fans = {}, {}, []
     track = temp_g.trace is not None  # the service records each value's source and read span
@@ -42,7 +44,7 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None, skip_devices=()
             basis, where = ids.get(d, ("unresolved", {}))
 
             def src(unit, **attr):
-                return sysfs.source("hwmon", unit, basis, **where, **attr) if track else None
+                return metadata.source("hwmon", unit, basis, **where, **attr) if track else None
             # one listing per chip for all its channels; if it cannot be listed, this chip is left out
             names = entries(d, temp_g, power_g, fan_g, listed=True)
 
@@ -109,8 +111,8 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None, skip_devices=()
 def thermal_zones(root="/sys/class/thermal", group=None):
     """Zone temps, the zone types their hwmon twins may be named after (kernel turns "-" into "_"), and the
     zones' resolved paths; hwmon_sensors leaves the twins out by both.
-    group: the temperature sysfs.Group; inactive zones (ENODATA) count as no_data, not as errors."""
-    g = group or sysfs.Group("temperature")
+    group: the temperature metadata.Group; inactive zones (ENODATA) count as no_data, not as errors."""
+    g = group or metadata.Group("temperature")
     temps, zone_types, zone_paths = {}, set(), set()
     sysroot = os.path.dirname(os.path.dirname(root))
     with guard(g):
@@ -131,7 +133,7 @@ def thermal_zones(root="/sys/class/thermal", group=None):
                     key += f" ({os.path.basename(z)})"
                 temps[key] = g.got(t / 1000)
                 if g.trace:
-                    g.sensor(key, sysfs.source("thermal", "celsius", "resolved_path" if rel else "unresolved",
+                    g.sensor(key, metadata.source("thermal", "celsius", "resolved_path" if rel else "unresolved",
                                                path=rel, attr="temp"), span)
     return temps, zone_types, zone_paths
 
@@ -247,13 +249,13 @@ def collect(cpu=None, groups=None, trace=None):
     """Fields every host has. gpu and power_mode stay None unless a board module fills them.
     cpu: the service's CpuCounters. Without one (a one-off call) the CPU usage comes from two readings
     250 ms apart with a baseline of its own.
-    groups: sysfs.Group per optional group, for collectors; without them this call reports its own.
+    groups: metadata.Group per optional group, for collectors; without them this call reports its own.
     CPU counters, memory, disk and identity are required: their failures raise. The optional parts
     (CPU clocks, temperatures, power, fans) note what they could not read and the rest is kept.
-    trace: the service's sysfs.Trace (shares cpu's clock); it gets the required reads' spans."""
+    trace: the service's metadata.Trace (shares cpu's clock); it gets the required reads' spans."""
     own = groups is None
     if own:
-        groups = sysfs.groups("cpu_frequency", "temperature", "power", "fans")
+        groups = metadata.groups("cpu_frequency", "temperature", "power", "fans")
     if cpu is None:
         cpu = CpuCounters(mode="oneshot")
         cpu.sample()
@@ -270,7 +272,7 @@ def collect(cpu=None, groups=None, trace=None):
             f = freq_g.read(f"/sys/devices/system/cpu/cpu{n}/cpufreq/scaling_cur_freq", f"cpu{n}")
             freqs[n] = None if f is None else freq_g.got(f * 1000)  # kHz
             if freq_g.trace:  # logical CPU n, not its position in the list
-                freq_g.sensor(n, sysfs.source("cpufreq", "hertz", "device_channel", cpu=n, attr="scaling_cur_freq"),
+                freq_g.sensor(n, metadata.source("cpufreq", "hertz", "device_channel", cpu=n, attr="scaling_cur_freq"),
                               freq_g.span)
 
     temps, zone_types, zone_paths = thermal_zones(group=groups["temperature"])
@@ -299,5 +301,5 @@ def collect(cpu=None, groups=None, trace=None):
         "temperature": temps,
         "power": power,
         "fans": fans,
-        **({"collectors": sysfs.summarize(groups)} if own else {}),
+        **({"collectors": metadata.summarize(groups)} if own else {}),
     }

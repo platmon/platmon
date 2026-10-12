@@ -1,7 +1,7 @@
 # Remaining work
 
 The latest status updates (container visibility and Pi PSI, default enablement policy, 2026-10-09) and
-the release evidence are kept in one place: [release readiness](../release-readiness.md). This file tracks the
+the release evidence are kept in one place: [release readiness](../releases/readiness.md). This file tracks the
 staged plan, checkpoints, rollouts and device records.
 
 Status of the staged plan (Disk I/O → UI → storage capacity → PSI → Wi-Fi → RTT → history → release
@@ -85,7 +85,7 @@ Main is unchanged at `e1e7c9f38bfac83e9844ddb8110a9eae08a7fb5a`. Production on b
 
 PR #45 (`integration/post-integration-rc`, `8df75e8`) was reconciled into #46, retaining its UI/tests/bench
 improvements and this task's Storage/Wi-Fi fixes. Its earlier open-gate report is historical context;
-[resumed results](../performance/resumed-integration-results.md) supersede the pending ARM entries.
+[resumed results](../performance/archive/resumed-integration-results.md) supersede the pending ARM entries.
 #42 depends on #41; #44 depends on #42; #46 includes #40–#45. Review component diffs against their PR
 bases, not the full aggregate as a new feature. No force-push, main merge or commit rewrite.
 
@@ -161,7 +161,7 @@ Production rollout and release publication remain unapproved.
 | 5 | Wi-Fi signal (passive) | merged; off (elapsed p95 above 2 ms) | #36 | Orin/Pi functional and cost |
 | 6 | TCP connect probe | merged; off; no approved remote targets | #37 | loopback and fakes only |
 | 7 | Recent history | merged; off | #38 | memory bound, integrated runs |
-| 8 | Integration, release readiness | merged with this page | #39 | integrated service on Orin/Pi ([release-readiness.md](../release-readiness.md)) |
+| 8 | Integration, release readiness | merged with this page | #39 | integrated service on Orin/Pi ([release-readiness.md](../releases/readiness.md)) |
 
 Not rolled out: #32–#38 (the devices run `8525942`, #31). Rolling them out is a separate decision.
 
@@ -182,7 +182,7 @@ the reasons do not have to be rediscovered. None of them is a defect in what shi
 A host can have its charge reported by a separate device — a power board, a controller — rather than by
 the kernel's class, with another program on the host already reading that device. Such a source would sit
 ahead of `/sys/class/power_supply` in the same group, chosen the way the GPU's sources already are
-([api.md](../api.md), "Where one value has several sources"), with `provider` saying which one answered
+([api.md](../reference/api.md), "Where one value has several sources"), with `provider` saying which one answered
 and the field model this group defines staying as it is.
 
 It would stay a source platmon **reads**, not one that pushes to it. Three reasons:
@@ -223,6 +223,6 @@ None of them is deleted by this work; removing old ones is the owner's decision.
 
 ```bash
 pytest                                        # all tests; CI runs the same on Python 3.9 and 3.13
-node tests/web_harness.js frontends/web/index.html
+node tests/frontends/web_harness.js frontends/web/index.html
 git diff --check
 ```

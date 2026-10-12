@@ -108,7 +108,7 @@ so it is the change.
 | the tree changes during the call | neither way is a snapshot. The order keeps the path as the last observation in both; a change after it is seen by the next collection |
 | paths across mount changes, procfs links and other special files | not verified: the `/proc/self/fd` text is the kernel's view of an open file and can differ from a lexical `realpath` there. platmon resolves only sysfs paths, but no test covers these cases |
 
-Tests (`tests/test_provenance.py`): the new and the portable way agree for aliases, a link in the middle
+Tests (`tests/collector/test_provenance.py`): the new and the portable way agree for aliases, a link in the middle
 of a path, a root given through a symlink, `.`/`..` in the path, missing, dangling, looping,
 file-as-directory, outside the root; the same answers without `O_PATH` or `/proc`; a retargeted link
 resolves to its new device; an unresolved path recovers; a second node on a device switches both to
@@ -116,5 +116,5 @@ path identity and back when it goes; a node removed, or a link retargeted, betwe
 gives `None` / the new target. The existing identity tests (label change keeps the id, a
 renumbered `hwmonN` keeps its device id, virtual devices are path-based) pass unchanged. On the boards
 themselves, every path of a real collection resolved the same both ways (Orin 34 calls over two
-collections, Raspberry Pi 6), and the Orin ran `tests/test_provenance.py` (73 passed; the Raspberry Pi has
+collections, Raspberry Pi 6), and the Orin ran `tests/collector/test_provenance.py` (73 passed; the Raspberry Pi has
 no pytest and none was installed).

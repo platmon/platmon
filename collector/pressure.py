@@ -1,6 +1,6 @@
 """Pressure stall information (PSI) from /proc/pressure: the kernel's own averages of the time tasks waited
 for CPU, memory and I/O. Read once per collection by the service's sampler thread. Contract:
-docs/pressure.md (format: Documentation/accounting/psi.rst).
+docs/reference/pressure.md (format: Documentation/accounting/psi.rst).
 """
 import os
 import re

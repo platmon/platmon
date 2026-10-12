@@ -1,7 +1,7 @@
-"""TCP connect time to configured targets, a low-frequency observation (collector/slow.py). Active: it opens
+"""TCP connect time to configured targets, a low-frequency observation (runtime/slow.py). Active: it opens
 a TCP connection to each target and closes it at once. Enabled by default, but idle without
 targets listed in the config. This is the time to complete a TCP handshake (the SYN / SYN-ACK round trip
-plus the target's accept), not an ICMP echo round trip. Contract: docs/probe.md.
+plus the target's accept), not an ICMP echo round trip. Contract: docs/reference/probe.md.
 """
 import collections
 import errno
@@ -67,7 +67,7 @@ def _reason(code):
 
 
 class Probe:
-    """observe(group) for collector/slow.py: one attempt per target per observation, one after another.
+    """observe(group) for runtime/slow.py: one attempt per target per observation, one after another.
     Keeps the last WINDOW results per target for the failure share."""
 
     def __init__(self, targets, timeout=2.0, connect=connect_ms):
