@@ -1,0 +1,7 @@
+platmon (@VERSION@) unstable; urgency=medium
+
+  * Include Debian copyright metadata, compressed changelogs and a CLI manual.
+  * Use this changelog date for reproducible default build timestamps.
+  * Include package file checksums and check package policy with Lintian.
+
+ -- Jinwoo Sung <jwsung91@users.noreply.github.com>  Tue, 13 Oct 2026 07:00:00 +0900

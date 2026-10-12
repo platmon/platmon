@@ -3,7 +3,7 @@ set -eu
 case "$1" in
     configure)
         # Validate the preserved config before enabling or restarting any service.
-        /usr/bin/python3 -B -c '
+        python3 -B -c '
 import sys
 sys.path.insert(0, "/usr/share/platmon")
 from platmon import load_config

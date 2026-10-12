@@ -6,6 +6,7 @@ No interpreter, OS software, build tools or hardware binaries are bundled.
 """
 import argparse
 import ast
+from email.utils import parsedate_to_datetime
 import gzip
 import hashlib
 import io
@@ -54,6 +55,26 @@ def copy_file(source, target, executable=False):
     target.chmod(0o755 if executable else 0o644)
 
 
+def packaging_epoch(root=ROOT):
+    """Keep the default timestamp in the source archive, independent of Git."""
+    changelog = (root / "packaging/debian/changelog").read_text(encoding="utf-8")
+    for line in changelog.splitlines():
+        if line.startswith(" -- "):
+            date = parsedate_to_datetime(line.rsplit("  ", 1)[-1])
+            if date.tzinfo is None:
+                raise ValueError("packaging changelog date must include a timezone")
+            return int(date.timestamp())
+    raise ValueError("packaging changelog must include a dated maintainer signature")
+
+
+def write_gzip(body, target, epoch):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=epoch, compresslevel=9) as gz:
+            gz.write(body)
+    target.chmod(0o644)
+
+
 def source_archive(root, output, release, epoch):
     # Fixed ownership, permissions, order and times make repeat builds comparable.
     with output.open("wb") as raw:
@@ -68,10 +89,12 @@ def source_archive(root, output, release, epoch):
                     archive.addfile(info, io.BytesIO(body))
 
 
-def build(output, revision="1", root=ROOT, epoch=0):
+def build(output, revision="1", root=ROOT, epoch=None):
     release = version(root)
     if not re.fullmatch(r"[1-9][0-9]*", revision):
         raise ValueError("revision must be a positive integer")
+    if epoch is None:
+        epoch = packaging_epoch(root)
     if epoch < 0 or epoch > 4294967295:
         raise ValueError("SOURCE_DATE_EPOCH must fit an unsigned 32-bit timestamp")
     output = Path(output).resolve()
@@ -99,14 +122,29 @@ def build(output, revision="1", root=ROOT, epoch=0):
         copy_file(root / "deploy/systemd/platmon.service", stage / "usr/lib/systemd/system/platmon.service")
         copy_file(root / "platmon.ini", stage / "etc/platmon/platmon.ini")
         doc = stage / "usr/share/doc/platmon"
-        for name in ("README.md", "CHANGELOG.md"):
-            copy_file(root / name, doc / name)
-        copy_file(root / "docs/reference/packaging.md", doc / "packaging.md")
-        copy_file(root / "LICENSE", doc / "copyright")
+        for source_path, name in ((root / "README.md", "README.md.gz"),
+                                  (root / "CHANGELOG.md", "changelog.gz"),
+                                  (root / "docs/reference/packaging.md", "packaging.md.gz")):
+            write_gzip(source_path.read_bytes(), doc / name, epoch)
+        changelog = (root / "packaging/debian/changelog").read_text(encoding="utf-8")
+        write_gzip(changelog.replace("@VERSION@", deb_version).encode("utf-8"),
+                   doc / "changelog.Debian.gz", epoch)
+        copy_file(root / "packaging/debian/copyright", doc / "copyright")
+        write_gzip((root / "packaging/debian/platmon.1").read_bytes(),
+                   stage / "usr/share/man/man1/platmon.1.gz", epoch)
+        if revision == "1":
+            copy_file(root / "packaging/debian/lintian-overrides",
+                      stage / "usr/share/lintian/overrides/platmon")
         control = stage / "DEBIAN"
         control.mkdir()
         for name in ("preinst", "postinst", "prerm", "postrm", "conffiles"):
             copy_file(root / "packaging/debian" / name, control / name, executable=name != "conffiles")
+        conffiles = set((control / "conffiles").read_text().splitlines())
+        md5sums = "".join(
+            f"{hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()}  {path.relative_to(stage).as_posix()}\n"
+            for path in sorted(stage.rglob("*")) if path.is_file()
+            and control not in path.parents and "/" + path.relative_to(stage).as_posix() not in conffiles)
+        (control / "md5sums").write_text(md5sums, encoding="utf-8")
         size = sum(p.stat().st_size for p in stage.rglob("*") if p.is_file())
         template = (root / "packaging/debian/control").read_text(encoding="utf-8")
         (control / "control").write_text(template.replace("@VERSION@", deb_version).replace(
@@ -137,7 +175,8 @@ def main():
     parser.add_argument("--version", action="version", version=version())
     args = parser.parse_args()
     try:
-        deb = build(args.output, args.revision, epoch=int(os.environ.get("SOURCE_DATE_EPOCH", "0")))
+        value = os.environ.get("SOURCE_DATE_EPOCH")
+        deb = build(args.output, args.revision, epoch=int(value) if value is not None else None)
     except (ValueError, OSError, subprocess.CalledProcessError) as e:
         parser.exit(1, f"package build failed: {e}\n")
     print(deb)

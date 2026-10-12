@@ -28,8 +28,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Install package policy checker
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lintian
       - run: python3 scripts/packaging/package.py --output dist/first
       - run: python3 scripts/packaging/package.py --revision 2 --output dist/second
+      - name: Check package policy
+        run: lintian --no-cfg --info --pedantic --fail-on error,warning dist/first/*.deb dist/second/*.deb
       - name: Verify extracted distribution
         run: python3 scripts/packaging/check_package.py dist/first/*.deb
       - name: Verify dpkg install, upgrade, downgrade and removal

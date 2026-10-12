@@ -1,0 +1,60 @@
+.TH PLATMON 1 "October 2026" "platmon" "User Commands"
+.SH NAME
+platmon \- view metrics from a platmon service
+.SH SYNOPSIS
+.B platmon
+.RI [ host[:port] ]
+.RI [ interval ]
+.RB [ --once ]
+.RB [ --view " view" ]
+.br
+.B platmon
+.RB [ --help " | " --version ]
+.SH DESCRIPTION
+platmon displays platform metrics collected by a running platmon service.
+The default host is localhost, the default port is 9797, and the default
+update interval is one second. The interval must be a finite positive number.
+On an interactive terminal, the client displays a live screen.
+Redirected output uses plain text.
+.SH OPTIONS
+.TP
+.B --once
+Print one snapshot and exit without clearing the screen.
+.TP
+.BI --view " view"
+Select the initial interactive view: overview, resources, network, storage,
+thermal, power, or system. This option cannot be combined with --once.
+.TP
+.B --help
+Display command usage and exit.
+.TP
+.B --version
+Display the client version and exit.
+.SH KEYS
+In the live screen, keys 1 through 7 select views.
+Tab and the arrow keys switch views; q quits.
+.SH ENVIRONMENT
+.TP
+.B NO_COLOR
+Set to a nonempty value to disable colors.
+.TP
+.B PLATMON_ASCII
+Set to 1 to draw using ASCII characters.
+.SH FILES
+.TP
+.I /etc/platmon/platmon.ini
+Service configuration, including the listening address and port.
+The client takes its target address from the command line.
+.SH EXAMPLES
+.B platmon --once
+.br
+.B platmon 192.168.1.10:9797 2
+.br
+.B platmon --view power
+.SH NOTES
+The Debian package provides platmon.service.
+After changing service configuration, restart it with
+.BR "sudo systemctl restart platmon" .
+The HTTP API is unauthenticated; use it on a trusted network.
+.SH SEE ALSO
+.BR systemctl (1)

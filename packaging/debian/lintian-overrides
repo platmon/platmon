@@ -1,0 +1,3 @@
+# Distributed directly as an upstream .deb, not uploaded to the Debian archive.
+# No Debian Intent To Package (ITP) bug exists for this distribution.
+platmon: initial-upload-closes-no-bugs
