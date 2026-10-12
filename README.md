@@ -23,9 +23,11 @@ command. Download a release's files from the GitHub Releases page (verify `SHA25
 the package from this checkout:
 
 ```sh
-python3 scripts/packaging/package.py --output dist/1.0.0-1
-python3 scripts/packaging/check_package.py dist/1.0.0-1/platmon_1.0.0-1_all.deb
-sudo apt install ./dist/1.0.0-1/platmon_1.0.0-1_all.deb
+platmon_version=$(python3 scripts/packaging/package.py --version)
+platmon_dist="dist/${platmon_version}-1"
+python3 scripts/packaging/package.py --output "$platmon_dist"
+python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_all.deb"
+sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_all.deb"
 platmon --version
 platmon --once
 ```

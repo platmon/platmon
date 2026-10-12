@@ -34,12 +34,14 @@ Build on Linux with Python 3.9+ and the installed `dpkg-deb` tool (dpkg 1.19+).
 No Python build dependency or root access is needed:
 
 ```sh
-python3 scripts/packaging/package.py --output dist/1.0.0-1
-python3 scripts/packaging/check_package.py dist/1.0.0-1/platmon_1.0.0-1_all.deb
-(cd dist/1.0.0-1 && sha256sum -c SHA256SUMS)
+platmon_version=$(python3 scripts/packaging/package.py --version)
+platmon_dist="dist/${platmon_version}-1"
+python3 scripts/packaging/package.py --output "$platmon_dist"
+python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_all.deb"
+(cd "$platmon_dist" && sha256sum -c SHA256SUMS)
 ```
 
-The fresh output directory contains `.deb`, `platmon-1.0.0.tar.gz`, `BUILD.json`
+The fresh output directory contains `platmon_<version>-1_all.deb`, `platmon-<version>.tar.gz`, `BUILD.json`
 (input content hashes and versions) and `SHA256SUMS`. The source archive includes
 runtime, tests, installation/build scripts and documentation, excluding caches and
 private validation artifacts. It can rebuild the package without `.git`.
@@ -50,14 +52,18 @@ refuses existing output filenames. Packaging revision: `--revision 2`.
 ## Install and update
 
 Download a fixed release, verify its checksums and keep its files for rollback.
-Install the local package using APT, which checks the declared host dependencies:
+Install the local package using APT, which checks the declared host dependencies. For a
+checkout build, use the variables from the Build section:
 
 ```sh
-sudo apt install ./platmon_1.0.0-1_all.deb
+sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_all.deb"
 systemctl status platmon --no-pager
 platmon --version
 platmon --once
 ```
+
+For a downloaded release, replace the package path with the exact verified `.deb` file,
+including that release's application version and packaging revision.
 
 Code goes to `/usr/share/platmon/`, the client to `/usr/bin/platmon`, the vendor unit
 to `/usr/lib/systemd/system/platmon.service`, and config to `/etc/platmon/platmon.ini`.
@@ -93,7 +99,15 @@ Do this during a maintenance window. First preserve the old checkout/version, IN
 unit, CLI and the previous image (for Docker); record whether the service was running
 and enabled. Keep the files outside paths removed by the old uninstaller.
 
-For the source installation, run `deploy/systemd/uninstall.sh` from the old checkout,
+Run the removal command from the retained checkout that matches the existing installation.
+The file layout determines the command; check which path exists before running it:
+
+| Retained checkout layout | Source service uninstall | Docker stop/remove |
+| --- | --- | --- |
+| Before the file reorganization (`scripts/`) | `scripts/systemd/uninstall.sh` | `scripts/docker/stop.sh` |
+| After the file reorganization (`deploy/`) | `deploy/systemd/uninstall.sh` | `deploy/docker/stop.sh` |
+
+For the source installation, run the matching source uninstall command from the table,
 without `--purge`, after the backup. This stops/disables the service, removes its local
 unit and command, and preserves `/etc/platmon/platmon.ini`. Then install the package.
 The first package install refuses an existing `/etc/systemd/system/platmon.service`
@@ -101,7 +115,7 @@ The first package install refuses an existing `/etc/systemd/system/platmon.servi
 administrator units and masks. An administrator's custom source unit needs explicit review
 and migration to a drop-in. `/etc` units otherwise override the packaged vendor unit.
 
-For Docker, stop/remove the old container with `deploy/docker/stop.sh`, keep its image
+For Docker, stop/remove the old container with the matching Docker command from the table, keep its image
 and compose/config files, and copy the desired INI to `/etc/platmon/platmon.ini` before
 installing. Do not run both services on the same listener. The container's mount-specific
 environment does not carry into the native service; compare device readings after migration.
@@ -142,7 +156,7 @@ directories are never automatically deleted by subsequent updates or uninstall.
    installation migration. CI uses an isolated container for dpkg lifecycle checks;
    actual systemd sandbox/startup and ARM device readings require real-device acceptance.
 3. Merge the reviewed change into `main` using the repository's signing/hooks policy.
-   Tag the verified commit included in `main` as `v1.0.0`; use `v1.0.0-2` for packaging
+   Tag the verified commit included in `main` as `v<version>` matching VERSION; use `v<version>-2` for packaging
    revision 2. Confirm the intended commit and required checks before pushing the tag.
    Creating a local tag alone does not start the workflow. This document does not create a tag.
 4. The release workflow fetches `main` and rejects tags whose commit is not an ancestor
@@ -165,8 +179,13 @@ by these scripts. Releases currently use stable MAJOR.MINOR.PATCH versions only.
 To run the dpkg lifecycle check locally, use Docker and a disposable Ubuntu container:
 
 ```sh
-python3 scripts/packaging/package.py --revision 2 --output dist/1.0.0-2
-python3 scripts/packaging/check_package_install.py dist/1.0.0-1/*.deb dist/1.0.0-2/*.deb
+platmon_version=$(python3 scripts/packaging/package.py --version)
+platmon_dist="dist/${platmon_version}-lifecycle"
+python3 scripts/packaging/package.py --output "$platmon_dist/first"
+python3 scripts/packaging/package.py --revision 2 --output "$platmon_dist/second"
+python3 scripts/packaging/check_package_install.py \
+  "$platmon_dist/first/platmon_${platmon_version}-1_all.deb" \
+  "$platmon_dist/second/platmon_${platmon_version}-2_all.deb"
 ```
 
 This installs test OS tools inside the container, mounts only the artifact directories
