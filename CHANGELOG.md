@@ -6,6 +6,11 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- NVIDIA GPU usage and graphics clocks are collected through the driver's optional `nvidia-smi`
+  command when no supported DRM reader is available, including on WSL2. The service also finds the
+  WSL command outside PATH. Queries time out after 0.5 seconds; unsupported fields remain null and
+  failures never reuse previous readings. GPU UUIDs identify history sources and choose one GPU
+  consistently when more than one is present. Python runtime dependencies remain unchanged.
 - Power rails are kept in the recent history, as `power/<source id>` series in watts
   (docs/history.md), and drawn in the web page's Power & battery view. They were the only numeric
   group of `/api/stats` with no series at all, which left the rails — what a consumption reading is

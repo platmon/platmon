@@ -196,7 +196,7 @@ or are caught as `counter_regressed`); the lines of `/proc/stat` are not read at
 
 `usage` is a percentage with one decimal, `freq` and `max_freq` are hertz; each is `null` where that
 driver or that moment has no value, and a measured `0` is `0` (an idle Intel GPU has its clock gated
-off). `driver` and `provider` are there when the entry came from the DRM class; a board's own source
+off). `driver` and `provider` are there when the entry came from the DRM class or NVIDIA query; a board's own source
 sets neither.
 
 | Source | `provider` | What `usage` is |
@@ -204,9 +204,19 @@ sets neither.
 | the board's own (Jetson GPU devfreq) | absent | the load the board reports |
 | `i915` (Intel, `/sys/class/drm/cardN`) | `rc6_residency` | the share of the time between two collections the GPU was not in its RC6 idle state |
 | `amdgpu` | `gpu_busy_percent` | the busy share the driver publishes, as it is |
+| NVIDIA (`nvidia-smi`, including WSL2) | `nvidia-smi` | the utilization percentage reported by NVIDIA |
 
 - The board module is asked first and the DRM class is read where it gave nothing, so a Jetson keeps its
   own numbers and every other host gets what its driver publishes.
+- When no supported DRM reader is available, the optional driver command `nvidia-smi` is queried
+  once per collection for GPU UUID, utilization, current graphics clock and maximum graphics clock.
+  It is discovered from PATH or `/usr/lib/wsl/lib/nvidia-smi`; it is not installed by platmon.
+  `driver` is `nvidia`. One GPU is chosen by sorted UUID, with UUID and query field identifying each
+  sensor's `device_channel` source. Unsupported fields are null (`not_exposed`); invalid numbers
+  report `invalid_data`. Queries time out after 0.5 seconds and command failures report `io_error`
+  (execution permission errors report `permission_denied`). Failed queries do not reuse old readings.
+  WSL support depends on the fields exposed by the installed NVIDIA driver. No native Linux or Docker
+  NVIDIA hardware acceptance is implied by the WSL2 validation.
 - An `i915` card has no `usage` in the first collection (`null`): RC6 is a counter, so a share needs two
   readings, like a CPU warming up. A break longer than `max(3 × interval, 5 s)` is not averaged over, and
   a counter that went backwards starts again instead of reporting the jump.
@@ -216,7 +226,7 @@ sets neither.
 - A card whose driver has no reader here is still reported, with its `driver` and no numbers, so a host
   with a GPU platmon cannot measure does not look like a host without one: the group is `unavailable` /
   `not_exposed`. With no card at all it is `unavailable` / `not_detected`.
-- One card is reported: the first, by card number, with a reader. Reading these attributes does not wake
+- One DRM card is reported: the first, by card number, with a reader. Reading these DRM attributes does not wake
   the GPU (measured on Meteor Lake: the same RC6 share at 0, 1 and 100 reads per second).
 
 ### NPU
