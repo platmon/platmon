@@ -54,7 +54,8 @@ def check(package):
                         time.sleep(0.1)
                 if stats.get("schema_version") != 1 or "cpu" not in stats:
                     raise ValueError("invalid packaged stats response")
-                for route in ("/api/status", "/api/observations", "/api/history", "/text", "/", "/app.js", "/styles.css",
+                for route in ("/api/status", "/api/observations", "/api/history", "/api/samples",
+                              "/api/observation-samples?group=battery", "/text", "/", "/app.js", "/styles.css",
                               "/assets/brand/platmon-logo-light.svg", "/assets/brand/platmon-logo-dark.svg",
                               "/assets/brand/favicon.svg"):
                     with urllib.request.urlopen(base + route, timeout=5) as response:

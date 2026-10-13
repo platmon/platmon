@@ -18,6 +18,7 @@ the HTTP frontend. Runtime scheduling is independent of frontend requests.
 | `collector/counters.py` | File reading and unsigned counter parsing shared by passive readers |
 | `runtime/sampler.py` | Cadence, snapshot publication, freshness and runtime status |
 | `runtime/slow.py` | Independent workers and published low-frequency observations |
+| `runtime/replay.py` | Bounded full-publication buffer for cursor-based Hub catch-up |
 | `runtime/history.py` | Bounded, in-memory history of published snapshots and observations |
 
 Readers do not import the runtime or frontends. Runtime modules consume collection records and

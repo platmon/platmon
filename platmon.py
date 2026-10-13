@@ -19,6 +19,7 @@ from collector.disk_io import DiskCounters
 from collector.gpu import Gpu
 from collector.npu import Npu
 from runtime.history import History
+from runtime.replay import Replay
 from collector.network import NetworkCounters
 from collector.probe import Probe, parse_targets
 from collector.pressure import Pressure
@@ -42,6 +43,7 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "battery": {"enabled": True, "interval": 60.0},
     "probe": {"enabled": True, "interval": 10.0, "timeout": 2.0, "targets": ""},
     "history": {"enabled": True, "retention": 600.0},
+    "replay": {"enabled": True, "retention": 600.0, "max_bytes": 16777216},
     "pressure": {"enabled": True},
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
     # the web page's warning and critical levels; temperature empty: the board default the page picks
@@ -50,6 +52,7 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
 RANGES = {("core", "interval"): (0.1, 3600), ("storage", "interval"): (5, 3600), ("wifi", "interval"): (1, 3600), ("probe", "interval"): (1, 3600),
           ("battery", "interval"): (10, 3600),
+          ("replay", "retention"): (1, 3600), ("replay", "max_bytes"): (1048576, 67108864),
           ("probe", "timeout"): (0.1, 10), ("history", "retention"): (60, 3600), ("http", "port"): (1, 65535)}
 
 
@@ -181,6 +184,12 @@ def main(argv=None):
             if cfg[name].getboolean("enabled")
             and (name != "probe" or parse_targets(cfg["probe"].get("targets")))]
     observations = Observations(slow, sampler.instance_id, clock[1])
+    if cfg["replay"].getboolean("enabled"):
+        replay = Replay(sampler.instance_id, clock[0], clock[1], [g.name for g in slow],
+                        cfg["replay"].getfloat("retention"), cfg["replay"].getint("max_bytes"))
+        sampler.replay = replay
+        for group in slow:
+            group.replay = replay
     # recent numbers of the published snapshots, in memory only (docs/reference/history.md)
     history = None
     if cfg["history"].getboolean("enabled"):

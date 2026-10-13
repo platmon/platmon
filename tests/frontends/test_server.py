@@ -275,3 +275,79 @@ def test_partial_snapshot_is_served_and_degraded():
         assert (status["state"], status["ready"]) == ("degraded", True)
     finally:
         httpd.shutdown()
+
+
+@pytest.mark.parametrize("web", [True, False])
+def test_replay_http_pagination_staleness_and_restart(web):
+    from runtime.replay import Replay
+    from runtime.slow import Slow
+    clock = [0]
+    s = NoWait(lambda: {"cpu": [{"id": 0, "usage": 0}], "nested": [None]},
+               clock=(lambda: clock[0], {"source": "fake"}))
+    s.replay = Replay(s.instance_id, s._elapsed, s.clock, ("battery",), retention=10)
+    for _ in range(3):
+        s._attempt()
+    slow = Slow("battery", lambda g: g.got({"batteries": [{"percent": 0}], "external": []}), 60, s._elapsed)
+    slow.replay = s.replay
+    slow.observe_once()
+    httpd, base = serve(None, web, sampler=s)
+    try:
+        code, headers, body = get(base + "/api/samples?limit=2")
+        page = json.loads(body)
+        assert code == 200 and headers["Cache-Control"] == "no-store"
+        assert [r["id"] for r in page["records"]] == [1, 2]
+        assert page["has_more"] and page["next_after"] == 2
+        code, _, body = get(base + f"/api/samples?instance_id={s.instance_id}&after=2")
+        assert code == 200 and json.loads(body)["records"][0]["id"] == 3
+        clock[0] = 6 * 10**9
+        assert get(base + "/api/stats")[0] == 503
+        code, _, body = get(base + "/api/samples")
+        assert code == 200 and json.loads(body)["records"][0]["data"]["sample"]["stale"]
+        code, _, body = get(base + "/api/observation-samples?group=battery")
+        assert code == 200 and json.loads(body)["records"][0]["data"]["data"]["batteries"][0]["percent"] == 0
+        code, _, body = get(base + "/api/samples?instance_id=previous-process&after=3")
+        assert code == 409 and json.loads(body) == {"code": "instance_changed", "instance_id": s.instance_id}
+        assert get(base + f"/api/samples?instance_id={s.instance_id}&after=4")[0] == 409
+        assert get(base + "/api/observation-samples?group=wifi")[0] == 404
+        clock[0] = 11 * 10**9
+        code, _, body = get(base + "/api/samples")
+        page = json.loads(body)
+        assert code == 200 and page["records"] == [] and page["next_after"] == 3
+        assert page["missing_ranges"] == [{"from": 1, "to": 3, "reason": "buffer_unavailable"}]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+@pytest.mark.parametrize("query", [
+    "after=1", "after=-1", "after=1.0", "after=", "limit=0", "limit=101", "limit=", "limit=nan",
+    "limit=1&limit=2", "extra=x", "group=battery", "instance_id=", "instance_id=" + "x" * 129,
+    "after=" + "9" * 20, "limit=1&after=0&instance_id=x&extra=x&other=y",
+])
+def test_replay_http_rejects_invalid_query(query):
+    from runtime.replay import Replay
+    s = NoWait(lambda: {})
+    s.replay = Replay(s.instance_id, s._elapsed, s.clock)
+    httpd, base = serve(None, sampler=s)
+    try:
+        code, headers, body = get(base + "/api/samples?" + query)
+        assert code == 400 and json.loads(body)["code"] == "invalid_query"
+        assert headers["Cache-Control"] == "no-store"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_replay_disabled_and_observation_group_required():
+    from runtime.replay import Replay
+    s = NoWait(lambda: {})
+    httpd, base = serve(None, sampler=s)
+    try:
+        assert get(base + "/api/samples")[0] == 404
+        assert get(base + "/api/observation-samples?group=battery")[0] == 404
+        s.replay = Replay(s.instance_id, s._elapsed, s.clock)
+        for query in ("", "group=core", "group=unknown", "group=wifi&group=battery"):
+            assert get(base + "/api/observation-samples?" + query)[0] == 400
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

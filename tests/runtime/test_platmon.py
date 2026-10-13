@@ -141,3 +141,46 @@ def test_sigterm_exits_promptly(tmp_path):
     t0 = time.monotonic()
     assert p.wait(timeout=5) == 0
     assert time.monotonic() - t0 < 2
+
+
+@pytest.mark.parametrize("text", [
+    "[replay]\nretention = 0\n", "[replay]\nretention = nan\n", "[replay]\nretention = 3601\n",
+    "[replay]\nmax_bytes = 1048575\n", "[replay]\nmax_bytes = 67108865\n",
+    "[replay]\nmax_bytes = 1.5\n", "[replay]\nenabled = maybe\n",
+])
+def test_replay_config_bounds(tmp_path, text):
+    ini = tmp_path / "replay.ini"
+    ini.write_text(text)
+    with pytest.raises(ValueError):
+        load_config(str(ini))
+
+
+@pytest.mark.parametrize("replay_on,history_on", [(True, True), (True, False), (False, True), (False, False)])
+def test_replay_wiring_is_independent_of_numeric_history(monkeypatch, tmp_path, replay_on, history_on):
+    import platmon
+    from runtime.sampler import Sampler
+    from runtime.slow import Slow
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def frontend(sampler, cfg, observations, history=None, levels=None):
+        seen.update(sampler=sampler, observations=observations, history=history)
+        raise Stop
+    monkeypatch.setattr(Sampler, "start", lambda self: self)
+    monkeypatch.setattr(Slow, "start", lambda self: self)
+    monkeypatch.setitem(platmon.FRONTENDS, "http", frontend)
+    monkeypatch.setattr(platmon.signal, "signal", lambda *args: None)
+    ini = tmp_path / "replay.ini"
+    ini.write_text(f"[replay]\nenabled = {'yes' if replay_on else 'no'}\n[history]\nenabled = {'yes' if history_on else 'no'}\n")
+    with pytest.raises(Stop):
+        platmon.main([str(ini)])
+    sampler = seen["sampler"]
+    assert (sampler.replay is not None) == replay_on
+    assert all(g.replay is sampler.replay for g in seen["observations"].groups)
+    assert (seen["history"] is not None) == history_on
+    sampler.collect = lambda: {"all_fields": [0, None]}
+    sampler._attempt()
+    if replay_on:
+        assert sampler.replay.view("core")["records"][0]["data"]["all_fields"] == [0, None]

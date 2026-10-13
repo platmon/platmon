@@ -61,6 +61,7 @@ class Sampler:
         self._provenance_problem = None  # last logged reason for falling back to the cycle start
         self._ready = threading.Event()
         self._stop = threading.Event()
+        self.replay = None  # optional full-publication buffer, separate from numeric history
         self.on_publish = None  # called with each published record (never to change it), e.g. History.append
         self._thread = None
 
@@ -124,6 +125,12 @@ class Sampler:
                                 "sensor_meta": sensor_meta, "oldest_read": oldest,
                                 "gap_before": gap_before}  # internal history hint; failed attempts have no sample
                 self._ready.set()
+        if reason is None and self.replay is not None:
+            try:
+                self.replay.append("core", self._record["sequence"], started, completed,
+                                   self._snapshot(self._record, completed), gap_before)
+            except Exception as e:
+                print(f"platmon: replay append failed: {e!r}", file=sys.stderr)
         if reason is None and self.on_publish is not None:  # outside the lock; a failure there is not the core's
             try:
                 self.on_publish(self._record)
@@ -258,6 +265,11 @@ class Sampler:
         }
         if not fresh:
             return None, status
+        return self._snapshot(record, now), status
+
+    def _snapshot(self, record, now):
+        """Format one immutable publication, also when replaying a historical sample."""
+        basis = record["oldest_read"] if record["oldest_read"] is not None else record["started"]
         stats = {k: v for k, v in record["stats"].items() if k != "collectors"}  # same key order as before
         optional = record["stats"].get("collectors")
         optional = {k: v for k, v in optional.items() if k != "core"} if isinstance(optional, dict) else {}
@@ -275,7 +287,7 @@ class Sampler:
         })
         if record["sensor_meta"] is not None:
             stats["sensor_meta"] = record["sensor_meta"]
-        return stats, status
+        return stats
 
     @staticmethod
     def _basis(record):

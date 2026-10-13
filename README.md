@@ -16,6 +16,10 @@ One collector core runs on the device as a background service with an HTTP API; 
 - Shows the OS release, kernel, architecture and hostname (plus the L4T release on Jetson)
 - Detects the platform (Jetson Orin / Xavier, Raspberry Pi, PC, Linux) and hides what the board lacks
 
+For external data collection, [full-sample replay](docs/reference/replay.md) lets a Hub
+retrieve complete published snapshots and slow observations after its last accepted ID.
+It uses a bounded memory buffer; long-term storage belongs to the consumer.
+
 ## Install on a device
 
 Ubuntu/Debian-derived systems use a `.deb` package with a systemd service and the `platmon`

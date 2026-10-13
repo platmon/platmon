@@ -8,6 +8,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .cli import VERSION, render
+from runtime.replay import CursorError, MAX_LIMIT
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 WEB_ASSETS = {
@@ -21,7 +22,7 @@ BRAND_ASSETS = {
     "/assets/brand/platmon-icon-dark.svg": "platmon-icon-dark.svg",
     "/assets/brand/favicon.svg": "favicon.svg",
 }
-LIVE = ("/api/stats", "/api/status", "/api/observations", "/api/history", "/text")
+LIVE = ("/api/stats", "/api/status", "/api/observations", "/api/history", "/api/samples", "/api/observation-samples", "/text")
 MAX_POINTS, MAX_PREFIX = 600, 128
 REQUEST_TIMEOUT = 10  # seconds to send a request line and headers in; generous for any real client
 
@@ -37,6 +38,31 @@ def history_query(history, query):
     if len(prefix) > MAX_PREFIX or not 0 < seconds <= history.retention or not 0 < points <= MAX_POINTS:
         raise ValueError(query)
     return prefix, seconds, points
+
+
+def replay_query(query, observation=False):
+    """Strict, bounded cursor query. Resuming requires the original process identity."""
+    q = urllib.parse.parse_qs(query, max_num_fields=4, keep_blank_values=True)
+    allowed = {"instance_id", "after", "limit"} | ({"group"} if observation else set())
+    if set(q) - allowed or any(len(v) != 1 for v in q.values()):
+        raise ValueError("unknown or repeated query field")
+    instance_id = q.get("instance_id", [None])[0]
+    after_text, limit_text = q.get("after", ["0"])[0], q.get("limit", ["100"])[0]
+    if not after_text.isascii() or not after_text.isdecimal() or len(after_text) > 19:
+        raise ValueError("after must be a nonnegative integer")
+    if not limit_text.isascii() or not limit_text.isdecimal() or len(limit_text) > 3:
+        raise ValueError("invalid limit")
+    after, limit = int(after_text), int(limit_text)
+    if after > 2**63 - 1 or not 1 <= limit <= MAX_LIMIT:
+        raise ValueError("cursor or limit out of range")
+    if instance_id is not None and not 1 <= len(instance_id) <= 128:
+        raise ValueError("invalid instance_id")
+    if after and instance_id is None:
+        raise ValueError("instance_id is required when after > 0")
+    stream = q.get("group", [""])[0] if observation else "core"
+    if observation and stream not in ("storage", "wifi", "battery", "probe"):
+        raise ValueError("group must be storage, wifi, battery or probe")
+    return stream, instance_id, after, limit
 
 
 def make_handler(sampler, web=True, observations=None, history=None, levels=None):
@@ -61,6 +87,23 @@ def make_handler(sampler, web=True, observations=None, history=None, levels=None
             # client that reads slowly but steadily. HTTP/1.0 closes after this, so no read follows.
             self.connection.settimeout(None)
             path, _, query = self.path.partition("?")
+            if path in ("/api/samples", "/api/observation-samples"):
+                self.path = path
+                replay = getattr(sampler, "replay", None)
+                code = 200
+                try:
+                    if replay is None:
+                        raise KeyError("replay_disabled")
+                    args = replay_query(query, path == "/api/observation-samples")
+                    body = replay.view(*args)
+                except CursorError as e:
+                    code, body = 409, {"code": str(e), "instance_id": sampler.instance_id}
+                except ValueError as e:
+                    code, body = 400, {"code": "invalid_query", "error": str(e)}
+                except KeyError:
+                    code, body = 404, {"code": "replay_unavailable"}
+                self.reply(code, json.dumps(body, separators=(",", ":")).encode(), "application/json")
+                return
             if history is not None and path == "/api/history":  # read-only, bounded; never collects
                 try:
                     prefix, seconds, points = history_query(history, query)
