@@ -6,6 +6,13 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- Full published core snapshots and independent observations can be replayed through
+  `/api/samples` and `/api/observation-samples`. A configurable bounded memory buffer
+  retains complete values and provenance for Hub catch-up, reports unavailable ID ranges,
+  and rejects cursors from a previous process. Live endpoints and numeric history keep
+  their existing contracts. Replay is enabled by default (up to 600 s / 16 MiB of
+  encoded payloads); restarting clears it. See docs/reference/replay.md.
+
 - Debian packages include a CLI manual, compressed upstream and packaging changelogs,
   copyright metadata and file checksums. Default reproducible timestamps come from
   the packaging changelog instead of 1970; `SOURCE_DATE_EPOCH` still overrides them.

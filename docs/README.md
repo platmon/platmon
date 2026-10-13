@@ -4,6 +4,7 @@ Start with the repository [README](../README.md) for installation and usage.
 
 - [Reference](reference/api.md): HTTP API, freshness and response contracts. Related contracts:
   [observations](reference/observations.md), [history](reference/history.md),
+  [full-sample replay](reference/replay.md),
   [network](reference/network.md), [disk I/O](reference/disk-io.md),
   [storage](reference/storage.md), [pressure](reference/pressure.md),
   [Wi-Fi](reference/wifi.md), [battery](reference/battery.md) and [TCP probes](reference/probe.md).

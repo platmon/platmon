@@ -30,6 +30,7 @@ class Slow:
         self._logged = {}
         self._stop = threading.Event()
         self._thread = None
+        self.replay = None
         self.on_publish = None
         self._publish_failed = False
 
@@ -64,6 +65,12 @@ class Slow:
                           "completed_at": self._wall(), "collector": collector, "data": data}
             self._since = None
             published = self._last
+        if self.replay is not None:
+            try:
+                self.replay.append(self.name, published["id"], started, completed,
+                                   self._entry(published, completed, None))
+            except Exception as e:
+                print(f"platmon: observation replay append failed: {e!r}", file=sys.stderr)
         if self.on_publish is not None:
             try:
                 self.on_publish(self.name, self.interval, published)
@@ -78,6 +85,10 @@ class Slow:
         (never changed after publishing, so it can be serialized outside the lock)."""
         with self._lock:
             now, last, since = self._clock(), self._last, self._since
+        return self._entry(last, now, since)
+
+    def _entry(self, last, now, since):
+        """Format one publication with ages on the shared elapsed clock."""
         entry = {"interval_ms": ms(self._interval_ns), "stale_after_ms": ms(self._stale_ns),
                  "collecting_for_ms": None if since is None else ms(now - since), "observation": None,
                  "collector": None, "data": None}
