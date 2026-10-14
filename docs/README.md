@@ -1,18 +1,40 @@
 # Documentation
 
-Start with the repository [README](../README.md) for installation and usage.
+The repository [README](../README.md) gives a short overview and quick start.
+Choose a guide for practical usage, a reference for behavior contracts, or an engineering
+document for implementation and validation evidence.
 
-- [Reference](reference/api.md): HTTP API, freshness and response contracts. Related contracts:
-  [observations](reference/observations.md), [history](reference/history.md),
-  [full-sample replay](reference/replay.md),
-  [network](reference/network.md), [disk I/O](reference/disk-io.md),
+## User guides
+
+- [Getting started](guides/getting-started.md) — prerequisites, package installation,
+  first connection, configuration and a remote-only terminal client.
+- [CLI and web interfaces](guides/interfaces.md) — interactive controls, dashboard views,
+  thresholds, data coverage and the HTTP entry points.
+- [Deployment and operations](guides/deployment.md) — package versus source/systemd versus
+  Docker, upgrades, troubleshooting, networking and image licensing.
+
+## Reference
+
+- [HTTP API](reference/api.md) — endpoints, schemas, response semantics and freshness.
+- [Observations](reference/observations.md), [history](reference/history.md) and
+  [full-sample replay](reference/replay.md) — independent slow readings,
+  numeric history and bounded publication replay.
+- Metric contracts: [network](reference/network.md), [disk I/O](reference/disk-io.md),
   [storage](reference/storage.md), [pressure](reference/pressure.md),
-  [Wi-Fi](reference/wifi.md), [battery](reference/battery.md) and [TCP probes](reference/probe.md).
-- [Packaging](reference/packaging.md) and [Docker scope](reference/docker-scope.md): distribution,
-  migration, rollback and container visibility.
-- [Architecture](development/architecture.md): source layout and module responsibilities.
-  [Remaining work](development/remaining-work.md) records development checkpoints and deferred work;
-  [post-integration validation](development/post-integration-validation.md) records validation scope.
-- [Release readiness](releases/readiness.md): release gates and acceptance evidence.
-- [Performance](performance/README.md): budgets, current measurements and background studies.
-  Superseded reports are retained in `performance/archive/` and indexed there by the performance guide.
+  [Wi-Fi](reference/wifi.md), [battery](reference/battery.md) and
+  [TCP probes](reference/probe.md).
+- [Packaging and releases](reference/packaging.md) — versioning, artifacts,
+  migration, rollback and release workflow.
+- [Docker observation scope](reference/docker-scope.md) — verified host visibility,
+  filesystem and network boundaries.
+
+## Development and validation
+
+- [Architecture](development/architecture.md) — source layout, dependencies
+  and module responsibilities.
+- [Remaining work](development/remaining-work.md) and
+  [post-integration validation](development/post-integration-validation.md) —
+  development checkpoints and validation scope.
+- [Release readiness](releases/readiness.md) — acceptance gates and release evidence.
+- [Performance reports](performance/README.md) — budgets, current measurements,
+  background studies and an index of superseded evidence in `performance/archive/`.
