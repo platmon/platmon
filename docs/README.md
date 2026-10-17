@@ -33,7 +33,10 @@ document for implementation and validation evidence.
 - [Architecture](development/architecture.md) — source layout, dependencies
   and module responsibilities.
 - [ADR 0001: Ubuntu LTS and Python support policy](development/adr/0001-ubuntu-lts-python-support.md)
-  — proposed support targets, validation gates and retirement rules for Ubuntu 20.04–26.04.
+  — support targets, validation gates and retirement rules for Ubuntu 20.04–26.04;
+  platform qualification is in progress.
+- [Ubuntu LTS qualification](development/ubuntu-lts-qualification.md) — implementation progress,
+  local interpreter and container evidence, and remaining native OS release gates.
 - [Remaining work](development/remaining-work.md) and
   [post-integration validation](development/post-integration-validation.md) —
   development checkpoints and validation scope.

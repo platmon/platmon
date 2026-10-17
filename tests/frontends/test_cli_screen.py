@@ -309,7 +309,7 @@ def test_the_overview_detail_takes_the_width_that_is_free():
     """"x86_pkg_temp · hottest of 38" was cut to "x86_pkg_temp · h" at 16 columns while 22 columns of an
     80-column terminal went unused. The column grows to what the details need, and no further, so a
     board with short ones keeps the layout it had."""
-    many = dict(HOT, temperature={f"coretemp Core {i}": 40.0 + i for i in range(37)} | {"x86_pkg_temp": 88.0})
+    many = dict(HOT, temperature={**{f"coretemp Core {i}": 40.0 + i for i in range(37)}, "x86_pkg_temp": 88.0})
     history = {"CPU": [10] * 24, "TEMP": [88] * 24}
     for width in (119, 100, 78, 70):
         row = [line for line in plain(screen(many, None, width, 40, Style(), LIVE, history, "overview"))

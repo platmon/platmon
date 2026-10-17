@@ -42,7 +42,7 @@ def inside(first, second):
     assert invoke("systemctl", "is-enabled", "platmon.service", success=False) == "disabled"
     invoke("systemctl", "mask", "platmon.service")
     invoke("dpkg", "--force-confold", "-i", str(first))
-    assert unit.is_symlink() and unit.readlink() == Path("/dev/null")
+    assert unit.is_symlink() and os.readlink(unit) == "/dev/null"
     assert ini.read_text() == custom
     invoke("systemctl", "unmask", "platmon.service")
     invoke("dpkg", "--remove", "platmon")

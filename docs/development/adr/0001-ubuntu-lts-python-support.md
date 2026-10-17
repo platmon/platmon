@@ -1,7 +1,7 @@
 # ADR 0001: Ubuntu LTS and Python support policy
 
 - Date: 2026-10-17
-- Status: Proposed
+- Status: Accepted; platform qualification in progress
 - Scope: platmon service, bundled web viewer, terminal client and distribution artifacts
 
 ## Context
@@ -10,13 +10,13 @@ platmon runs on existing Linux devices, including systems whose OS upgrades are 
 by board drivers and vendor images. Requiring a separately installed Python increases deployment
 and maintenance work on those devices. The intended Ubuntu coverage spans 20.04 through 26.04 LTS.
 
-The runtime uses the Python standard library. Today, the Debian package requires Python 3.9 or
-later, CI tests Python 3.9 and 3.13, and the Dockerfile uses Python 3.13. Python 3.8 compatibility
+The runtime uses the Python standard library. Before this decision, the Debian package required Python 3.9 or
+later, CI tested Python 3.9 and 3.13, and the Dockerfile used Python 3.13. Python 3.8 compatibility
 requires changes, including replacing runtime uses of `str.removeprefix()` and `str.removesuffix()`.
 Test and packaging helpers also contain Python 3.9 APIs and dictionary merge operations.
 The current checks do not establish support for every target OS below.
 
-## Proposed decision
+## Decision
 
 Support the default system Python on each named Ubuntu LTS release. Keep the runtime compatible
 with Python 3.8, subject to the implementation and release gates below. Do not require users to
@@ -122,7 +122,8 @@ change. No performance improvement is implied by lowering the runtime minimum.
 
 ## Implementation and acceptance
 
-This ADR records a proposal; it does not itself change package metadata, CI or public support claims.
+The policy is accepted. Acceptance does not itself change package metadata or public support claims;
+platform qualification remains a separate release gate.
 
 1. Replace incompatible runtime operations with equivalent Python 3.8 behavior. Adapt tests and
    packaging checks, and preserve regression coverage for the affected collectors and CLI.
@@ -131,8 +132,8 @@ This ADR records a proposal; it does not itself change package metadata, CI or p
    representative device collection. Record exact environments and results.
 4. Update the package dependency, installation guides, release policy and support matrix together
    once the applicable gates pass. Keep unqualified environments explicitly pending.
-5. Mark this ADR accepted when the policy is adopted; track implementation evidence separately so
-   acceptance is not confused with completed platform qualification.
+5. Track implementation evidence in the [qualification record](../ubuntu-lts-qualification.md)
+   separately from policy acceptance, so acceptance is not confused with completed qualification.
 
 ## References
 

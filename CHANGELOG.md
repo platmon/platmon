@@ -6,6 +6,12 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- Begin Ubuntu 20.04–26.04 qualification: replace Python 3.9-only runtime and packaging
+  operations, pin test tools and expand interpreter CI to 3.8, 3.9, 3.10, 3.12, 3.13 and 3.14.
+  CI checks extracted packages using all four Ubuntu LTS default interpreters, plus package
+  lifecycle on 22.04, 24.04 and 26.04. The native package minimum stays at Python 3.9 pending
+  booted OS and hardware qualification. See docs/development/ubuntu-lts-qualification.md.
+
 - Full published core snapshots and independent observations can be replayed through
   `/api/samples` and `/api/observation-samples`. A configurable bounded memory buffer
   retains complete values and provenance for Hub catch-up, reports unavailable ID ranges,
