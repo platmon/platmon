@@ -67,7 +67,7 @@ def pmode(text):
 
 def power_mode(status, conf_text):
     """status: /var/lib/nvpmodel/status ("pmode:0002"), conf_text: /etc/nvpmodel.conf."""
-    mode_id = status.removeprefix("pmode:").lstrip("0") or "0"
+    mode_id = (status[6:] if status.startswith("pmode:") else status).lstrip("0") or "0"
     m = re.search(rf"POWER_MODEL\s+ID={mode_id}\s+NAME=(\S+?)\s*>", conf_text or "")
     return m.group(1) if m else mode_id
 

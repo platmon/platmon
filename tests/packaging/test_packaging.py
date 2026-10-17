@@ -143,10 +143,10 @@ def test_package_contents_and_config_ownership(package, tmp_path):
     assert gzip.decompress((doc / "changelog.gz").read_bytes()) == (ROOT / "CHANGELOG.md").read_bytes()
     assert "/usr/share/common-licenses/Apache-2.0" in (doc / "copyright").read_text()
     assert gzip.decompress((root / "usr/share/man/man1/platmon.1.gz").read_bytes()).startswith(b".TH PLATMON 1")
+    assert run("md5sum", "--check", str(root / "DEBIAN/md5sums"), cwd=root).returncode == 0
     checksums = {}
     for line in (root / "DEBIAN/md5sums").read_text().splitlines():
         digest, relative = line.split("  ")
-        assert hashlib.md5((root / relative).read_bytes(), usedforsecurity=False).hexdigest() == digest
         checksums[relative] = digest
     expected = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
                 and root / "DEBIAN" not in p.parents and p != root / "etc/platmon/platmon.ini"}

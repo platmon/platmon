@@ -10,14 +10,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python: ["3.9", "3.13"]
+        python: ["3.8", "3.9", "3.10", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install pytest
+      - run: python -m pip install -r tests/requirements.txt
       - run: pytest -v
 
   package:
@@ -46,3 +47,35 @@ jobs:
           name: platmon-package
           path: dist/first/*
           if-no-files-found: error
+
+  ubuntu-userspace:
+    needs: package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["20.04", "22.04", "24.04", "26.04"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-package
+          path: dist/first
+      - name: Check extracted package with the OS default Python
+        run: |
+          docker run --rm --security-opt=no-new-privileges \
+            --mount "type=bind,src=$PWD,dst=/checkout,readonly" \
+            ubuntu:${{ matrix.ubuntu }} sh -ec '
+              apt-get update -qq
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3
+              python3 --version
+              python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/*.deb
+            '
+      # Ubuntu 20.04 is an observation target, outside official native support.
+      # The package requires Python >= 3.9; never force dependencies.
+      - name: Build upgrade fixture
+        if: matrix.ubuntu != '20.04'
+        run: python3 scripts/packaging/package.py --revision 2 --output dist/second
+      - name: Check package lifecycle
+        if: matrix.ubuntu != '20.04'
+        run: python3 scripts/packaging/check_package_install.py dist/first/*.deb dist/second/*.deb --image ubuntu:${{ matrix.ubuntu }}

@@ -82,7 +82,7 @@ def test_once_prints_one_snapshot():
     from tests.frontends.test_server import serve
     httpd, base = serve(FULL)
     try:
-        r = run_cli("--once", base.removeprefix("http://"))
+        r = run_cli("--once", base[len("http://"):])
     finally:
         httpd.shutdown()
     assert r.returncode == 0
@@ -112,7 +112,7 @@ def test_no_current_data_is_explained():
     from tests.frontends.test_server import serve
     httpd, base = serve(None)  # service up, but no snapshot: 503
     try:
-        r = run_cli("--once", base.removeprefix("http://"))
+        r = run_cli("--once", base[len("http://"):])
     finally:
         httpd.shutdown()
     assert r.returncode == 1 and "answered 503" in r.stderr and "no current data" in r.stderr

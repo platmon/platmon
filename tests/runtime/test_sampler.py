@@ -540,8 +540,8 @@ def test_all_optional_failing_still_publishes_then_required_failure_keeps_last_g
     monkeypatch.setattr(common, "thermal_zones", lambda group=None: ({}, set(), set()))
     freq = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
     # the fan is denied, not EIO: an EIO fan speed is a board without a tachometer, not a failure
-    fail_reads(monkeypatch, {f"{root}/hwmon0/{f}": errno.EIO for f in ("temp1_input", "power1_input")}
-               | {f"{root}/hwmon0/fan1_input": errno.EACCES, freq: errno.EACCES})
+    fail_reads(monkeypatch, {**{f"{root}/hwmon0/{f}": errno.EIO for f in ("temp1_input", "power1_input")},
+                            f"{root}/hwmon0/fan1_input": errno.EACCES, freq: errno.EACCES})
     c = Clock()
     p = Proc(monkeypatch)
     s = fake(functools.partial(collector.collect, CpuCounters(lambda: c.ns, max_gap=5.0)), c)

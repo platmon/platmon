@@ -128,7 +128,7 @@ def thermal_zones(root="/sys/class/thermal", group=None):
             t = g.read(f"{z}/temp", os.path.basename(z), found=z)
             span = g.span
             if t is not None:
-                key = zt.removesuffix("-thermal")
+                key = zt[:-8] if zt.endswith("-thermal") else zt
                 if key in temps:  # e.g. several acpitz zones
                     key += f" ({os.path.basename(z)})"
                 temps[key] = g.got(t / 1000)
