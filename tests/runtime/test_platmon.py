@@ -81,6 +81,16 @@ def test_frontends_flag_enables_exactly_those(tmp_path):
     ("[thresholds]\ntemperature = 85, 151\n", None, r"<= 150"),
     ("[thresholds]\nswap = 80, 90\n", None, r"\[thresholds\] unknown key\(s\): swap"),
     ("[thresholds]\ntemperature = 70.5, 82\n", None, None),
+    # battery and Wi-Fi: the low reading is the bad one, so warning above critical
+    ("[thresholds]\nbattery = 10, 20\n", None, r"battery = '10, 20': a low reading is the bad one, so need 100% > warning > critical > 0%"),
+    ("[thresholds]\nbattery = 20, 0\n", None, "> 0%"),
+    ("[thresholds]\nbattery = 100, 10\n", None, "100% > warning"),
+    ("[thresholds]\nbattery = 20\n", None, r"give two numbers, warning then critical, e.g. 20, 10"),
+    ("[thresholds]\nwifi = -80, -70\n", None, r"need 0 dBm > warning > critical > -120 dBm"),
+    ("[thresholds]\nwifi = -70, -121\n", None, "> -120 dBm"),
+    ("[thresholds]\nwifi = 5, -80\n", None, "0 dBm > warning"),
+    ("[thresholds]\nwifi = nan, -80\n", None, "need 0 dBm"),
+    ("[thresholds]\nbattery = 30.5, 5\nwifi = -65, -85\n", None, None),
 ])
 def test_rejects_bad_config(tmp_path, ini, frontends, error):
     path = tmp_path / "p.ini"
@@ -93,9 +103,10 @@ def test_rejects_bad_config(tmp_path, ini, frontends, error):
 
 
 def test_levels(tmp_path):
-    """Defaults: percent levels, and no temperature (the page picks the board's); the file overrides them."""
+    """Defaults: percent levels, and no temperature (the page picks the board's); the file overrides them.
+    Battery and Wi-Fi are low-is-bad: warning above critical."""
     assert levels(load_config()) == {"cpu": [80, 90], "gpu": [80, 90], "memory": [80, 90], "filesystem": [80, 90],
-                                     "temperature": None}
+                                     "temperature": None, "battery": [20, 10], "wifi": [-70, -80]}
     ini = tmp_path / "p.ini"
     ini.write_text("[thresholds]\nmemory = 70, 85\ntemperature = 70.5, 82\n")
     got = levels(load_config(str(ini)))

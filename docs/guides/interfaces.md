@@ -58,10 +58,15 @@ The **Needs attention** strip lists readings at or above their warning
 threshold and links to the relevant view. By default, CPU, GPU, memory and
 filesystem levels are warning at 80% and critical at 90%. Temperature defaults
 are Jetson Orin 85/95 °C, Raspberry Pi 75/80 °C and other platforms 80/90 °C.
+Battery charge and the connected Wi-Fi signal are the other way round, since their low reading is the
+bad one: a reading **at or below** a level counts, by default battery 20%/10% and Wi-Fi −70/−80 dBm.
 These are instantaneous thresholds, not alerts based on persistence;
 change them in the service's `[thresholds]` configuration.
-Other filesystem warnings use the cached Storage observation only while it is current. Staying on
-Overview does not refresh that observation; its warnings disappear when it becomes stale.
+Other filesystem, battery and Wi-Fi warnings use the cached Storage, Battery and Wi-Fi observations only
+while they are current; an empty bay or a disconnected interface raises nothing. Staying on Overview does
+not refresh those observations; open Storage, Network or Power & battery to fetch them. Their warnings
+disappear when the observation becomes stale. The Power & battery and Network views color the charge and
+the signal by the same levels.
 
 The **Resources, Network, Storage, Temperature** and
 **Power & battery** views show details and related recent history.

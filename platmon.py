@@ -47,7 +47,8 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "pressure": {"enabled": True},
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
     # the web page's warning and critical levels; temperature empty: the board default the page picks
-    "thresholds": {"cpu": "80, 90", "gpu": "80, 90", "memory": "80, 90", "filesystem": "80, 90", "temperature": ""},
+    "thresholds": {"cpu": "80, 90", "gpu": "80, 90", "memory": "80, 90", "filesystem": "80, 90", "temperature": "",
+                   "battery": "20, 10", "wifi": "-70, -80"},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
 RANGES = {("core", "interval"): (0.1, 3600), ("storage", "interval"): (5, 3600), ("wifi", "interval"): (1, 3600), ("probe", "interval"): (1, 3600),
@@ -87,6 +88,9 @@ def check(cfg):
 # command keeps a copy only for servers older than this (tests check that it matches).
 BOARD_TEMPERATURE = {"Jetson Orin": [85.0, 95.0], "Raspberry Pi": [75.0, 80.0]}
 OTHER_TEMPERATURE = [80.0, 90.0]
+# Levels where the low reading is the bad one: warning above critical, both inside (floor, ceiling).
+# Battery charge in percent; Wi-Fi signal in dBm (-120 dBm is below any receiver's sensitivity).
+LOW_LEVELS = {"battery": (0, 100, "%"), "wifi": (-120, 0, " dBm")}
 
 
 def levels(cfg, platform=None):
@@ -101,7 +105,15 @@ def levels(cfg, platform=None):
         try:
             warn, crit = (float(v) for v in text.split(","))
         except ValueError:
-            raise ValueError(f"[thresholds] {name} = {text!r}: give two numbers, warning then critical, e.g. 80, 90")
+            raise ValueError(f"[thresholds] {name} = {text!r}: give two numbers, warning then critical, e.g. "
+                             + (DEFAULTS["thresholds"][name] if name in LOW_LEVELS else "80, 90"))
+        if name in LOW_LEVELS:
+            floor, ceiling, unit = LOW_LEVELS[name]
+            if not floor < crit < warn < ceiling:  # also rejects nan and inf
+                raise ValueError(f"[thresholds] {name} = {text!r}: a low reading is the bad one, so need "
+                                 f"{ceiling:g}{unit} > warning > critical > {floor:g}{unit}")
+            out[name] = [warn, crit]
+            continue
         top = 150 if name == "temperature" else 100  # °C, else percent
         if not 0 < warn < crit <= top:  # also rejects nan and inf
             raise ValueError(f"[thresholds] {name} = {text!r}: need 0 < warning < critical <= {top}")

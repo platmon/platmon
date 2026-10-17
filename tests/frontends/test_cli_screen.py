@@ -76,6 +76,33 @@ def test_server_levels_replace_the_defaults(monkeypatch):
     assert cli.LIMITS["memory"] == (10, 20)
 
 
+def test_low_levels_attention_and_colors(monkeypatch):
+    """Battery charge and Wi-Fi signal: at or below a level, the opposite of the other readings; only from a
+    current observation, and never from an empty bay or a disconnected interface."""
+    import copy
+    monkeypatch.setattr(cli, "LIMITS", dict(LIMITS))
+    obs = copy.deepcopy(OBSERVED)
+    bat, wlan = obs["groups"]["battery"]["data"]["batteries"][0], obs["groups"]["wifi"]["data"]["interfaces"][0]
+    obs["groups"]["battery"]["data"]["batteries"].append(dict(bat, name="BAT2", present=False, percent=3))
+    obs["groups"]["wifi"]["data"]["interfaces"].append(dict(wlan, name="wlan1", connected=False, signal_dbm=-99))
+    assert attention(FULL, obs) == []  # 89 % and -47 dBm are fine
+    bat["percent"], wlan["signal_dbm"] = 20, -70
+    assert attention(FULL, obs) == [("BAT1", "20 %", "warn"), ("wlan0", "-70 dBm", "warn")]
+    bat["percent"], wlan["signal_dbm"] = 10, -81
+    assert attention(FULL, obs) == [("BAT1", "10 %", "crit"), ("wlan0", "-81 dBm", "crit")]
+    power = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "power"))
+    network = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "network"))
+    crit = r"\033\[31(;1)?m"  # the critical color, bold or not
+    assert re.search(crit + "10 %", power) and re.search(crit + "-81 dBm", network)
+    assert "NEEDS ATTENTION" in "\n".join(plain(screen(FULL, obs, 119, 40, Style(), LIVE, {})))
+    obs["groups"]["battery"]["observation"]["stale"] = True
+    obs["groups"]["wifi"]["observation"]["stale"] = True
+    assert attention(FULL, obs) == []  # not a current reading
+    # the server's levels: low ones arrive warning above critical; the wrong order keeps the default
+    use_levels({"battery": [30, 15], "wifi": [-80, -70]})
+    assert cli.LIMITS["battery"] == (30, 15) and cli.LIMITS["wifi"] == (-70, -80)
+
+
 def test_fallback_board_levels_match_the_server():
     """The command's copy for older servers is the server's table."""
     from platmon import BOARD_TEMPERATURE

@@ -6,6 +6,12 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- Battery charge and the connected Wi-Fi signal get warning and critical levels, `[thresholds] battery`
+  (default 20, 10 %) and `wifi` (default -70, -80 dBm). Their low reading is the bad one, so the warning
+  is above the critical level and a reading at or below a level reaches it. The web page and the
+  `platmon` command color them and list them under Needs attention while their observation is current;
+  `/api/status` `levels` carries both, and clients that do not know them ignore them.
+
 - Begin Ubuntu 20.04–26.04 qualification: replace Python 3.9-only runtime and packaging
   operations, pin test tools and expand interpreter CI to 3.8, 3.9, 3.10, 3.12, 3.13 and 3.14.
   CI checks extracted packages using all four Ubuntu LTS default interpreters, plus package
