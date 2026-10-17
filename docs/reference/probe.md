@@ -29,6 +29,8 @@ time never mixes in.
 - `reason` (with `connect_ms: null`): `timeout` (no answer within `timeout`), `refused` (the target sent a
   reset: reachable, nothing listening; it is still a failure), `unreachable`, `error`. A failure is never
   shown as a time, and a first failure is not 0 ms.
+  Local socket errors (including an unavailable address family) are also recorded for that target;
+  they count in its failure window and do not discard other targets' results or skip later targets.
 - `attempts`, `failures`, `failure_ratio`: over the target's last 10 attempts (fewer right after the start).
   This is the share of failed connection attempts in that window, not packet loss on the path.
 - `timeout_ms`: the configured timeout.
