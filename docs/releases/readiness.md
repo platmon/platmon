@@ -1,5 +1,45 @@
 # Release readiness
 
+## 1.3.0 release gate (2026-10-17)
+
+Changes since 1.2.1: full-publication replay (#77), bounded HTTP connections and stalled writers
+with isolated probe errors and expiring storage warnings (#79), battery and Wi-Fi levels (#81, #82),
+Ubuntu LTS and Python CI qualification (#80), Debian package policy (#76) and the source tree grouped
+by responsibility (#75). A minor release by the repository's rule: `/api/samples` and
+`/api/observation-samples` are new endpoints, `[replay]` is a new config section,
+`[thresholds] battery` and `wifi` are new keys and `/api/status` `levels` gains two entries; no
+endpoint, key, option, status code or schema version is removed or changed. #75 is marked breaking
+for source checkouts only: their deployment and packaging scripts move, while installed commands,
+service names and configuration paths stay. The versioning contract covers the HTTP API,
+`platmon.ini` keys and command options, so the owner chose 1.3.0 over 2.0.0, with the moves listed in
+the changelog.
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| `pytest` at the release commit, locally (Python 3.14.4) | 989 passed, 2 skipped |
+| CI on merged `main` | pass at #81, #82 and #83 (`5c761b0`, the release base) |
+| `scripts/packaging/package.py` then `scripts/packaging/check_package.py` | `platmon_1.3.0-1_all.deb` smoke pass (server, CLI, API, web and SVG) |
+| `SHA256SUMS` of the built files | `sha256sum -c` OK for the `.deb`, the archive and `BUILD.json` |
+| dpkg lifecycle, `1.3.0-1` → `1.3.0-2`, locally in disposable containers | pass on `ubuntu:22.04`, `ubuntu:24.04` and `ubuntu:26.04`: install, config-preserving upgrade and downgrade, disabled/masked state, remove/purge, migration refusal and invalid-config recovery |
+| the fleet server's contract (`platmon-hub` `main` at `17b8429`), against this release's source on an x86_64 PC | status, stats and observations accepted with no core or optional error; replay captured for core, storage, Wi-Fi, battery and probe with no losses and no rejected page; schema 7 history healthy with no invalid record; battery and Wi-Fi alert inputs present. Agent restart handling (new instance, cursor reset) was checked the same day against Hub `a48232a` and Agent `54a7885`, which already contained replay |
+
+Not verified, and therefore the gates still open before this draft is published:
+
+- **Lintian was not run locally** (not installed on the release host). CI runs it for both packaging
+  revisions on this change; its result is the evidence.
+- **No real systemd service run of 1.3.0.** The lifecycle check does not boot systemd; the x86 PC was
+  not upgraded to the package for this release.
+- **No ARM device acceptance**, as at 1.1.0 and 1.2.0: Orin Nano and Raspberry Pi startup, sandboxing
+  and readings are unverified at this version.
+- **Replay memory on boards is unmeasured.** The default 16 MiB budget counts encoded payloads, not
+  process RSS; its resident cost and CPU on an ARM board have not been measured.
+
+Publishing the draft therefore needs, at minimum, the CI Lintian result and the owner's decision on the
+open ARM and service gates. The draft release and its artifacts are the review point, not a release
+decision.
+
 ## 1.2.0 release gate (2026-10-11)
 
 Changes since 1.1.0: batteries and external power supplies as the low-frequency group `battery` (#68),
