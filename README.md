@@ -63,7 +63,7 @@ The service is unauthenticated and listens on all IPv4 interfaces by default:
 ## Development
 
 ```sh
-pip install pytest    # tests only; the runtime stays dependency-free
+python3 -m pip install -r tests/requirements.txt  # tests only; runtime stays dependency-free
 pytest
 ```
 

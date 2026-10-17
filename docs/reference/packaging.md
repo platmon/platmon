@@ -7,6 +7,13 @@ standard-library only. `Architecture: all` means the files are architecture-inde
 not that every OS/kernel has been validated. A device whose Python is older than 3.9
 needs a supported OS/interpreter before installation.
 
+Python 3.8 and Ubuntu 20.04 are CI observation targets under
+[ADR 0001](../development/adr/0001-ubuntu-lts-python-support.md), outside official support and
+without an ongoing compatibility commitment. The native package minimum remains Python 3.9.
+Container checks do not establish native OS, systemd or hardware support. See the
+[qualification record](../development/ubuntu-lts-qualification.md) for commit-specific CI evidence
+and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
+
 ## Versioning
 
 `VERSION` in `frontends/cli.py` is the single source of the application version. The
@@ -23,6 +30,11 @@ Use MAJOR.MINOR.PATCH: patch for compatible fixes, minor for compatible features
 major for breaking changes. From 1.0.0 this covers the HTTP API, the `platmon.ini` keys and
 the `platmon` command's options. API `schema_version` remains a separate contract; a
 release bump does not change it. Update `CHANGELOG.md` in the same change as `VERSION`.
+
+Removing an officially supported OS or raising the minimum Python is also a major-version change.
+Announce it at least six months in advance with the final compatible version, migration path and
+any maintenance end date. Adding a newly qualified OS is a compatible minor-version change.
+CI-only observation targets carry no such retirement guarantee; their removal is recorded in the changelog.
 
 The first release is `1.0.0` (a `v0.1.0` tag exists from packaging validation and was never
 published). Debian package versions append a packaging revision: `1.0.0-1`. A packaging-only rebuild can use `-2` without

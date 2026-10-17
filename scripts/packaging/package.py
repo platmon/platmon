@@ -26,6 +26,16 @@ SOURCE_FILES = ("platmon.py", "platmon.ini", "deploy/systemd/platmon.service", "
 SOURCE_DIRS = ("collector", "runtime", "frontends", "scripts", "packaging", "deploy", "benchmarks", "docs", "tests", ".github")
 
 
+def file_md5(path):
+    """Debian's file integrity checksum, not a security digest."""
+    data = path.read_bytes()
+    try:
+        digest = hashlib.md5(data, usedforsecurity=False)
+    except TypeError:  # Python 3.8 has no usedforsecurity keyword.
+        digest = hashlib.md5(data)
+    return digest.hexdigest()
+
+
 def version(root=ROOT):
     """Read the single source without importing Linux collectors during a build."""
     tree = ast.parse((root / "frontends/cli.py").read_text(encoding="utf-8"))
@@ -141,7 +151,7 @@ def build(output, revision="1", root=ROOT, epoch=None):
             copy_file(root / "packaging/debian" / name, control / name, executable=name != "conffiles")
         conffiles = set((control / "conffiles").read_text().splitlines())
         md5sums = "".join(
-            f"{hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()}  {path.relative_to(stage).as_posix()}\n"
+            f"{file_md5(path)}  {path.relative_to(stage).as_posix()}\n"
             for path in sorted(stage.rglob("*")) if path.is_file()
             and control not in path.parents and "/" + path.relative_to(stage).as_posix() not in conffiles)
         (control / "md5sums").write_text(md5sums, encoding="utf-8")
