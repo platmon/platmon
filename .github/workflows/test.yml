@@ -71,8 +71,8 @@ jobs:
               python3 --version
               python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/*.deb
             '
-      # Native 20.04 installation remains gated on booted OS/hardware qualification;
-      # the published dependency is still Python >= 3.9. Never force dependencies.
+      # Ubuntu 20.04 is an observation target, outside official native support.
+      # The package requires Python >= 3.9; never force dependencies.
       - name: Build upgrade fixture
         if: matrix.ubuntu != '20.04'
         run: python3 scripts/packaging/package.py --revision 2 --output dist/second

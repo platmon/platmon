@@ -1,8 +1,9 @@
 # Ubuntu LTS qualification
 
 This record tracks implementation of [ADR 0001](adr/0001-ubuntu-lts-python-support.md).
-The policy is accepted; native Ubuntu 20.04 support is still pending. The package continues to
-require Python 3.9 or later until booted OS and representative hardware qualification is complete.
+Python 3.8 and Ubuntu 20.04 are CI observation targets, outside official support and without an
+ongoing compatibility commitment. The native package continues to require Python 3.9 or later.
+No minimum-version reduction or native Ubuntu 20.04 qualification is planned by this policy.
 
 ## Implementation
 
@@ -12,8 +13,8 @@ require Python 3.9 or later until booted OS and representative hardware qualific
 - Interpreter CI covers 3.8, 3.9, 3.10, 3.12, 3.13 and 3.14. Test-only pytest versions are pinned
   in `tests/requirements.txt`; dependency resolver constraints select compatible transitive packages.
 - Ubuntu userspace CI checks extracted packages on 20.04, 22.04, 24.04 and 26.04, and dpkg lifecycle
-  on 22.04, 24.04 and 26.04. The 20.04 lifecycle check must be enabled when the native dependency
-  is lowered; dependency checks must not be bypassed to make it pass.
+  on 22.04, 24.04 and 26.04. The 20.04 lifecycle check is excluded because its default interpreter
+  does not satisfy the package dependency; dependency checks must not be bypassed.
 
 ## Local evidence on 2026-10-17
 
@@ -39,7 +40,7 @@ covered by the packaging suite; they do not alter the runtime payload tested in 
 
 | Container userspace | Python reported | Extracted server/API/web/CLI smoke | dpkg lifecycle |
 | --- | --- | --- | --- |
-| Ubuntu 20.04 | 3.8.10 | Passed | Pending: package still requires Python 3.9 |
+| Ubuntu 20.04 | 3.8.10 | Passed | Outside scope: package requires Python 3.9 |
 | Ubuntu 22.04 | 3.10.12 | Passed | Passed |
 | Ubuntu 24.04 | 3.12.3 | Passed | Passed |
 | Ubuntu 26.04 | 3.14.4 | Passed | Passed |
@@ -65,14 +66,23 @@ python3 scripts/packaging/check_package_install.py \
 Use each intended interpreter for the Python commands and fresh output paths when rebuilding.
 The workflow contains the read-only container mounts and default-interpreter smoke invocation.
 
-## Remaining release gates
+## Hosted CI evidence
 
-1. Run the expanded workflow on GitHub, including the intermediate interpreter versions.
-2. Verify service start/restart and isolation under systemd on booted Ubuntu targets. Container
+Commit `48a7a63723738dd67524fd9ccde6d924004942a7` passed all six interpreter jobs, packaging,
+and all four Ubuntu userspace jobs in [PR run 39026693707](https://github.com/platmon/platmon/actions/runs/39026693707).
+The [Python 3.8 job](https://github.com/platmon/platmon/actions/runs/39026693707/job/117378965348)
+and [Ubuntu 20.04 job](https://github.com/platmon/platmon/actions/runs/39026693707/job/117379321326)
+passed on 2026-10-17. This supersedes the earlier local CI-pending note, not its historical test results.
+These results establish CI compatibility at that commit, not official OS or hardware support.
+Later commits must be checked separately before claiming their CI passed.
+
+## Remaining gates for new official OS support
+
+1. Verify service start/restart and isolation under systemd on booted Ubuntu 22.04, 24.04 and 26.04 targets. Container
    userspace tests share the host kernel and do not qualify those targets' kernels.
-3. Exercise representative x86_64 and arm64 hardware and record collector availability; qualify
+2. Exercise representative x86_64 and arm64 hardware and record collector availability; qualify
    Jetson/vendor images separately. Local containers establish no new board support.
-4. Once these gates pass, lower the Debian dependency and its test to Python 3.8, enable the
-   20.04 lifecycle job, validate installation there, and update public prerequisites together.
+3. Publish only the combinations actually qualified. Any change to native Python requirements
+   needs a separate decision; successful observation checks alone do not justify it.
 
 No new native OS support is advertised by this intermediate implementation.
