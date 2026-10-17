@@ -25,6 +25,33 @@ BRAND_ASSETS = {
 LIVE = ("/api/stats", "/api/status", "/api/observations", "/api/history", "/api/samples", "/api/observation-samples", "/text")
 MAX_POINTS, MAX_PREFIX = 600, 128
 REQUEST_TIMEOUT = 10  # seconds to send a request line and headers in; generous for any real client
+WRITE_TIMEOUT = 10  # seconds without progress on a response write
+WRITE_CHUNK = 64 * 1024
+
+
+class BoundedHTTPServer(ThreadingHTTPServer):
+    """Reject excess connections before allocating another request thread."""
+    max_connections = 32
+
+    def __init__(self, *args, **kwargs):
+        self._slots = threading.BoundedSemaphore(self.max_connections)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 def history_query(history, query):
@@ -80,12 +107,16 @@ def make_handler(sampler, web=True, observations=None, history=None, levels=None
         # memory behind it, for as long as it stays connected: a dropped client or a port scan leaves
         # the thread parked in the request read forever. This bounds reading the request only.
         timeout = REQUEST_TIMEOUT
+        write_timeout = WRITE_TIMEOUT
+
+        def handle(self):
+            try:
+                super().handle()
+            except (TimeoutError, ConnectionError):
+                pass  # stalled or disconnected peer: finish closes the socket and releases its slot
 
         def do_GET(self):
-            # Answering is not bounded: a socket timeout is a deadline for a whole write, not an idle
-            # one, so keeping it would cut a large response (/api/history can be hundreds of kB) off a
-            # client that reads slowly but steadily. HTTP/1.0 closes after this, so no read follows.
-            self.connection.settimeout(None)
+            self.connection.settimeout(self.write_timeout)
             path, _, query = self.path.partition("?")
             if path in ("/api/samples", "/api/observation-samples"):
                 self.path = path
@@ -168,7 +199,14 @@ def make_handler(sampler, web=True, observations=None, history=None, levels=None
             if self.path in LIVE:  # a cached answer would show old data as current
                 self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            self.wfile.write(body)
+            # send(), unlike sendall(), returns on partial progress. Each call gets its own timeout,
+            # so a large response can take longer overall while a stopped reader is still reclaimed.
+            pending = memoryview(body)
+            while pending:
+                sent = self.connection.send(pending[:WRITE_CHUNK])
+                if not sent:
+                    raise ConnectionError("response socket closed")
+                pending = pending[sent:]
 
         def log_message(self, *args):
             pass
@@ -178,7 +216,7 @@ def make_handler(sampler, web=True, observations=None, history=None, levels=None
 
 def start(sampler, cfg, observations=None, history=None, levels=None):
     """cfg: the [http] config section (bind, port, web); levels: see make_handler."""
-    httpd = ThreadingHTTPServer((cfg.get("bind"), cfg.getint("port")),
+    httpd = BoundedHTTPServer((cfg.get("bind"), cfg.getint("port")),
                                 make_handler(sampler, cfg.getboolean("web"), observations, history, levels))
     print(f"platmon http on {cfg.get('bind')}:{cfg.getint('port')}", flush=True)
     t = threading.Thread(target=httpd.serve_forever, name="http", daemon=True)
