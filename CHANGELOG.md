@@ -4,7 +4,7 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `frontends/cli.py`; Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.3.0 — 2026-10-17
 
 - Battery charge and the connected Wi-Fi signal get warning and critical levels, `[thresholds] battery`
   (default 20, 10 %) and `wifi` (default -70, -80 dBm). Their low reading is the bad one, so the warning
@@ -24,6 +24,17 @@ API schema versions are independent of release versions.
   and rejects cursors from a previous process. Live endpoints and numeric history keep
   their existing contracts. Replay is enabled by default (up to 600 s / 16 MiB of
   encoded payloads); restarting clears it. See docs/reference/replay.md.
+
+- The HTTP server allows at most 32 active connections and closes excess connections before a request
+  thread is created; request reads and response writes time out after 10 seconds without progress, so
+  a stalled or disconnected client releases its slot. The overview's cached storage warnings expire with
+  their observation, and one probe target's socket error no longer affects the others.
+
+- Source checkout files are grouped by responsibility. Deployment commands move from `scripts/systemd`
+  and `scripts/docker` to `deploy/systemd` and `deploy/docker`, the Dockerfile and compose files move
+  to `deploy/docker`, and package build and check tools move to `scripts/packaging`. Installed
+  commands, service names, configuration paths, the HTTP API and `platmon.ini` keys are unchanged;
+  a source or Docker installation runs the same commands from their new paths (docs/reference/packaging.md).
 
 - Debian packages include a CLI manual, compressed upstream and packaging changelogs,
   copyright metadata and file checksums. Default reproducible timestamps come from

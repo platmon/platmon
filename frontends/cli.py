@@ -32,7 +32,7 @@ except ImportError:
     termios = tty = None
 
 # The release version lives here so the copied, single-file client stays standalone.
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 PORT = 9797
 
 
