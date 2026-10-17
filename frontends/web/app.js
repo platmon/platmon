@@ -401,7 +401,8 @@ function overviewRows(s) {
     }
   }
   // other filesystems, from the storage observation when the Storage view fetched it; the root card covers /
-  const fsData = obs && obs.groups && obs.groups.storage && obs.groups.storage.data;
+  const storage = obs && obs.groups && obs.groups.storage;
+  const fsData = storage && storage.observation && !observationStale(storage) ? storage.data : null;
   for (const f of listOf(fsData, 'filesystems')) {
     const lv = f.total_bytes && !f.mount_points.some(p => p.path === '/') ? level(fsPct(f), LIMITS.filesystem) : 'ok';
     if (lv !== 'ok') alerts.push({lv, tab: 'storage', name: f.mount_points[0].path, value: fsPct(f).toFixed(0) + '%'});
