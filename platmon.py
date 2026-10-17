@@ -48,7 +48,7 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
     # the web page's warning and critical levels; temperature empty: the board default the page picks
     "thresholds": {"cpu": "80, 90", "gpu": "80, 90", "memory": "80, 90", "filesystem": "80, 90", "temperature": "",
-                   "battery": "20, 10", "wifi": "-70, -80"},
+                   "battery": "10, 5", "wifi": "-70, -80"},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
 RANGES = {("core", "interval"): (0.1, 3600), ("storage", "interval"): (5, 3600), ("wifi", "interval"): (1, 3600), ("probe", "interval"): (1, 3600),
@@ -89,7 +89,9 @@ def check(cfg):
 BOARD_TEMPERATURE = {"Jetson Orin": [85.0, 95.0], "Raspberry Pi": [75.0, 80.0]}
 OTHER_TEMPERATURE = [80.0, 90.0]
 # Levels where the low reading is the bad one: warning above critical, both inside (floor, ceiling).
-# Battery charge in percent; Wi-Fi signal in dBm (-120 dBm is below any receiver's sensitivity).
+# Battery charge in percent; Wi-Fi signal in dBm (-120 dBm is below any receiver's sensitivity). The defaults are
+# the usual values: Windows' low and critical battery levels, and the common Wi-Fi rule of thumb (-70 dBm the
+# least for reliable data, below -80 dBm unreliable).
 LOW_LEVELS = {"battery": (0, 100, "%"), "wifi": (-120, 0, " dBm")}
 
 
