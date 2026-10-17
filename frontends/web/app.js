@@ -13,7 +13,7 @@ const muted = text => `<span class="muted">${text}</span>`;
 // The server fills them in from [thresholds] in platmon.ini, temperature with its board's default when
 // not set there (platmon.py BOARD_TEMPERATURE); these generic defaults apply only to a page not served by platmon.
 const LIMITS = {cpu: [80, 90], gpu: [80, 90], memory: [80, 90], filesystem: [80, 90], temperature: [80, 90],
-  battery: [10, 5], wifi: [-70, -80]};
+  battery: [20, 10], wifi: [-70, -80]};
 try { Object.assign(LIMITS, JSON.parse($('levels').textContent)); } catch (e) {}  // not served by platmon
 LIMITS.temperature ||= [80, 90];
 const level = (v, [warn, crit]) => v >= crit ? 'crit' : v >= warn ? 'warn' : 'ok';

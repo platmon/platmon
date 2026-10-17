@@ -74,13 +74,13 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
       {name: 'BAT1', present: true, percent: ${percent}}, {name: 'BAT2', present: false, percent: null}]}},
     wifi: {state: 'ok', stale_after_ms: 15000, observation: {data_age_ms: 0, stale: false}, data: {interfaces: [
       {name: 'wlan0', connected: true, signal_dbm: ${signal_dbm}}, {name: 'wlan1', connected: false, signal_dbm: -95}]}}}}`);
-  low(11, -69);
+  low(21, -69);
   assert(!attention({}).includes('Needs attention'), 'above both warning levels: nothing');
-  low(10, -70);
+  low(20, -70);
   const atWarn = attention({});
-  assert(atWarn.includes('<a class="pill warn" href="#power">BAT1 <span class="mono">10%') &&
+  assert(atWarn.includes('<a class="pill warn" href="#power">BAT1 <span class="mono">20%') &&
          atWarn.includes('<a class="pill warn" href="#network">wlan0 <span class="mono">-70 dBm'), 'at the warning level: warn');
-  low(5, -80);
+  low(10, -80);
   const atCrit = attention({});
   assert(atCrit.includes('pill crit" href="#power">BAT1') && atCrit.includes('pill crit" href="#network">wlan0'), 'at critical: crit');
   assert(!atCrit.includes('BAT2') && !atCrit.includes('wlan1'), 'an empty bay and a disconnected interface raise nothing');
@@ -89,10 +89,10 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   low(50, -60);
   run('LIMITS.battery = [60, 30]; LIMITS.wifi = [-55, -65]');  // as the server sends a configured [thresholds]
   assert(attention({}).includes('pill warn" href="#power">BAT1') && attention({}).includes('pill warn" href="#network">wlan0'), 'served levels apply');
-  run('LIMITS.battery = [10, 5]; LIMITS.wifi = [-70, -80]');
-  low(4, -75);
+  run('LIMITS.battery = [20, 10]; LIMITS.wifi = [-70, -80]');
+  low(5, -75);
   const rows = run('batteryRows()'), signal = run('wifiRows()');
-  assert(rows.includes('<span class="t-crit">4 %') && rows.includes('<div class="crit" style="width:4.0%"'), 'the charge and its bar are critical');
+  assert(rows.includes('<span class="t-crit">5 %') && rows.includes('<div class="crit" style="width:5.0%"'), 'the charge and its bar are critical');
   assert(signal.includes('<span class="t-warn">-75 dBm') && signal.includes('<div class="warn"'), 'the signal and its bar warn');
   low(80, -50);
   assert(run('batteryRows()').includes('<span>80 %') && run('wifiRows()').includes('<span>-50 dBm'), 'ok readings keep plain markup');

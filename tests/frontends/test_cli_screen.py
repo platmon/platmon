@@ -86,14 +86,14 @@ def test_low_levels_attention_and_colors(monkeypatch):
     obs["groups"]["battery"]["data"]["batteries"].append(dict(bat, name="BAT2", present=False, percent=3))
     obs["groups"]["wifi"]["data"]["interfaces"].append(dict(wlan, name="wlan1", connected=False, signal_dbm=-99))
     assert attention(FULL, obs) == []  # 89 % and -47 dBm are fine
-    bat["percent"], wlan["signal_dbm"] = 10, -70
-    assert attention(FULL, obs) == [("BAT1", "10 %", "warn"), ("wlan0", "-70 dBm", "warn")]
-    bat["percent"], wlan["signal_dbm"] = 5, -81
-    assert attention(FULL, obs) == [("BAT1", "5 %", "crit"), ("wlan0", "-81 dBm", "crit")]
+    bat["percent"], wlan["signal_dbm"] = 20, -70
+    assert attention(FULL, obs) == [("BAT1", "20 %", "warn"), ("wlan0", "-70 dBm", "warn")]
+    bat["percent"], wlan["signal_dbm"] = 10, -81
+    assert attention(FULL, obs) == [("BAT1", "10 %", "crit"), ("wlan0", "-81 dBm", "crit")]
     power = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "power"))
     network = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "network"))
     crit = r"\033\[31(;1)?m"  # the critical color, bold or not
-    assert re.search(crit + "5 %", power) and re.search(crit + "-81 dBm", network)
+    assert re.search(crit + "10 %", power) and re.search(crit + "-81 dBm", network)
     assert "NEEDS ATTENTION" in "\n".join(plain(screen(FULL, obs, 119, 40, Style(), LIVE, {})))
     obs["groups"]["battery"]["observation"]["stale"] = True
     obs["groups"]["wifi"]["observation"]["stale"] = True

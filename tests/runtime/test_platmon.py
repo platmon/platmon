@@ -83,9 +83,9 @@ def test_frontends_flag_enables_exactly_those(tmp_path):
     ("[thresholds]\ntemperature = 70.5, 82\n", None, None),
     # battery and Wi-Fi: the low reading is the bad one, so warning above critical
     ("[thresholds]\nbattery = 10, 20\n", None, r"battery = '10, 20': a low reading is the bad one, so need 100% > warning > critical > 0%"),
-    ("[thresholds]\nbattery = 10, 0\n", None, "> 0%"),
+    ("[thresholds]\nbattery = 20, 0\n", None, "> 0%"),
     ("[thresholds]\nbattery = 100, 10\n", None, "100% > warning"),
-    ("[thresholds]\nbattery = 20\n", None, r"give two numbers, warning then critical, e.g. 10, 5"),
+    ("[thresholds]\nbattery = 20\n", None, r"give two numbers, warning then critical, e.g. 20, 10"),
     ("[thresholds]\nwifi = -80, -70\n", None, r"need 0 dBm > warning > critical > -120 dBm"),
     ("[thresholds]\nwifi = -70, -121\n", None, "> -120 dBm"),
     ("[thresholds]\nwifi = 5, -80\n", None, "0 dBm > warning"),
@@ -106,7 +106,7 @@ def test_levels(tmp_path):
     """Defaults: percent levels, and no temperature (the page picks the board's); the file overrides them.
     Battery and Wi-Fi are low-is-bad: warning above critical."""
     assert levels(load_config()) == {"cpu": [80, 90], "gpu": [80, 90], "memory": [80, 90], "filesystem": [80, 90],
-                                     "temperature": None, "battery": [10, 5], "wifi": [-70, -80]}
+                                     "temperature": None, "battery": [20, 10], "wifi": [-70, -80]}
     ini = tmp_path / "p.ini"
     ini.write_text("[thresholds]\nmemory = 70, 85\ntemperature = 70.5, 82\n")
     got = levels(load_config(str(ini)))
