@@ -61,17 +61,21 @@ def test_answering_is_not_bounded_by_the_request_deadline():
     not an idle one, so leaving it in force would cut a large response (/api/history can be hundreds of
     kB) off a client that reads slowly but steadily."""
     seen = []
+    recorded = threading.Event()
 
     def watch(cls):
         class Watched(cls):
             def do_GET(self):
                 super().do_GET()
                 seen.append(self.connection.gettimeout())
+                recorded.set()
         return Watched
 
     httpd, base = serve({"platform": "PC"}, timeout=0.3, wrap=watch)
     try:
         assert get(base + "/api/status")[0] == 200
+        # the client has the whole response before the handler records, so wait for the handler
+        assert recorded.wait(5)
         assert seen == [WRITE_TIMEOUT]  # response progress has its own budget
     finally:
         httpd.shutdown()
