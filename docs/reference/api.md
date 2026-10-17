@@ -19,6 +19,11 @@ One background thread collects a snapshot every `interval`; HTTP requests only r
 never collect on their own. `/api/stats` and `/text` wait up to 5 s for the first snapshot after the
 service starts; `/api/status` never waits.
 
+The HTTP server allows at most 32 active connections. Excess connections are closed before a request
+thread is created; clients can retry after an active connection finishes. Request reads time out after
+10 s without input. Response writes time out after 10 s without send progress; a steadily transferring
+response may take longer overall. Disconnected or stalled clients release their connection slots.
+
 ## `/api/stats`
 
 The metrics (`cpu`, `gpu`, `memory`, `disk`, `temperature`, `power`, `fans`, `time`, ...) keep their

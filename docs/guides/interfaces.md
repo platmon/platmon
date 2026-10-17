@@ -60,6 +60,8 @@ filesystem levels are warning at 80% and critical at 90%. Temperature defaults
 are Jetson Orin 85/95 °C, Raspberry Pi 75/80 °C and other platforms 80/90 °C.
 These are instantaneous thresholds, not alerts based on persistence;
 change them in the service's `[thresholds]` configuration.
+Other filesystem warnings use the cached Storage observation only while it is current. Staying on
+Overview does not refresh that observation; its warnings disappear when it becomes stale.
 
 The **Resources, Network, Storage, Temperature** and
 **Power & battery** views show details and related recent history.

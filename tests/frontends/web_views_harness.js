@@ -60,6 +60,15 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   assert(orin.includes('pill warn') && !orin.includes('pill crit'), 'the served temperature level applies');
   assert(attention({gpu: {usage: 75, freq: null}}).includes('href="#resources">GPU'), 'configured GPU level: warns from 70 %');
   assert(!full.includes('href="#resources">CPU'), 'unset levels keep their defaults');
+  run(`obsAt = performance.now(); obs = {groups: {storage: {state: 'ok', stale_after_ms: 90000,
+    observation: {data_age_ms: 89000, stale: false}, data: {filesystems: [
+      {total_bytes: 100, used_bytes: 99, mount_points: [{path: '/data'}]}]}}}}`);
+  assert(attention({}).includes('href="#storage">/data'), 'fresh storage values contribute alerts');
+  now += 2000;
+  assert(!attention({}).includes('href="#storage">/data'), 'cached storage alerts expire on overview without another fetch');
+  run('obs.groups.storage.observation.stale = true; obs.groups.storage.observation.data_age_ms = 0; obsAt = performance.now()');
+  assert(!attention({}).includes('href="#storage">/data'), 'server-marked stale storage never contributes alerts');
+  run('obs = null'); now = 0;
   run('LIMITS.temperature = [80, 90]');
   assert(el('overview').innerHTML.includes('eth0') && !el('overview').innerHTML.includes('999999'));
   const networkOverview = interfaces => run('overviewRows({...latestStats, network: ' + JSON.stringify({interfaces}) + '})');

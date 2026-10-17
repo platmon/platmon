@@ -1,5 +1,6 @@
 """collector/probe.py: target parsing, the TCP connect timing (against this machine's loopback only), the
 observation and its config. No packet leaves the host: every real connection is to 127.0.0.1."""
+import errno
 import socket
 import threading
 
@@ -94,6 +95,37 @@ def test_targets_are_probed_one_after_another():
         return 1.0, None
     p = Probe([("192.0.2.1", 1), ("192.0.2.2", 2), ("192.0.2.3", 3)], connect=connect)
     assert [t["port"] for t in p(metadata.Group("probe"))["targets"]] == [1, 2, 3] and peak[0] == 1
+
+
+def test_socket_creation_error_does_not_escape(monkeypatch):
+    def unsupported(*args):
+        raise OSError(errno.EAFNOSUPPORT, "IPv6 unavailable")
+    monkeypatch.setattr(socket, "socket", unsupported)
+    assert connect_ms("::1", 80, 0.1) == (None, "error")
+
+
+def test_socket_error_keeps_other_targets_and_failure_window():
+    from runtime.slow import Slow
+
+    calls = []
+    def connect(address, port, timeout):
+        calls.append(address)
+        if address == "::1":
+            raise OSError(errno.EAFNOSUPPORT, "IPv6 unavailable")
+        return 1.0, None
+    targets = [("127.0.0.1", 80), ("::1", 80), ("127.0.0.2", 80)]
+    worker = Slow("probe", Probe(targets, connect=connect), 10, lambda: 0)
+    for attempt in (1, 2):
+        worker.observe_once()
+        entry = worker.view()
+        assert entry["state"] == "ok"  # a connection failure is a result, not a broken collector
+        results = entry["data"]["targets"]
+        assert [r["address"] for r in results] == [a for a, _ in targets]
+        assert [r["connect_ms"] for r in results] == [1.0, None, 1.0]
+        assert results[1]["reason"] == "error"
+        assert results[1]["attempts"] == results[1]["failures"] == attempt
+        assert results[1]["failure_ratio"] == 1.0
+    assert calls == [a for a, _ in targets] * 2
 
 
 @pytest.mark.parametrize("text, error", [

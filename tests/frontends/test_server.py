@@ -11,7 +11,7 @@ import pytest
 
 from runtime.sampler import METADATA_KEYS, Sampler
 from frontends.cli import VERSION, render
-from frontends.server import REQUEST_TIMEOUT, make_handler
+from frontends.server import BoundedHTTPServer, REQUEST_TIMEOUT, WRITE_TIMEOUT, make_handler
 
 
 class NoWait(Sampler):
@@ -24,7 +24,7 @@ class NoWait(Sampler):
         return super()._stats_json(0.0)
 
 
-def serve(stats, web=True, sampler=None, timeout=None, wrap=None):
+def serve(stats, web=True, sampler=None, timeout=None, wrap=None, server_class=BoundedHTTPServer):
     """Serves one collected snapshot of stats (None: nothing collected yet), or the given sampler.
     timeout: the handler's request deadline, shortened from the product default to keep tests fast.
     wrap: called with the handler class, returns the class to serve with."""
@@ -35,7 +35,7 @@ def serve(stats, web=True, sampler=None, timeout=None, wrap=None):
     cls = make_handler(sampler, web)
     if timeout is not None:
         cls = type("Impatient", (cls,), {"timeout": timeout})
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), wrap(cls) if wrap else cls)
+    httpd = server_class(("127.0.0.1", 0), wrap(cls) if wrap else cls)
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
     return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
 
@@ -72,9 +72,117 @@ def test_answering_is_not_bounded_by_the_request_deadline():
     httpd, base = serve({"platform": "PC"}, timeout=0.3, wrap=watch)
     try:
         assert get(base + "/api/status")[0] == 200
-        assert seen == [None]  # no deadline left on the connection the response went out on
+        assert seen == [WRITE_TIMEOUT]  # response progress has its own budget
     finally:
         httpd.shutdown()
+
+
+@pytest.mark.parametrize("reading", [False, True])
+def test_response_reclaims_stalled_reader_but_allows_continued_progress(reading):
+    finished = threading.Event()
+    body = b"x" * (256 * 1024)
+
+    def wrap(cls):
+        class Response(cls):
+            write_timeout = 0.3
+
+            def setup(self):
+                super().setup()
+                self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+
+            def handle(self):
+                try:
+                    super().handle()
+                finally:
+                    finished.set()
+        return Response
+
+    class Payload(NoWait):
+        def _stats_json(self, timeout=0.0):
+            return body, {}
+
+    httpd, _ = serve(None, sampler=Payload(lambda: None), wrap=wrap)
+    client = socket.socket()
+    client.settimeout(5)
+    client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    try:
+        client.connect(httpd.server_address)
+        client.sendall(b"GET /api/stats HTTP/1.0\r\n\r\n")
+        if reading:
+            response = bytearray()
+            start = time.monotonic()
+            while True:
+                chunk = client.recv(2048)
+                if not chunk:
+                    break
+                response.extend(chunk)
+                time.sleep(0.01)
+            assert time.monotonic() - start > 0.3
+            assert bytes(response).split(b"\r\n\r\n", 1)[1] == body
+        assert finished.wait(3), "stopped reader must release the request thread before client closes"
+    finally:
+        client.close()
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_connection_limit_rejects_excess_and_reuses_released_slot():
+    entered, finished, release = threading.Event(), threading.Event(), threading.Event()
+
+    class OneConnection(BoundedHTTPServer):
+        max_connections = 1
+
+    def wrap(cls):
+        class Waiting(cls):
+            def do_GET(self):
+                entered.set()
+                assert release.wait(5)
+                super().do_GET()
+
+            def finish(self):
+                try:
+                    super().finish()
+                finally:
+                    finished.set()
+        return Waiting
+
+    httpd, base = serve({}, wrap=wrap, server_class=OneConnection)
+    client = socket.create_connection(httpd.server_address, timeout=5)
+    try:
+        client.sendall(b"GET /api/status HTTP/1.0\r\n\r\n")
+        assert entered.wait(2)
+        with socket.create_connection(httpd.server_address, timeout=5) as excess:
+            assert excess.recv(1) == b""  # rejected before another handler is created
+        release.set()
+        assert finished.wait(2)
+        # Acquiring the permit waits for process_request_thread's final cleanup as well as finish().
+        assert httpd._slots.acquire(timeout=2)
+        httpd._slots.release()
+        assert get(base + "/api/status")[0] == 200
+    finally:
+        release.set()
+        client.close()
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_connection_slot_is_released_when_thread_creation_fails(monkeypatch):
+    httpd, _ = serve(None)
+    request = socket.socket()
+    available = httpd.max_connections
+    def fail(*args):
+        raise RuntimeError("cannot start thread")
+    monkeypatch.setattr(ThreadingHTTPServer, "process_request", fail)
+    try:
+        with pytest.raises(RuntimeError, match="cannot start thread"):
+            httpd.process_request(request, ("127.0.0.1", 0))
+        for _ in range(available):
+            assert httpd._slots.acquire(blocking=False)
+        assert not httpd._slots.acquire(blocking=False)
+    finally:
+        request.close()
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def get(url):

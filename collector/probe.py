@@ -39,23 +39,23 @@ def connect_ms(address, port, timeout, clock=time.monotonic_ns):
     """(milliseconds to complete the connection, None) or (None, reason): refused, timeout, unreachable,
     error. One socket, closed before returning: nothing stays outstanding for a later answer."""
     family = socket.AF_INET6 if ":" in address else socket.AF_INET
-    s = socket.socket(family, socket.SOCK_STREAM)
     try:
-        s.setblocking(False)
-        start = clock()
-        rc = s.connect_ex((address, port))
-        if rc not in (0, errno.EINPROGRESS):
-            return None, _reason(rc)
-        if rc:
-            _, w, _ = select.select([], [s], [], timeout)
-            if not w:
-                return None, "timeout"
-            rc = s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
-            if rc:
+        with socket.socket(family, socket.SOCK_STREAM) as s:
+            s.setblocking(False)
+            start = clock()
+            rc = s.connect_ex((address, port))
+            if rc not in (0, errno.EINPROGRESS):
                 return None, _reason(rc)
-        return round((clock() - start) / 1e6, 3), None
-    finally:
-        s.close()
+            if rc:
+                _, w, _ = select.select([], [s], [], timeout)
+                if not w:
+                    return None, "timeout"
+                rc = s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if rc:
+                    return None, _reason(rc)
+            return round((clock() - start) / 1e6, 3), None
+    except OSError as e:
+        return None, _reason(e.errno)
 
 
 def _reason(code):
@@ -77,7 +77,10 @@ class Probe:
     def __call__(self, group):
         out = {"provider": PROVIDER, "timeout_ms": self.timeout * 1000, "targets": []}
         for address, port in self.targets:
-            ms, reason = self._connect(address, port, self.timeout)
+            try:
+                ms, reason = self._connect(address, port, self.timeout)
+            except OSError as e:
+                ms, reason = None, _reason(e.errno)
             recent = self._recent[address, port]
             recent.append(ms is not None)
             out["targets"].append(group.got({
