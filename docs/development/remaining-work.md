@@ -172,7 +172,7 @@ the reasons do not have to be rediscovered. None of them is a defect in what shi
 
 | Item | What it would take | Why it waited |
 | --- | --- | --- |
-| A battery level in `[thresholds]` | `DEFAULTS["thresholds"]`, `levels()` and its range check, the CLI's `LIMITS`, the web page's `LIMITS` — and an inverted comparison | For a battery the **low** reading is the bad one, the opposite of every level `level()` compares, so it is not a new row in an existing table but a second kind of threshold. The viewers show the charge without a warning colour until that is designed |
+| A battery level in `[thresholds]` | Done: `battery` and `wifi` levels, warning above critical, compared at or below by `low_level()` / `lowLevel` (docs/guides/interfaces.md) | — |
 | `temp`, `time_to_empty_now`, `time_to_full_now` | Three more standard `power_supply` attributes in `collector/battery.py`; absent ones already cost nothing | `temp` is a temperature and `/api/stats` already has a `temperature` table, so where it belongs is a design question, not a field to add. The two time estimates are a driver's own extrapolation, not a reading |
 | What reading a battery costs the battery | A power measurement on a battery-powered host, with the group off and on | It is the reason the default interval is 60 s rather than the 10 s floor, and it is the one number behind that choice that is not measured |
 | Battery in a fleet server's own history | `platmon-hub`: its history projection lists the groups it stores (`storage`, `wifi`, `probe`), so the group is validated, shown on its dashboard and not persisted | Work in that repository, not this one. Nothing here blocks it: the group is accepted by its validator as it is |

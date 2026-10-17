@@ -362,7 +362,7 @@ check uses `/api/stats` for that reason).
   "collecting_for_ms": null,
   "clock": {"source": "boottime", "suspend_aware": true},
   "levels": {"cpu": [80.0, 90.0], "gpu": [80.0, 90.0], "memory": [80.0, 90.0], "filesystem": [80.0, 90.0],
-             "temperature": [85.0, 95.0]}
+             "temperature": [85.0, 95.0], "battery": [20.0, 10.0], "wifi": [-70.0, -80.0]}
 }
 ```
 
@@ -382,7 +382,9 @@ check uses `/api/stats` for that reason).
   growing value does not mean the reads are making progress.
 - `levels`: the warning and critical levels from `[thresholds]` in `platmon.ini`, as `[warning, critical]`
   in percent, and in °C for `temperature`. When `[thresholds]` leaves `temperature` empty, it is this
-  board's default (Jetson Orin 85/95, Raspberry Pi 75/80, others 80/90). The web page and the `platmon`
+  board's default (Jetson Orin 85/95, Raspberry Pi 75/80, others 80/90). `battery` (percent) and `wifi`
+  (dBm) are levels whose low reading is the bad one: the warning is **above** the critical level, and a
+  reading at or below a level reaches it. A client that does not know a name ignores it. The web page and the `platmon`
   command color readings with them. Older servers send no `levels`, or a null `temperature`: the `platmon`
   command then uses those defaults.
 

@@ -12,14 +12,18 @@ const muted = text => `<span class="muted">${text}</span>`;
 // Status levels: ok below warn, warn from warn, crit from crit. Instantaneous values, no persistence.
 // The server fills them in from [thresholds] in platmon.ini, temperature with its board's default when
 // not set there (platmon.py BOARD_TEMPERATURE); these generic defaults apply only to a page not served by platmon.
-const LIMITS = {cpu: [80, 90], gpu: [80, 90], memory: [80, 90], filesystem: [80, 90], temperature: [80, 90]};
+const LIMITS = {cpu: [80, 90], gpu: [80, 90], memory: [80, 90], filesystem: [80, 90], temperature: [80, 90],
+  battery: [20, 10], wifi: [-70, -80]};
 try { Object.assign(LIMITS, JSON.parse($('levels').textContent)); } catch (e) {}  // not served by platmon
 LIMITS.temperature ||= [80, 90];
 const level = (v, [warn, crit]) => v >= crit ? 'crit' : v >= warn ? 'warn' : 'ok';
+// battery and wifi: the low reading is the bad one, so a level is reached at or below it (warning above critical)
+const lowLevel = (v, [warn, crit]) => v <= crit ? 'crit' : v <= warn ? 'warn' : 'ok';
 const textLevel = lv => lv === 'ok' ? '' : ' t-' + lv;
 const pctOf = (used, total) => total ? 100 * used / total : 0;
-// a bar on a 0–100 scale; limits add the level color and, unless ticks is false, two threshold ticks
-const bar = (pct, limits, ticks = true) => `<div class="bar"><div class="${limits ? level(pct, limits) : 'ok'}" style="width:${Math.max(0, Math.min(pct, 100)).toFixed(1)}%"></div>` +
+// a bar on a 0–100 scale; limits add the level color and, unless ticks is false, two threshold ticks;
+// lv, when given, is the level to color it with (a lowLevel reading's)
+const bar = (pct, limits, ticks = true, lv = limits ? level(pct, limits) : 'ok') => `<div class="bar"><div class="${lv}" style="width:${Math.max(0, Math.min(pct, 100)).toFixed(1)}%"></div>` +
   (limits && ticks ? limits.map(t => `<span style="left:${t}%"></span>`).join('') : '') + '</div>';
 const meter = (label, text, pct, limits) =>
   `<div class="meter"><div class="meter-head"><span>${label}</span><span>${text}</span></div>${bar(pct, limits)}</div>`;
@@ -152,14 +156,14 @@ function wifiRows() {
   return '<div class="meters">' + items.map(i => {
     const state = i.connected !== true ? (i.connected === false ? 'not connected' : esc(i.connection_state || 'unknown'))
       : i.signal_dbm != null ? i.signal_dbm + ' dBm' : i.signal_raw != null ? `signal ${i.signal_raw} (unit not reported)` : 'signal n/a';
-    return `<div class="meter"><div class="meter-head"><span class="mono">${esc(i.name)}</span><span>${state}</span></div>` +
-      (i.connected === true && i.signal_dbm != null ? bar((i.signal_dbm + 90) / 60 * 100) : '') +
+    const lv = i.connected === true && i.signal_dbm != null ? lowLevel(i.signal_dbm, LIMITS.wifi) : 'ok';
+    return `<div class="meter"><div class="meter-head"><span class="mono">${esc(i.name)}</span><span${lv === 'ok' ? '' : ` class="t-${lv}"`}>${state}</span></div>` +
+      (i.connected === true && i.signal_dbm != null ? bar((i.signal_dbm + 90) / 60 * 100, null, false, lv) : '') +
       (i.connected === true ? `<div class="detail">Connected${i.link_quality != null ? ' · link quality ' + i.link_quality : ''}</div>` : '') + '</div>';
   }).join('') + '</div>';
 }
 // batteries and external supplies, observed on their own slow cadence: one reading is one firmware call,
-// so the age is shown. No threshold colouring: for a battery a low reading is the bad one, the opposite of
-// every level() reading, and [thresholds] has no battery entry.
+// so the age is shown. The charge is coloured by lowLevel: for a battery the low reading is the bad one.
 function batteryRows() {
   const g = obs && obs.groups && obs.groups.battery, o = g && g.observation, d = g && g.data;
   const cells = d && Array.isArray(d.batteries) ? d.batteries : [];
@@ -168,7 +172,8 @@ function batteryRows() {
   const rows = cells.map(b => {
     const head = b.present === false ? 'not present'
       : b.percent != null ? b.percent + ' %' : esc(b.capacity_level || 'charge n/a');
-    const open = `<div class="meter"><div class="meter-head"><span class="mono">${esc(b.name)}</span><span>${head}</span></div>`;
+    const lv = b.present !== false && b.percent != null ? lowLevel(b.percent, LIMITS.battery) : 'ok';
+    const open = `<div class="meter"><div class="meter-head"><span class="mono">${esc(b.name)}</span><span${lv === 'ok' ? '' : ` class="t-${lv}"`}>${head}</span></div>`;
     if (b.present === false) return open + '</div>';
     const full = b.charge_full_uah || b.energy_full_uwh, design = b.charge_full_design_uah || b.energy_full_design_uwh;
     const detail = [b.voltage_uv != null ? (b.voltage_uv / 1e6).toFixed(2) + ' V' : '',
@@ -176,7 +181,7 @@ function batteryRows() {
       b.power_uw != null ? (b.power_uw / 1e6).toFixed(2) + ' W' : '',
       b.cycle_count != null ? b.cycle_count + ' cycles' : '',
       full && design ? Math.round(full * 100 / design) + ' % of design' : ''].filter(Boolean).join(' · ');
-    return open + (b.percent != null ? bar(b.percent) : '') +
+    return open + (b.percent != null ? bar(b.percent, LIMITS.battery, true, lv) : '') +
       `<div class="detail">${esc(b.status || 'status n/a')}${detail ? ' · ' + detail : ''}</div></div>`;
   });
   if (external.length) {
@@ -406,6 +411,16 @@ function overviewRows(s) {
   for (const f of listOf(fsData, 'filesystems')) {
     const lv = f.total_bytes && !f.mount_points.some(p => p.path === '/') ? level(fsPct(f), LIMITS.filesystem) : 'ok';
     if (lv !== 'ok') alerts.push({lv, tab: 'storage', name: f.mount_points[0].path, value: fsPct(f).toFixed(0) + '%'});
+  }
+  // the batteries' charge and connected Wi-Fi signals, when their views fetched a current observation
+  const current = name => { const g = obs && obs.groups && obs.groups[name]; return g && g.observation && !observationStale(g) ? g.data : null; };
+  for (const b of listOf(current('battery'), 'batteries')) {
+    const lv = b.present !== false && Number.isFinite(b.percent) ? lowLevel(b.percent, LIMITS.battery) : 'ok';
+    if (lv !== 'ok') alerts.push({lv, tab: 'power', name: b.name, value: b.percent + '%'});
+  }
+  for (const i of listOf(current('wifi'), 'interfaces')) {
+    const lv = i.connected === true && Number.isFinite(i.signal_dbm) ? lowLevel(i.signal_dbm, LIMITS.wifi) : 'ok';
+    if (lv !== 'ok') alerts.push({lv, tab: 'network', name: i.name, value: i.signal_dbm + ' dBm'});
   }
   alerts.sort((a, b) => (b.lv === 'crit') - (a.lv === 'crit'));
   let html = alerts.length ? '<div class="card attention"><strong>Needs attention</strong>' + alerts.map(a =>

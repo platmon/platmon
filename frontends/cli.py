@@ -323,7 +323,10 @@ def render(s, obs=None):
 # requests beyond render()'s: the sparklines are the last SPARK_POINTS /api/stats answers kept here.
 
 # The web page's defaults; use_levels() replaces them with the server's [thresholds] (/api/status "levels").
-LIMITS = {"cpu": (80, 90), "gpu": (80, 90), "memory": (80, 90), "filesystem": (80, 90), "temperature": None}
+LIMITS = {"cpu": (80, 90), "gpu": (80, 90), "memory": (80, 90), "filesystem": (80, 90), "temperature": None,
+          "battery": (20, 10), "wifi": (-70, -80)}
+# Levels where the low reading is the bad one: warning above critical (platmon.py LOW_LEVELS).
+LOW = ("battery", "wifi")
 # Servers from #57 on send the temperature level they use; this copy of platmon.py BOARD_TEMPERATURE serves
 # older ones that send none (tests/frontends/test_cli_screen.py checks that the two match).
 TEMP_LIMITS = {"Jetson Orin": (85, 95), "Raspberry Pi": (75, 80)}
@@ -341,13 +344,19 @@ def use_levels(levels):
     them, or a server without them (None), keeps the defaults."""
     for name, value in (levels if isinstance(levels, dict) else {}).items():
         if name in LIMITS and (value is None and name == "temperature" or isinstance(value, list) and len(value) == 2
-                               and all(isinstance(v, (int, float)) for v in value) and value[0] < value[1]):
+                               and all(isinstance(v, (int, float)) for v in value)
+                               and (value[0] > value[1] if name in LOW else value[0] < value[1])):
             LIMITS[name] = tuple(value) if value else None
 
 
 def level(v, limits):
     """Without limits (a reading [thresholds] does not set levels for) nothing is a warning."""
     return "ok" if not limits else "crit" if v >= limits[1] else "warn" if v >= limits[0] else "ok"
+
+
+def low_level(v, limits):
+    """level() for a reading whose low value is the bad one: at or below a level, not at or above."""
+    return "ok" if not limits else "crit" if v <= limits[1] else "warn" if v <= limits[0] else "ok"
 
 
 def tone(lv):
@@ -401,13 +410,14 @@ def spread(left, right, width):
     return left + " " * max(1, width - vlen(left) - vlen(right)) + right
 
 
-def meter(st, pct, width, limits=None, ticks=True):
-    """A bar on a 0–100 scale in its level's color; limits also mark the warning and critical points."""
+def meter(st, pct, width, limits=None, ticks=True, lv=None):
+    """A bar on a 0–100 scale in its level's color; limits also mark the warning and critical points.
+    lv, when given, is the level to color it with (a low-is-bad reading's, see low_level)."""
     pct = max(0.0, min(float(pct), 100.0))
     n = round(width * pct / 100)
     marks = {min(width - 1, int(width * t / 100)) for t in limits} if limits and ticks else set()
     track = "".join(st.tick if i in marks else st.track for i in range(n, width))
-    return st(st.full * n, level(pct, limits) if limits else "ok") + st(track, "muted")
+    return st(st.full * n, lv or (level(pct, limits) if limits else "ok")) + st(track, "muted")
 
 
 def spark(st, values, width, lv="ok"):
@@ -462,8 +472,9 @@ def fs_pct(f):
 
 
 def attention(s, obs):
-    """Readings at or above their warning level, critical first, as on the web page: the Overview readings,
-    every temperature sensor, and filesystems other than / from the storage observation."""
+    """Readings at their warning level or worse, critical first, as on the web page: the Overview readings,
+    every temperature sensor, filesystems other than / from the storage observation, and from current
+    observations the batteries' charge and the connected Wi-Fi signals, where the low reading is the bad one."""
     out = [("/" if label == "DISK" else label, f"{v:.1f} {unit}", level(v, lim))
            for label, v, unit, lim, _ in metrics(s) if v is not None and label != "TEMP"]
     out += [(k, f"{v:.1f} °C", level(v, temp_limits(s))) for k, v in hottest_first(s)]
@@ -472,7 +483,23 @@ def attention(s, obs):
         pct = fs_pct(f)
         if pct is not None and not any(p["path"] == "/" for p in f["mount_points"]):
             out.append((f["mount_points"][0]["path"], f"{pct:.0f} %", level(pct, LIMITS["filesystem"])))
+    out += low_attention(obs)
     return sorted((a for a in out if a[2] != "ok"), key=lambda a: a[2] != "crit")
+
+
+def low_attention(obs):
+    """(name, value, level) of the batteries' charge and connected Wi-Fi signals; a stale observation is
+    not a current reading, so it raises nothing."""
+    out = []
+    battery, o = group_data(obs, "battery")
+    for b in (battery or {}).get("batteries") or [] if o and not o.get("stale") else []:
+        if b.get("present") is not False and isinstance(b.get("percent"), (int, float)):
+            out.append((b["name"], f"{b['percent']} %", low_level(b["percent"], LIMITS["battery"])))
+    wifi, o = group_data(obs, "wifi")
+    for i in (wifi or {}).get("interfaces") or [] if o and not o.get("stale") else []:
+        if i.get("connected") is True and isinstance(i.get("signal_dbm"), (int, float)):
+            out.append((i["name"], f"{i['signal_dbm']} dBm", low_level(i["signal_dbm"], LIMITS["wifi"])))
+    return out
 
 
 # The views of the live screen, one at a time, as the web page's tabs: the same data, wording and levels.
@@ -856,7 +883,8 @@ def body_network(v):
                       else f"signal {i['signal_raw']} (unit not reported)" if i["signal_raw"] is not None else "signal n/a")
             extra = [f"link quality {i['link_quality']}" if i["link_quality"] is not None else "",
                      f"noise {i['noise_dbm']} dBm" if i["noise_dbm"] is not None else ""]
-            body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), signal]
+            lv = low_level(i["signal_dbm"], LIMITS["wifi"]) if i["signal_dbm"] is not None else "ok"
+            body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), st(signal, tone(lv))]
                                + [st(f"   {e}", "muted") for e in extra if e]))
 
     if targets:
@@ -1003,9 +1031,10 @@ def body_power(v):
                 b.get("power_uw") is not None and f"{b['power_uw'] / 1e6:.2f} W",
                 b.get("cycle_count") is not None and f"{b['cycle_count']} cycles",
                 full and design and f"{full * 100 / design:.0f} % of design") if x)
-            head = [st(f"    {b['name']:<{name_w}}", "muted"), st(pad(charge, 7), "bold")]
+            lv = low_level(b["percent"], LIMITS["battery"]) if b.get("percent") is not None else "ok"
+            head = [st(f"    {b['name']:<{name_w}}", "muted"), st(pad(charge, 7), tone(lv) or "bold", "bold" if tone(lv) else None)]
             bw = min(14 if v.wide else 8, max(6, v.width - 10 - name_w - vlen(charge) - vlen(detail)))
-            bar = ["  " + meter(st, b["percent"], bw, None)] if b.get("percent") is not None else []
+            bar = ["  " + meter(st, b["percent"], bw, LIMITS["battery"], lv=lv)] if b.get("percent") is not None else []
             # the readings come before the bar, so a narrow terminal gives up the bar, never a reading;
             # where even that is not enough they wrap onto their own lines rather than being cut
             inline = vlen("".join(head)) + vlen(detail) + 2 <= v.width

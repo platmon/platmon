@@ -6,6 +6,11 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- Battery charge and the connected Wi-Fi signal get warning and critical levels, `[thresholds] battery`
+  (default 20, 10 %) and `wifi` (default -70, -80 dBm). Their low reading is the bad one, so the warning
+  is above the critical level and a reading at or below a level reaches it. The web page and the
+  `platmon` command color them and list them under Needs attention while their observation is current;
+  `/api/status` `levels` carries both, and clients that do not know them ignore them.
 - Full published core snapshots and independent observations can be replayed through
   `/api/samples` and `/api/observation-samples`. A configurable bounded memory buffer
   retains complete values and provenance for Hub catch-up, reports unavailable ID ranges,
