@@ -66,13 +66,14 @@ runs. The Python tests cover those on fake trees; the Rust port has no fake-tree
 
 | host | Python (A, A) | platmon-native (B, B) | change | peak RSS, Python / Rust |
 | --- | --- | --- | --- | --- |
-| Orin | 1.273, 1.230 | 0.432, 0.431 | −66 % (2.9×) | 16.1 / 1.5 MiB |
+| Orin | 1.273, 1.230 | 0.432, 0.431 | −66 % (2.9×) | 15.8 / 1.5 MiB |
 | Raspberry Pi 4 | 0.797, 0.807 | 0.255, 0.262 | −68 % (3.1×) | 20.0 / 1.7 MiB |
 | x86 PC | 0.620, 0.623 | 0.371, 0.391 | −39 % (1.6×) | 21.1 / 1.5 MiB |
 
 All 480 collections per host succeeded. Use the totals: the user/system split is tick-sampled on these
-kernels. These figures cover collection only, without network, disk_io or pressure, so they are lower
-than the floor-bench numbers in rust-feasibility.md, which included those.
+kernels. These figures cover collection without network, disk_io or pressure. The floor bench in
+rust-feasibility.md included those, so its Python numbers are higher (Orin 1.37, Raspberry Pi 1.16 %).
+Its Rf numbers are close to these Rust ones (0.43 and 0.28 %).
 
 **What it took to get there.** The first A B B A run, with std file I/O and musl's allocator, gave
 Orin 0.55, Raspberry Pi 0.37 and x86 0.48 % for Rust. `strace -c` over 23 x86 collections showed two causes:
