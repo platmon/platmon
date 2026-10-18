@@ -7,10 +7,13 @@ marked as estimated or as a hypothesis.
 
 ## Summary
 
-- **Collection only (measured):** replaying the file operations of one Python collection in Rust uses
-  53–76 % less CPU than the Python collector itself (2.1–4.1 times less): Orin 1.37 → 0.43 %, Raspberry Pi 4
-  1.16 → 0.28 %, x86 PC 0.66 → 0.31 % of one core. This is a micro-benchmark of reading and parsing. It is
-  not a Rust implementation of the collector (see [Limits](#limits)).
+- **Collection only (measured, exploratory):** replaying the recorded file operations of one Python
+  collection in Rust used 53–76 % less CPU than the Python collector itself (2.1–4.1 times less): Orin
+  1.37 → 0.43 %, Raspberry Pi 4 1.16 → 0.28 %, x86 PC 0.66 → 0.31 % of one core. This is a micro-benchmark
+  of reading and parsing, not a Rust implementation of the collector, and because of a defect in the trace
+  the replay did not do the same file operations as the collector (see [Limits](#limits)). Keep these
+  numbers as observations of this exploration; do not use them as a same-work ratio or as a strict lower
+  bound. The collector prototype (draft PR #92) measures a Rust collector with the same output instead.
 - **Where the saving comes from:** user time falls by about 90–95 %. Kernel time stays: on the Orin it is
   about 27 % lower in Rust (0.52 → 0.38 %); on the Raspberry Pi and the x86 PC it is about the same. Part of
   the Orin difference may be fewer system calls per file rather than the language.
@@ -19,7 +22,7 @@ marked as estimated or as a hypothesis.
   0.66 % of that; the rest (requests, replay, history, slow groups, threads) is about 0.8 / 1.6 / 0.5 pp.
   Replacing only the collector would give about 1.21 / 1.87 / 0.78 % (estimated, below). A whole Rust service
   at 0.5–0.7 % is a **hypothesis**: HTTP, replay and history were not measured in Rust.
-- **Memory (measured, collection only):** the Python collector process peaked at 16–21 MiB RSS, the Rust
+- **Memory (measured, collection only):** the Python collector process peaked at 16–23 MiB RSS, the Rust
   probe at about 1 MiB. Neither holds replay or history buffers. A whole-service figure is not measured.
 - **One binary per architecture (measured):** one `aarch64-unknown-linux-musl` static binary ran unchanged on
   the Orin (L4T, Ubuntu 22.04, kernel 5.15) and the Raspberry Pi 4 (Debian 13, kernel 6.18).
@@ -92,12 +95,14 @@ Means and the split between user and system time:
 - **Rf is the comparison, not Rr.** [identity-resolution.md](identity-resolution.md) chose to resolve every
   source path on every collection, with the kernel doing the resolution, and rejected caching, because a path
   can point elsewhere later (hotplug, relinked `hwmon` numbers). Rr's lower number would need an
-  invalidation design the current contract does not have.
+  invalidation design the current contract does not have. Rf is still not the collector's work: see the
+  trace defect under [Limits](#limits).
 - Peak RSS: P 16.5 MiB (Orin), 21.0 MiB (Raspberry Pi), 23.0 MiB (x86). Rust 0.98 / 1.07 / 0.77 MiB.
 
 ### Whole-service estimate
 
-Estimated, not measured. The current service's CPU, with the Python collector's cost swapped for Rf's:
+Estimated, not measured. The current service's CPU, with the Python collector's cost swapped for Rf's (and
+with Rf's limits: the trace defect below):
 
 | host | service now (measured) | collector only in Rust (estimated) | change |
 | --- | --- | --- | --- |
@@ -141,9 +146,12 @@ different windows.
     the read failed with `EISDIR`. That happened 48 times per collection on the Orin, 8 on the Raspberry Pi
     and 72 on the x86 PC.
   - Rust also read a link that did not resolve the same way.
-  - Both are small next to the totals, but Rf is not exactly the Python collection's system calls. A rerun
-    must record O_PATH resolution as one operation and replay it as `open(O_PATH)` + `readlink` of its own
-    descriptor.
+  - So Rf is not equivalent to the collector's file operations. Its numbers are kept as observations of
+    this exploration, not as a same-work performance ratio or a strict lower bound. The direction and size
+    of the error were not quantified.
+  - A rerun would have to record O_PATH resolution as one operation and replay it as `open(O_PATH)` +
+    `readlink` of its own descriptor. None is planned: the collector prototype (draft PR #92) replaces this
+    replay for comparisons.
 - **One round, exploratory windows,** with the production service and Hub polling on the same host. Not
   the budget procedure.
 - **Elapsed time is not measured.** Lower CPU does not imply a lower read latency: device wake-ups (for
