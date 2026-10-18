@@ -77,6 +77,33 @@ Intent To Package bug. Other policy errors and warnings remain checked.
 
 ## Install and update
 
+### From the APT repository
+
+<https://platmon.github.io/apt> is a signed APT repository (suite `stable`, component
+`main`) with the same `.deb` files as GitHub Releases. Its index is signed with the key
+`6D42 C14A BFB9 412F 34BA 4BEF F38B 9BB5 26A3 B0C6` (Ed25519, expires 2028-10-17).
+[Getting started](../guides/getting-started.md#requirements-and-installation) installs the key in
+`/etc/apt/keyrings/platmon.gpg` and the source in `/etc/apt/sources.list.d/platmon.sources`,
+with `Signed-By` so that the key is trusted for this repository only.
+
+```sh
+sudo apt update && sudo apt install --only-upgrade platmon   # update platmon only
+apt list -a platmon                                          # versions in the repository
+sudo apt install --allow-downgrades platmon=<version>-<revision>   # roll back
+```
+
+Every published release stays in the repository, so a rollback does not need a retained
+`.deb`; still back up the INI first (see [Rollback](#rollback)). The repository holds
+only published releases: a file that is already there is never replaced, and a release is
+added only after its `SHA256SUMS` and, from releases after 1.3.0-1, its provenance attestation
+have been checked. It is added by hand after each release, so it can trail GitHub Releases
+for a short time. Unattended upgrades do not include this origin unless you add it; when you do,
+choose a conffile policy as described below. Before the key expires, a key with a later expiry
+date is published at the same address; fetch the keyring file again to keep updating. To stop
+using the repository, delete those two files and run `sudo apt update`.
+
+### From a downloaded or built package
+
 Download a fixed release, verify its checksums and keep its files for rollback.
 Install the local package using APT, which checks the declared host dependencies. For a
 checkout build, use the variables from the Build section:
@@ -194,6 +221,10 @@ directories are never automatically deleted by subsequent updates or uninstall.
    then creates a **draft** GitHub Release with the four artifacts. Review the attached
    bytes, acceptance evidence and notes before publishing the draft. Do not distribute
    a container image; the repository's existing image licensing policy still applies.
+5. After the release is published, add it to the APT repository: run the `apt` workflow of
+   [platmon.github.io](https://github.com/platmon/platmon.github.io) with the tag
+   (`gh workflow run apt -R platmon/platmon.github.io -f tags=v<version>`) and approve the
+   `apt` environment. It re-checks the published files before signing the new index.
 
 The repository's active `release-tags` tag ruleset targets `refs/tags/v*`: new tags
 are allowed, but existing tags cannot be updated or deleted, with no bypass actors.
@@ -203,8 +234,8 @@ changing that file alone does not change GitHub settings. Apply it through the r
 ruleset API and confirm the live settings. The workflow's `main` check runs after a tag
 push; it prevents release creation rather than rejecting the original tag push.
 
-APT hosting is a later operational choice; no APT repository or signing key is created
-by these scripts. Releases currently use stable MAJOR.MINOR.PATCH versions only.
+The signing key is not part of this repository or its release workflow. Releases currently use
+stable MAJOR.MINOR.PATCH versions only.
 
 To run the dpkg lifecycle check locally, use Docker and a disposable Ubuntu container:
 
