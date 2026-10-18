@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: platmon
 Upstream-Contact: Jinwoo Sung <jwsung91@users.noreply.github.com>
-Source: https://github.com/jwsung91/platmon
+Source: https://github.com/platmon/platmon
 
 Files: *
 Copyright: 2026 Jinwoo Sung
