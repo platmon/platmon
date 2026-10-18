@@ -130,7 +130,7 @@ Then platmon makes no `NetworkCounters` and never reads the counters: there is n
 
 Cost when on: +0.160 pp (Jetson Orin Nano, 10 interfaces) and +0.175 pp (Raspberry Pi 4, 3 interfaces)
 of one core for the whole process at a 1 s interval with one client polling every second; the default
-configuration stays within the 2.0 % release target of [performance/budget.md](../performance/budget.md).
+configuration stayed within the release target of [performance/budget.md](../performance/budget.md), then 2.0 %.
 It missed the earlier per-feature 0.1 pp target, which stays recorded as not met
 ([performance/network-product.md](../performance/network-product.md)).
 

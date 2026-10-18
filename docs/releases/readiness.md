@@ -75,6 +75,63 @@ The journal also showed one storage line below warning level, `permission_denied
 disk mounted under `/run/media/<user>`, most likely because the sandboxed service user cannot read
 that mount.
 
+### ARM acceptance (2026-10-18)
+
+The owner upgraded both boards to the published `platmon_1.3.0-1_all.deb` (SHA-256 checked against the
+release's `SHA256SUMS`) with `apt-get install -o Dpkg::Options::=--force-confnew`. Both boards' INIs were
+comment-free files with every value at its default, written on 2026-10-10; they were backed up and
+replaced by the 1.3.0 default, the old file kept as `.dpkg-old`.
+
+| check | Jetson Orin Nano devkit (Super) | Raspberry Pi 4 Model B |
+| --- | --- | --- |
+| system | L4T R36.5.2, Ubuntu 22.04.5, MAXN_SUPER, `schedutil`, Python 3.10.12 | Debian 13, 6.18 rpi-v8, `ondemand`, Python 3.13.5 |
+| upgrade | `1.2.1-2` → `1.3.0-1` | `1.0.0-5` → `1.3.0-1` |
+| installed files | `dpkg -V`: only `/usr/share/man/man1/platmon.1.gz` missing, because the image's `/etc/dpkg/dpkg.cfg.d` excludes `/usr/share/man/*` for every package | `dpkg -V` clean |
+| service | `active`, `enabled`, `NRestarts=0`, `ExecMainStatus=0`; no journal entry at warning or above; the server logs version 1.3.0 and board module `collector.jetson` | the same; board module none, as at 1.0.0 |
+| sandbox | `DynamicUser=yes`, `User=platmon`, `ProtectSystem=strict`, `NoNewPrivileges=yes` | the same |
+| API | `/api/samples` 200 (404 before); `/api/observation-samples?group=storage` 200 | the same |
+| fleet server | registered in `platmon-hub` 1.1.0 (raw capture on) on the x86 PC: Live, every core publication from ID 1 captured, no replay loss | the same |
+
+Replay memory, sampled every minute from the restart, default `[replay]` (600 s, 16 MiB), with the
+fleet server polling the service. The Pi kernel runs with `cgroup_disable=memory`, so it has no cgroup
+figure.
+
+| minutes after start | Orin RSS | Orin cgroup `MemoryCurrent` | Pi RSS | replay records (Orin / Pi) |
+| --- | --- | --- | --- | --- |
+| 1.6–2.2 | 29.7 MiB | 23.6 MiB | 32.2 MiB | 134 / 94 |
+| 5.3 | 35.2 MiB | 28.4 MiB | 33.8 MiB | 318 / 277 |
+| 10.4 / 9.7 | 37.5 MiB | 31.6 MiB | 35.4 MiB | 600 (full) / 584 |
+| 13.5 / 12.8 | 37.5 MiB | 31.6 MiB | 35.6 MiB | 600 / 600 |
+| 17.5 / 16.9 | 37.5 MiB | 31.7 MiB | 35.6 MiB | 600 / 600 |
+
+RSS stopped growing once the buffer held 600 s: the default buffer costs about 12.6 MiB on the Orin
+(from 24.9 MiB at 54 s) and about 4 MiB on the Pi, in proportion to the core publication size (about
+10.3 KB on the Orin and 5.3 KB on the Pi against 19.4 KB on the x86 PC). Over the last 6–7 minutes RSS
+moved by +12 KiB (Orin) and +100 KiB (Pi). The fleet server's capture lag over ten minutes was p50
+2.6 s and p95 5.0 s on both boards, its 5 s replay poll.
+
+CPU, measured as in the [budget](../performance/budget.md): `v1.3.0` (`e767176`) from `git archive`,
+natively on loopback port 19797 next to the boards' own services (which the fleet server kept
+polling), the shipped INI with only `[http]` bind/port changed (A) and additionally
+`[replay] enabled = no` (B), `benchmarks/service_cpu.py` with 30 s warmup + 120 s per window, one
+client polling `/api/stats` every second. Both boards ran at the same time, 15:08–15:18 KST.
+
+| board | 1: A (replay on) | 2: B (off) | 3: B (off) | 4: A (on) | replay (A − B means) | release target |
+| --- | --- | --- | --- | --- | --- | --- |
+| Orin Nano | 1.884 % | 1.769 % | 1.767 % | 1.875 % | +0.11 pp | every window ≤ 2.5 % |
+| Raspberry Pi 4 | 2.108 % | 1.800 % | 1.942 % | 2.067 % | +0.22 pp | every window ≤ 2.5 % |
+
+Under the previous 2.0 % target the Pi's replay-on windows would fail; the owner raised the target to
+2.5 % the same day ([budget](../performance/budget.md#release-target-raised-to-25--2026-10-18)). Replay
+adds about 2.2 ms per collection on the Pi, at the per-feature review criterion of about 2 ms. All 963
+`/api/stats` requests answered 200; no collection failure, overrun or missing sample; collection took
+at most 22 ms (Orin) and 16 ms (Pi); every window exited normally and released its port. These windows
+have no replay reader: the fleet server's `/api/samples` reads add to this, and the boards' services
+used 2.42 % (Orin) and 2.64 % (Pi) over the 15 minutes they were polled by it.
+
+This closes the ARM service and replay-memory gates for 1.3.0. Still open: replay memory over hours,
+and the fleet server's 24-hour compression ratio on these boards (its ADR-0006).
+
 ## 1.2.0 release gate (2026-10-11)
 
 Changes since 1.1.0: batteries and external power supplies as the low-frequency group `battery` (#68),
