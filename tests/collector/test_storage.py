@@ -14,7 +14,7 @@ from collector import sysfs
 from runtime.slow import Observations, Slow
 from collector.storage import Storage, parse_mountinfo, parse_partitions, unescape
 from tests.collector.test_network_integration import ini_file
-from tests.frontends.test_server import get
+from tests.runtime.test_server import get
 
 S = 10**9
 PARTS = """major minor  #blocks  name
@@ -295,12 +295,12 @@ def test_slow_groups_and_history_follow_configuration(monkeypatch, tmp_path, tex
 
 
 def test_observations_endpoint():
-    from tests.frontends.test_server import NoWait
+    from tests.runtime.test_server import NoWait
     s = NoWait(lambda: {"v": 1})
     s._attempt()
     g, c = group(lambda grp: {"filesystems": [], "partitions": []})
     g.observe_once()
-    from frontends.server import make_handler
+    from runtime.server import make_handler
     from http.server import ThreadingHTTPServer
     for observations, groups in ((Observations([g], s.instance_id, s.clock), ["storage"]), (None, [])):
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(s, True, observations))
@@ -328,8 +328,8 @@ def test_http_answers_while_a_group_is_blocked_and_stale():
     all answer at once; only the storage entry says it is old."""
     from http.server import ThreadingHTTPServer
 
-    from frontends.server import make_handler
-    from tests.frontends.test_server import NoWait
+    from runtime.server import make_handler
+    from tests.runtime.test_server import NoWait
     s = NoWait(lambda: {"v": 1, "uptime": 1})
     s._attempt()
     release, entered = threading.Event(), threading.Event()

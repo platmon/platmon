@@ -115,8 +115,8 @@ def test_release_versions_match_and_cli_stays_standalone(tmp_path):
 
 @pytest.mark.parametrize("value", ["1.0", "01.0.0", "1.0.0-rc.1", "not-a-version"])
 def test_bad_version_refused(tmp_path, value):
-    (tmp_path / "frontends").mkdir()
-    (tmp_path / "frontends/cli.py").write_text(f"VERSION = {value!r}\n")
+    (tmp_path / "runtime").mkdir()
+    (tmp_path / "runtime/__init__.py").write_text(f"VERSION = {value!r}\n")
     with pytest.raises(ValueError, match="MAJOR.MINOR.PATCH"):
         version(tmp_path)
 

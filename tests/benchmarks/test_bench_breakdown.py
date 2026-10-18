@@ -13,7 +13,7 @@ from benchmarks import breakdown, cadence
 from collector import common, sysfs
 from runtime import sampler
 from runtime.sampler import Sampler, pick_clock
-from frontends import server
+from runtime import server
 
 
 class FakeClock:

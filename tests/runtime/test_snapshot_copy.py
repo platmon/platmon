@@ -13,7 +13,7 @@ from collector import core as collector
 from runtime import sampler as sampler_module
 from collector.common import CpuCounters
 from runtime.sampler import Sampler
-from frontends.server import make_handler
+from runtime.server import make_handler
 from tests.collector.test_common import idle_busy
 from tests.collector.test_provenance import Tick, recorded  # noqa: F401 - the fixture
 from tests.runtime.test_sampler import Clock, fake, slow
