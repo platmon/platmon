@@ -7,6 +7,13 @@ license = "Apache-2.0"
 description = "Experimental Rust port of the platmon collector (docs/performance/rust-feasibility.md); not part of the product"
 
 [dependencies]
+# MIT OR Apache-2.0, no dependencies of its own: system call numbers, flags and struct layouts per target,
+# instead of hand-written ones (statvfs, utsname, rusage, O_PATH, errno)
+libc = "=0.2.172"
+
+[features]
+# the experimental size-class cache in front of the system allocator (src/alloc.rs); off by default
+cache-alloc = []
 
 [profile.release]
 opt-level = 3

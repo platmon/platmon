@@ -2,7 +2,10 @@
 //! so a collection that allocates and frees the same small objects every second maps and unmaps pages every
 //! time (strace -c on x86: ~60 mmap/munmap pairs per collection). Freed blocks up to 4 KiB are kept on a
 //! free list per power-of-two class and reused; nothing is returned, so memory stays at the peak.
-//! A product build would use a vetted allocator crate instead (mimalloc and jemalloc are MIT-licensed).
+//! Experimental, behind the cache-alloc feature: one spin lock for all classes and no limit on what the
+//! lists hold, neither checked beyond the short single-threaded collection loop. A product build would
+//! compare vetted allocators instead (mimalloc: MIT; jemalloc: BSD-2-Clause; their Rust wrappers and
+//! bundled sources checked separately).
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, Ordering};

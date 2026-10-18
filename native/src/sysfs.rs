@@ -32,24 +32,30 @@ fn py_space(c: char) -> bool {
 // Raw system calls: musl's open() adds an fcntl(F_SETFD) after every O_CLOEXEC open, and a fresh buffer per
 // file makes its allocator map and unmap pages every collection. Measured on x86 (strace -c): 4233 fcntl and
 // ~1500 mmap/munmap pairs in 23 collections before this; see native/README.md.
-#[cfg(target_arch = "x86_64")]
-mod nr { pub const OPENAT: i64 = 257; pub const READ: i64 = 0; pub const CLOSE: i64 = 3; pub const READLINKAT: i64 = 267; }
-#[cfg(target_arch = "aarch64")]
-mod nr { pub const OPENAT: i64 = 56; pub const READ: i64 = 63; pub const CLOSE: i64 = 57; pub const READLINKAT: i64 = 78; }
-const AT_FDCWD: i64 = -100;
-const O_CLOEXEC: i64 = 0o2000000;
-extern "C" {
-    fn syscall(number: i64, ...) -> i64;
+// Bypassing std also bypasses its EINTR handling, so open and read retry an interrupted call here, as
+// Python and std::fs do; close is never retried (Linux releases the descriptor even when it reports EINTR).
+
+fn retry(mut call: impl FnMut() -> i64) -> io::Result<i64> {
+    loop {
+        let n = call();
+        if n >= 0 {
+            return Ok(n);
+        }
+        let e = io::Error::last_os_error(); // libc's syscall() returns -1 and sets errno
+        if e.raw_os_error() != Some(libc::EINTR) {
+            return Err(e);
+        }
+    }
 }
 
 fn sys_open(path: &str, flags: i64) -> io::Result<i64> {
-    let c = std::ffi::CString::new(path).map_err(|_| io::Error::from_raw_os_error(22))?;
-    let fd = unsafe { syscall(nr::OPENAT, AT_FDCWD, c.as_ptr(), flags | O_CLOEXEC, 0i64) };
-    if fd < 0 { Err(io::Error::last_os_error()) } else { Ok(fd) }
+    let c = std::ffi::CString::new(path).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
+    let flags = flags | libc::O_CLOEXEC as i64;
+    retry(|| unsafe { libc::syscall(libc::SYS_openat, libc::AT_FDCWD as i64, c.as_ptr(), flags, 0i64) as i64 })
 }
 
 fn sys_close(fd: i64) {
-    unsafe { syscall(nr::CLOSE, fd) };
+    unsafe { libc::syscall(libc::SYS_close, fd) };
 }
 
 thread_local! {
@@ -67,14 +73,15 @@ fn with_file<T>(path: &str, f: impl FnOnce(&[u8]) -> T) -> io::Result<T> {
                 let n = b.len() * 2;
                 b.resize(n, 0);
             }
-            let n = unsafe { syscall(nr::READ, fd, b[len..].as_mut_ptr(), (b.len() - len) as i64) };
-            if n < 0 {
-                let e = io::Error::last_os_error();
-                sys_close(fd);
-                return Err(e);
+            let rest = &mut b[len..];
+            match retry(|| unsafe { libc::syscall(libc::SYS_read, fd, rest.as_mut_ptr(), rest.len()) as i64 }) {
+                Ok(0) => break,
+                Ok(n) => len += n as usize,
+                Err(e) => {
+                    sys_close(fd);
+                    return Err(e);
+                }
             }
-            if n == 0 { break; }
-            len += n as usize;
         }
         sys_close(fd);
         Ok(f(&b[..len]))
@@ -90,19 +97,20 @@ pub fn read_text(path: &str) -> Result<String, ReadError> {
     text.map_err(|_| ReadError::Utf8)
 }
 
-/// sysfs.read(path, default): the text, or None on an OS error.
-pub fn read(path: &str) -> Option<String> {
+/// sysfs.read(path, default): the text, or None on an OS error. Bytes that are not UTF-8 are an error, as
+/// in Python, where UnicodeDecodeError is not an OSError and reaches the caller.
+pub fn read(path: &str) -> Result<Option<String>, String> {
     match read_text(path) {
-        Ok(t) => Some(t),
-        Err(ReadError::Os(_)) => None,
-        Err(ReadError::Utf8) => None, // Python raises here; the prototype treats it as unreadable
+        Ok(t) => Ok(Some(t)),
+        Err(ReadError::Os(_)) => Ok(None),
+        Err(ReadError::Utf8) => Err(format!("{}: not UTF-8", path)),
     }
 }
 
 pub fn reason_of(e: &io::Error) -> &'static str {
     match e.raw_os_error() {
-        Some(13) | Some(1) => "permission_denied", // EACCES, EPERM
-        Some(61) => "no_data",                     // ENODATA: e.g. an inactive thermal zone
+        Some(libc::EACCES) | Some(libc::EPERM) => "permission_denied",
+        Some(libc::ENODATA) => "no_data", // e.g. an inactive thermal zone
         _ => "io_error",
     }
 }
@@ -111,15 +119,18 @@ fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// Sorted names in directory path; see sysfs.entries.
+/// Sorted names in directory path; see sysfs.entries. Like os.listdir, all or nothing: an error while
+/// iterating fails the whole listing, so a partial one is never taken for the directory's contents.
 pub fn entries(path: &str, groups: &mut [&mut Group], listed: bool) -> Vec<String> {
-    match fs::read_dir(path) {
-        Ok(rd) => {
-            let mut names: Vec<String> = rd.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    let listing = fs::read_dir(path).and_then(|rd| {
+        rd.map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned())).collect::<io::Result<Vec<String>>>()
+    });
+    match listing {
+        Ok(mut names) => {
             names.sort();
             names
         }
-        Err(e) if e.raw_os_error() == Some(2) => {
+        Err(e) if e.raw_os_error() == Some(libc::ENOENT) => {
             if listed {
                 for g in groups.iter_mut() {
                     g.note(basename(path), "disappeared", None);
@@ -174,19 +185,16 @@ pub fn hwmon_chips(root: &str, groups: &mut [&mut Group]) -> Vec<(String, String
     chips
 }
 
-const O_PATH: i64 = 0o10000000; // Linux, the same on x86_64 and aarch64
-
 /// The absolute path the kernel resolved an existing path to (open without reading, then the
 /// /proc/self/fd link); None if it went away in between.
 fn kernel_path(path: &str) -> io::Result<Option<String>> {
-    let fd = sys_open(path, O_PATH)?;
+    let fd = sys_open(path, libc::O_PATH as i64)?;
     let link = format!("/proc/self/fd/{}\0", fd);
     let mut buf = [0u8; 4096];
-    let n = unsafe { syscall(nr::READLINKAT, AT_FDCWD, link.as_ptr(), buf.as_mut_ptr(), buf.len() as i64) };
+    let n = unsafe { libc::syscall(libc::SYS_readlinkat, libc::AT_FDCWD as i64, link.as_ptr(), buf.as_mut_ptr(), buf.len()) };
+    let n = if n < 0 { Err(io::Error::last_os_error()) } else { Ok(n) };
     sys_close(fd);
-    if n < 0 {
-        return Err(io::Error::last_os_error()); // libc's syscall() returns -1 and sets errno
-    }
+    let n = n?;
     let real = String::from_utf8_lossy(&buf[..n as usize]).into_owned();
     Ok(if real.ends_with(" (deleted)") || !real.starts_with('/') { None } else { Some(real) })
 }
@@ -255,4 +263,65 @@ pub fn exists(path: &str) -> bool {
 
 pub fn is_dir(path: &str) -> bool {
     Path::new(path).is_dir()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static SIGNALS: AtomicU32 = AtomicU32::new(0);
+    extern "C" fn on_signal(_: libc::c_int) {
+        SIGNALS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// A signal without SA_RESTART interrupts the blocking open of a FIFO with EINTR; the read still
+    /// succeeds once the writer comes.
+    #[test]
+    fn interrupted_open_is_retried() {
+        let dir = std::env::temp_dir().join(format!("platmon-native-eintr-{}", std::process::id()));
+        let _ = fs::create_dir(&dir);
+        let fifo = dir.join("fifo");
+        let path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        unsafe {
+            let mut sa: libc::sigaction = std::mem::zeroed();
+            sa.sa_sigaction = on_signal as usize;
+            sa.sa_flags = 0; // no SA_RESTART: the kernel returns EINTR instead of restarting the call
+            assert_eq!(libc::sigaction(libc::SIGUSR1, &sa, std::ptr::null_mut()), 0);
+        }
+        let reader = unsafe { libc::pthread_self() } as usize;
+        let writer_path = fifo.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            unsafe { libc::pthread_kill(reader as libc::pthread_t, libc::SIGUSR1) };
+            // non-blocking, so a reader that gave up (no retry) fails the test instead of hanging it
+            let started = std::time::Instant::now();
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let open = fs::OpenOptions::new().write(true).custom_flags(libc::O_NONBLOCK).open(&writer_path);
+                if let Ok(mut f) = open {
+                    std::io::Write::write_all(&mut f, b"42\n").unwrap();
+                    break;
+                }
+                if started.elapsed() > std::time::Duration::from_secs(2) {
+                    break;
+                }
+            }
+        });
+        let text = read_text(fifo.to_str().unwrap());
+        writer.join().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        assert!(SIGNALS.load(Ordering::SeqCst) >= 1);
+        assert!(matches!(text, Ok(ref t) if t == "42"));
+    }
+
+    #[test]
+    fn reasons_of_os_errors() {
+        assert_eq!(reason_of(&io::Error::from_raw_os_error(libc::EACCES)), "permission_denied");
+        assert_eq!(reason_of(&io::Error::from_raw_os_error(libc::EPERM)), "permission_denied");
+        assert_eq!(reason_of(&io::Error::from_raw_os_error(libc::ENODATA)), "no_data");
+        assert_eq!(reason_of(&io::Error::from_raw_os_error(libc::EIO)), "io_error");
+    }
 }

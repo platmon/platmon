@@ -269,29 +269,25 @@ pub fn meminfo() -> Result<Vec<(String, i64)>, String> {
     }).collect()
 }
 
-#[repr(C)]
-struct Utsname { f: [[u8; 65]; 6] }
-extern "C" {
-    fn uname(buf: *mut Utsname) -> i32;
-    fn statvfs(path: *const std::os::raw::c_char, buf: *mut [u64; 16]) -> i32;
-}
-
 /// (sysname, nodename, release, version, machine)
 pub fn os_uname() -> [String; 5] {
-    let mut u = Utsname { f: [[0; 65]; 6] };
-    unsafe { uname(&mut u) };
-    let s = |i: usize| { let b = &u.f[i]; String::from_utf8_lossy(&b[..b.iter().position(|c| *c == 0).unwrap_or(65)]).into_owned() };
-    [s(0), s(1), s(2), s(3), s(4)]
+    let mut u: libc::utsname = unsafe { std::mem::zeroed() };
+    unsafe { libc::uname(&mut u) };
+    let s = |f: &[libc::c_char]| {
+        let b: Vec<u8> = f.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+        String::from_utf8_lossy(&b).into_owned()
+    };
+    [s(&u.sysname), s(&u.nodename), s(&u.release), s(&u.version), s(&u.machine)]
 }
 
-/// shutil.disk_usage: (total, used) in bytes. 64-bit Linux struct statvfs: bsize, frsize, blocks, bfree, bavail, ...
+/// shutil.disk_usage: (total, used) in bytes.
 pub fn disk_usage(path: &str) -> Result<(i64, i64), String> {
     let c = std::ffi::CString::new(path).map_err(|e| e.to_string())?;
-    let mut buf = [0u64; 16];
-    if unsafe { statvfs(c.as_ptr(), &mut buf) } != 0 {
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
         return Err(std::io::Error::last_os_error().to_string());
     }
-    let (frsize, blocks, bfree) = (buf[1], buf[2], buf[3]);
+    let (frsize, blocks, bfree) = (st.f_frsize as u64, st.f_blocks as u64, st.f_bfree as u64);
     Ok(((blocks * frsize) as i64, ((blocks - bfree) * frsize) as i64))
 }
 
@@ -312,16 +308,18 @@ pub fn os_release(text: Option<&str>) -> Option<String> {
     })
 }
 
-pub fn system_info() -> Value {
+pub fn system_info() -> Result<Value, String> {
     let u = os_uname();
-    let osr = sysfs::read(&sysfs::host_path("/etc/os-release")).filter(|s| !s.is_empty())
-        .or_else(|| sysfs::read(&sysfs::host_path("/usr/lib/os-release")));
+    let osr = match sysfs::read(&sysfs::host_path("/etc/os-release"))?.filter(|s| !s.is_empty()) {
+        Some(t) => Some(t),
+        None => sysfs::read(&sysfs::host_path("/usr/lib/os-release"))?,
+    };
     let mut v = Value::obj();
     v.set("os", os_release(osr.as_deref()).into());
     v.set("kernel", u[2].clone().into());
     v.set("arch", u[4].clone().into());
     v.set("hostname", u[1].clone().into());
-    v
+    Ok(v)
 }
 
 /// The required reads' spans, by name (Trace.required).
@@ -359,18 +357,19 @@ pub fn collect(cpu: &mut CpuCounters, g: &mut Groups, req: &mut Required) -> Res
     }
     let mem = timed(req, "memory", meminfo)?;
     let disk = timed(req, "disk", || disk_usage(&sysfs::host_root()))?;
-    let uptime = timed(req, "uptime", || sysfs::read("/proc/uptime"));
+    let uptime = timed(req, "uptime", || sysfs::read("/proc/uptime"))?;
     let uptime: f64 = uptime.as_deref().and_then(|u| u.split_whitespace().next()).and_then(|u| u.parse().ok())
         .ok_or("uptime unreadable")?;
     let m = |k: &str| mem.iter().find(|(x, _)| x == k).map(|(_, v)| *v).ok_or(format!("meminfo: no {}", k));
-    let model = sysfs::read(&format!("{}/model", sysfs::device_tree())).filter(|s| !s.is_empty())
-        .or_else(|| sysfs::read("/sys/class/dmi/id/product_name").filter(|s| !s.is_empty()))
-        .unwrap_or_else(|| os_uname()[1].clone());
+    let model = match sysfs::read(&format!("{}/model", sysfs::device_tree()))?.filter(|s| !s.is_empty()) {
+        Some(m) => m,
+        None => sysfs::read("/sys/class/dmi/id/product_name")?.filter(|s| !s.is_empty()).unwrap_or_else(|| os_uname()[1].clone()),
+    };
 
     let mut s = Value::obj();
-    s.set("time", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64().into());
+    s.set("time", metadata::wall().into());
     s.set("model", model.trim_end_matches('\0').into());
-    s.set("system", system_info());
+    s.set("system", system_info()?);
     s.set("uptime", uptime.into());
     s.set("power_mode", Value::Null);
     s.set("cpu", Value::Arr(usage.iter().map(|(n, u)| {

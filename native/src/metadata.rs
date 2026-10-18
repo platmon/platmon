@@ -1,18 +1,59 @@
 //! collector/metadata.py: one optional group's diagnostics, timed reads, sensor sources and pointers.
 use crate::json::Value;
 use crate::{sha256, sysfs};
-use std::sync::OnceLock;
-use std::time::Instant;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 pub const PROBLEMS: [&str; 6] = ["internal_error", "permission_denied", "io_error", "disappeared", "mount_changed", "invalid_data"];
 pub const ABSENT: [&str; 4] = ["no_data", "not_exposed", "not_detected", "unsupported_platform"];
 const MAX_ISSUES: usize = 32;
 const MAX_TARGET: usize = 64;
 
-/// Elapsed nanoseconds on one monotonic clock, as the Sampler's clock.
+// sampler.pick_clock: CLOCK_BOOTTIME, which keeps counting through suspend, so a window across a suspend
+// is as long as it really was (and a gap); CLOCK_MONOTONIC where it is not available. std's Instant is
+// CLOCK_MONOTONIC on Linux and stops while suspended, so it is not used for collection times.
+fn os_clock(id: libc::clockid_t) -> Option<i64> {
+    let mut t = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    (unsafe { libc::clock_gettime(id, &mut t) } == 0).then(|| t.tv_sec as i64 * 1_000_000_000 + t.tv_nsec as i64)
+}
+
+/// The clock this process uses, chosen once like pick_clock: "boottime" or "monotonic".
+pub fn clock_source() -> &'static str {
+    static SOURCE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    SOURCE.get_or_init(|| if os_clock(libc::CLOCK_BOOTTIME).is_some() { "boottime" } else { "monotonic" })
+}
+
+const UNSET: i64 = i64::MIN;
+static FAKE_BASE: AtomicI64 = AtomicI64::new(UNSET);
+static FAKE_CALLS: AtomicI64 = AtomicI64::new(0);
+static FAKE_WALL_US: AtomicI64 = AtomicI64::new(UNSET);
+/// The step between two calls of a set clock (fixture tests: the same reads give the same spans).
+pub const FAKE_TICK: i64 = 1_000;
+
+/// Sets the clocks for the next collection (script mode): clock() returns base, base + FAKE_TICK, ...
+/// and wall() wall_us / 1e6. Collections never set them.
+pub fn set_clocks(base: i64, wall_us: i64) {
+    FAKE_BASE.store(base, Ordering::Relaxed);
+    FAKE_CALLS.store(0, Ordering::Relaxed);
+    FAKE_WALL_US.store(wall_us, Ordering::Relaxed);
+}
+
+/// Elapsed nanoseconds on the Sampler's clock (see clock_source).
 pub fn clock() -> i64 {
-    static START: OnceLock<Instant> = OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_nanos() as i64
+    let base = FAKE_BASE.load(Ordering::Relaxed);
+    if base != UNSET {
+        return base + FAKE_TICK * FAKE_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+    let id = if clock_source() == "boottime" { libc::CLOCK_BOOTTIME } else { libc::CLOCK_MONOTONIC };
+    os_clock(id).unwrap_or(0)
+}
+
+/// Unix time in seconds (time.time()).
+pub fn wall() -> f64 {
+    let us = FAKE_WALL_US.load(Ordering::Relaxed);
+    if us != UNSET {
+        return us as f64 / 1e6;
+    }
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
 
 pub type Span = Option<(i64, i64)>;
