@@ -5,15 +5,24 @@ required read, collectors state and source id). Runs inside the container fixtur
 
 Each scenario writes a tree, starts both collectors (as nobody, so file modes apply), and runs its steps:
 before a step its change is applied to the tree, then each collector makes one collection on the step's
-clocks (fixture_py.py, `platmon-native script`). A collection that fails must fail on both sides; the
-messages are not compared. Exit 1 on any difference.
+clocks (fixture_py.py, `platmon-native script`). Every step says whether it expects a collection or a
+failed collection (only /proc/stat missing and a model that is not text fail); both sides must give it,
+collections must be equal, and both sides must exit with 0 at the end. A failed collection is the
+collector's {"error"} answer; exiting, not answering in time or writing something else is a broken side,
+never a match. Error messages are not compared. Exit 1 on any difference.
 
-  fixture.py BINARY [SCENARIO ...]"""
+Before the scenarios, the harness is run against fake sides that read no tree (CONTROLS): equal ones must
+pass, and both sides failing where a collection is expected, a nonzero exit, a hang or garbage must fail.
+
+  fixture.py BINARY [SCENARIO ...]
+  fixture.py --self-test          # the controls only; needs no container"""
 import json
 import os
+import select
 import shutil
 import subprocess
 import sys
+import tempfile
 
 FX = "/fx"            # tmpfs; FX/sys is mounted at /sys and FX/proc at /proc
 HOST = "/fxhost"      # PLATMON_HOST_ROOT: os-release, nv_tegra_release; statvfs reads this tmpfs
@@ -21,6 +30,8 @@ ETC_EXTRA = ("/var/lib/nvpmodel", "/etc/nvpmodel.conf")  # Jetson files read at 
 HERE = os.path.dirname(os.path.abspath(__file__))
 NOBODY = 65534
 S = 1_000_000_000
+OK, FAILS = "a collection", "a failed collection"  # what a step expects from both sides
+TIMEOUT = 30  # s for one answer
 
 
 # --- trees ---------------------------------------------------------------------------------------------
@@ -168,9 +179,9 @@ def pc_steps():
         put(sys_("devices/pci0000:00/0000:00:02.0/drm/card0/gt/gt0/rc6_residency_ms"), "1210\n")
         put(sys_("devices/pci0000:00/0000:00:0b.0/accel/accel0/device/npu_busy_time_us"), "1500000\n")
 
-    return [("warmup", None, 10 * S), ("busy", busy, 11 * S), ("counter regressed, rc6 reset", regress, 12 * S),
-            ("no ticks", idle, 13 * S), ("same clock: invalid interval", None, 13 * S),
-            ("hotplug, fan chip gone, gap", hotplug, 20 * S), ("after the gap", after_gap, 21 * S)]
+    return [("warmup", None, 10 * S, OK), ("busy", busy, 11 * S, OK), ("counter regressed, rc6 reset", regress, 12 * S, OK),
+            ("no ticks", idle, 13 * S, OK), ("same clock: invalid interval", None, 13 * S, OK),
+            ("hotplug, fan chip gone, gap", hotplug, 20 * S, OK), ("after the gap", after_gap, 21 * S, OK)]
 
 
 def failure_tree():
@@ -216,9 +227,11 @@ def failure_steps():
     def second():
         put(stat, stat_text(advance(CPUS, 10, 90)))
 
-    return [("warmup", None, 10 * S), ("second", second, 11 * S), ("/proc/stat gone: collection fails", proc_stat_gone, 12 * S),
-            ("/proc/stat back: warmup again", proc_stat_back, 13 * S), ("model not UTF-8: collection fails", model_not_text, 14 * S),
-            ("classes unlistable", model_fixed, 15 * S)]
+    return [("warmup", None, 10 * S, OK), ("second", second, 11 * S, OK),
+            ("/proc/stat gone: collection fails", proc_stat_gone, 12 * S, FAILS),
+            ("/proc/stat back: warmup again", proc_stat_back, 13 * S, OK),
+            ("model not UTF-8: collection fails", model_not_text, 14 * S, FAILS),
+            ("classes unlistable", model_fixed, 15 * S, OK)]
 
 
 TEGRA = "nvidia,p3768-0000+p3767-0005-super\0nvidia,p3767-0005\0nvidia,tegra234\0"
@@ -261,7 +274,8 @@ def jetson_steps():
         put("/var/lib/nvpmodel/status", "pmode:x\n")  # invalid_data
         os.chmod(sys_("devices/platform/39c0000.tachometer/hwmon/hwmon3/rpm"), 0)
         os.remove(sys_("devices/platform/bus@0/17000000.gpu/load"))  # no load: no GPU entry
-    return [("warmup", None, 5 * S), ("second", second, 6 * S), ("nvpmodel invalid, rpm unreadable, no GPU load", change, 7 * S)]
+    return [("warmup", None, 5 * S, OK), ("second", second, 6 * S, OK),
+            ("nvpmodel invalid, rpm unreadable, no GPU load", change, 7 * S, OK)]
 
 
 def bare_tree():
@@ -283,15 +297,15 @@ def pi_tree():
 
 
 def two_steps():
-    return [("warmup", None, 10 * S), ("second", lambda: put(proc("stat"), stat_text(
-        {n: c for n, c in enumerate([advance(CPUS, 30, 70)[0]] * 4)})), 11 * S)]
+    return [("warmup", None, 10 * S, OK), ("second", lambda: put(proc("stat"), stat_text(
+        {n: c for n, c in enumerate([advance(CPUS, 30, 70)[0]] * 4)})), 11 * S, OK)]
 
 
 SCENARIOS = {
     "pc": (pc_tree, pc_steps),
     "failures": (failure_tree, failure_steps),
     "jetson": (jetson_tree, jetson_steps),
-    "bare": (bare_tree, lambda: [("warmup", None, 10 * S), ("same", None, 11 * S)]),
+    "bare": (bare_tree, lambda: [("warmup", None, 10 * S, OK), ("same", None, 11 * S, OK)]),
     "pi": (pi_tree, two_steps),
 }
 
@@ -315,17 +329,44 @@ def clear():
         shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) else (os.path.exists(p) and os.remove(p))
 
 
-def start(cmd):
+class Broken(Exception):
+    """A side that did not answer: it exited, timed out, or wrote something that is neither a collection
+    nor an error. Unlike a collection that failed, this is never equal on both sides."""
+
+
+def start(cmd, log):
     env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": "/platmon", "PLATMON_HOST_ROOT": HOST, "PYTHONDONTWRITEBYTECODE": "1"}
-    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                            env=env, user=NOBODY, group=NOBODY, cwd="/")
+    user = {"user": NOBODY, "group": NOBODY} if os.geteuid() == 0 else {}  # the self-test also runs unprivileged
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True,
+                            env=env, cwd="/", **user)
 
 
-def step(p, base, wall):
-    p.stdin.write(f"{base} {wall}\n")
-    p.stdin.flush()
+def exited(p):
+    try:
+        return f"exited with {p.wait(timeout=5)}"
+    except subprocess.TimeoutExpired:
+        return "closed its output"
+
+
+def step(p, base, wall, timeout):
+    """One collection: {"stats", "sensors", "required"} or {"error"}, else Broken."""
+    try:
+        p.stdin.write(f"{base} {wall}\n")
+        p.stdin.flush()
+    except BrokenPipeError:
+        raise Broken(exited(p)) from None
+    if not select.select([p.stdout], [], [], timeout)[0]:
+        raise Broken(f"no answer in {timeout} s")
     line = p.stdout.readline()
-    return json.loads(line) if line else {"error": "exited"}
+    if not line:
+        raise Broken(exited(p))
+    try:
+        out = json.loads(line)
+    except ValueError:
+        raise Broken(f"not JSON: {line[:80]!r}") from None
+    if not isinstance(out, dict) or set(out) not in ({"stats", "sensors", "required"}, {"error"}):
+        raise Broken(f"neither a collection nor an error: {line[:80]!r}")
+    return out
 
 
 def kind(v):
@@ -351,43 +392,134 @@ def diff(a, b, ptr, out):
         out.append(f"{ptr}: {a!r} (python) != {b!r} (rust)")
 
 
+def states(a):
+    if "error" in a:
+        return "failed"
+    c = a["stats"]["collectors"]
+    out = " ".join(f"{g}={s['state']}" + (f"({s['reason']})" if s["reason"] else "")
+                   for g, s in c.items() if s["state"] != "ok") or "all ok"
+    issues = sorted({f"{g}:{i['reason']}" for g, s in c.items() for i in s["issues"]})
+    return out + (f" issues: {' '.join(issues)}" if issues else "")
+
+
+def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
+    """Runs the steps on both sides: (differences, report lines). A step passes only when both sides gave
+    what it expects (a collection, or a failed collection) and, for collections, the same one; and the run
+    only when both sides then exit with 0. A side that breaks ends the run."""
+    logs = {n: tempfile.TemporaryFile("w+") for n in ("python", "rust")}
+    procs = {"python": start(py_cmd, logs["python"]), "rust": start(rs_cmd, logs["rust"])}
+    report, problems, got = [], 0, {OK: 0, FAILS: 0}
+    for i, (label, change, base, expect) in enumerate(steps):
+        if change:
+            change()
+        wall = 1_700_000_000_000_000 + base // 1000
+        out, res = [], {}
+        for n, p in procs.items():
+            try:
+                res[n] = step(p, base, wall, timeout)
+            except Broken as e:
+                out.append(f"{n}: {e}")
+        for n, r in res.items():
+            if ("error" in r) != (expect == FAILS):
+                out.append(f"{n}: expected {expect}, got " + (f"an error: {r['error']!r}" if "error" in r else "a collection"))
+        if not out and expect == OK:
+            diff(res["python"], res["rust"], "", out)
+        if not out:
+            got[expect] += 1
+        shown = states(res["python"]) if "python" in res else "no answer"
+        report.append(f"  {i + 1}. {label}: {'OK' if not out else f'{len(out)} DIFFERENCES'} [{shown}]")
+        report += [f"       {d}" for d in out[:40]]
+        problems += len(out)
+        if len(res) < 2:
+            report.append("       stopped: a side did not answer")
+            break
+    for n, p in procs.items():
+        p.stdin.close()
+        try:
+            code = p.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            code = f"{p.wait()} (killed: no exit 10 s after its input closed)"
+        if code != 0:
+            report.append(f"  {n} exited with {code}")
+            problems += 1
+        if code != 0 or problems:
+            logs[n].seek(0)
+            tail = logs[n].read().splitlines()[-5:]
+            report += [f"       {n} stderr: {t}" for t in tail]
+        logs[n].close()
+    want = {e: sum(s[3] == e for s in steps) for e in got}
+    report.append(f"  {got[OK]}/{want[OK]} collections equal, {got[FAILS]}/{want[FAILS]} expected failures on both sides")
+    return problems, report
+
+
 def run(name, binary):
     tree, steps = SCENARIOS[name]
     steps = steps()
     clear()
     tree()
-    py = start(["python3", f"{HERE}/fixture_py.py"])
-    rs = start([binary, "script"])
-    failures, report = 0, []
-    for i, (label, change, base) in enumerate(steps):
-        if change:
-            change()
-        wall = 1_700_000_000_000_000 + base // 1000
-        a, b = step(py, base, wall), step(rs, base, wall)
-        out = []
-        if "error" in a or "error" in b:
-            if ("error" in a) != ("error" in b):
-                out.append(f"one side failed: python {a.get('error')!r}, rust {b.get('error')!r}")
-        else:
-            diff(a, b, "", out)
-        states = "failed" if "error" in a else " ".join(
-            f"{g}={s['state']}" + (f"({s['reason']})" if s["reason"] else "")
-            for g, s in a["stats"]["collectors"].items() if s["state"] != "ok") or "all ok"
-        if "error" not in a:
-            issues = sorted({f"{g}:{i['reason']}" for g, s in a["stats"]["collectors"].items() for i in s["issues"]})
-            states += f" issues: {' '.join(issues)}" if issues else ""
-        report.append(f"  {i + 1}. {label}: {'OK' if not out else f'{len(out)} DIFFERENCES'} [{states}]")
-        report += [f"       {d}" for d in out[:40]]
-        failures += len(out)
-    for p in (py, rs):
-        p.stdin.close()
-        p.wait(timeout=10)
-    print(f"{name}: {'OK' if not failures else 'FAILED'}")
+    problems, report = compare(steps, ["python3", f"{HERE}/fixture_py.py"], [binary, "script"])
+    print(f"{name}: {'OK' if not problems else 'FAILED'}")
     print("\n".join(report))
-    return failures
+    return problems
+
+
+# --- the harness against itself ------------------------------------------------------------------------
+
+FAKE = """import json, sys, time
+kind, n = sys.argv[1], 0
+for line in sys.stdin:
+    n += 1
+    if kind == "hang":
+        time.sleep(60)
+    if kind == "exit_now" or kind == "exit_after_one" and n == 2:
+        sys.exit(0)
+    if kind == "garbage":
+        print("not json", flush=True)
+        continue
+    error = kind.startswith("error")
+    out = {"error": "control"} if error else {"stats": {"collectors": {}, "x": 2 if kind == "other" else 1},
+                                               "sensors": {}, "required": {}}
+    print(json.dumps(out), flush=True)
+sys.exit(17 if kind.endswith("exit17") else 0)
+"""
+
+CONTROLS = [  # name, python side, rust side, what the steps expect, whether the harness must pass it
+    ("equal collections", "ok", "ok", [OK, OK], True),
+    ("expected failures on both sides", "error", "error", [FAILS, FAILS], True),
+    ("both fail where a collection is expected", "error", "error", [OK, OK], False),
+    ("both fail as expected, then exit 17", "error_exit17", "error_exit17", [FAILS, FAILS], False),
+    ("both collect where a failure is expected", "ok", "ok", [OK, FAILS], False),
+    ("python exits 17 after equal collections", "ok_exit17", "ok", [OK, OK], False),
+    ("rust's collection differs", "ok", "other", [OK, OK], False),
+    ("rust exits after one collection", "ok", "exit_after_one", [OK, OK], False),
+    ("rust exits where a failure is expected", "error", "exit_now", [FAILS], False),
+    ("rust does not answer", "ok", "hang", [OK, OK], False),
+    ("rust writes something that is not JSON", "ok", "garbage", [OK, OK], False),
+    ("rust writes something that is not JSON where a failure is expected", "error", "garbage", [FAILS], False),
+]
+
+
+def self_test():
+    """Each control must pass or fail as listed; the fake sides read no tree. True when all do."""
+    wrong, report_lines = 0, []
+    for name, a, b, expects, passes in CONTROLS:
+        steps = [(f"step {i + 1}", None, (i + 1) * S, e) for i, e in enumerate(expects)]
+        problems, report = compare(steps, ["python3", "-c", FAKE, a], ["python3", "-c", FAKE, b], timeout=2)
+        if (problems == 0) != passes:
+            wrong += 1
+            report_lines += [f"  {name}: {'failed' if passes else 'passed'}, must {'pass' if passes else 'fail'}"] + report
+    print(f"harness self-test: {len(CONTROLS) - wrong}/{len(CONTROLS)} controls as expected")
+    if wrong:
+        print("\n".join(report_lines))
+    return not wrong
 
 
 def main():
+    if sys.argv[1:] == ["--self-test"]:
+        sys.exit(0 if self_test() else 1)
+    if not self_test():
+        sys.exit(1)
     binary, names = sys.argv[1], sys.argv[2:] or list(SCENARIOS)
     failed = sum(run(n, binary) > 0 for n in names)
     print(f"{len(names) - failed}/{len(names)} scenarios equal")

@@ -2,11 +2,12 @@
 # Build the static musl binaries in a throwaway container (no Rust toolchain on the host needed):
 #   native/build.sh   -> native/target/{x86_64,aarch64}-unknown-linux-musl/release/platmon-native (system allocator)
 #                        native/target/cache-alloc/<same>/release/platmon-native (the cache-alloc feature)
+# The shell in the container stops at the first failure too (-e there, not only here): a failed test fails the build.
 set -euo pipefail
 cd "$(dirname "$0")"
-docker run --rm -u "$(id -u):$(id -g)" -e CARGO_HOME=/src/target/cargo-home -v "$PWD":/src -w /src rust:1.88-slim bash -c '
-  rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl >/dev/null 2>&1 || true
-  cargo test -q --release
+docker run --rm -u "$(id -u):$(id -g)" -e CARGO_HOME=/src/target/cargo-home -v "$PWD":/src -w /src rust:1.88-slim bash -euo pipefail -c '
+  rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl >/dev/null
+  cargo test -q --release --locked
   for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
     RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static" cargo build -q --release --locked --target $t
     RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static" cargo build -q --release --locked --target $t \

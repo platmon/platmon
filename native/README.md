@@ -58,7 +58,11 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
   pushed). Both collectors run as `nobody`, so file modes apply, on the same clocks (`platmon-native script`
   and `fixture_py.py`; the elapsed clock advances 1 µs per call, wall time is fixed). Every output value is
   compared exactly: JSON types, key order, numbers, read spans, required reads, `collectors` and source ids.
-  No tolerance.
+  No tolerance. Each step states whether it expects a collection or a failed collection; both sides must
+  give that and exit with 0 at the end, and a side that exits, hangs or writes something else fails the
+  run. Before the scenarios, the harness checks itself against fake sides (`fixture.py --self-test`, no
+  container needed): both failing where a collection is expected, a nonzero exit, a hang or output that is
+  not JSON must each be reported.
 - `compare.py`: **a live smoke test** on a real host, both collectors at the same moment. Structure, types,
   identities, `collectors`, source ids, which values have a span, the clock source, and spans within 5 s of
   each other are exact. Readings that move between two reads are only checked to be plausible (a GPU clock
@@ -73,12 +77,14 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
 
 ### Equivalence on fake trees
 
-`fixture.sh`, 2026-10-19, x86_64 build: 5 of 5 scenarios, 20 collections, no difference.
+`fixture.sh`, 2026-10-19, x86_64 build: 5 of 5 scenarios, no difference: 18 collections equal and the 2
+expected failures (below) failed on both sides; every side exited with 0. Harness self-test: 12 of 12
+controls reported as they must be.
 
 | scenario | what it covers |
 | --- | --- |
 | `pc` | i915 GPU (0 MHz in RC6, RC6 share, a reset, a share above 100 % clamped to 0), intel_vpu NPU, ACPI zones with a hwmon twin, duplicate chip names, two chips on one device, a fan with and without a tachometer, INA3221 rails and a sum channel; CPU warmup, usage, a regressed counter, no ticks, the same clock twice (invalid interval), a gap over 5 s, a core coming online, a fan chip removed |
-| `failures` | unreadable files and directories (`permission_denied`), a chip that disappeared (dangling link), invalid numbers and text that is not UTF-8 (`invalid_data`), empty files, the os-release fallback, an unknown DRM driver next to amdgpu, no accel class; `/proc/stat` missing (the collection fails) and back (warmup again), a model that is not UTF-8 (fails), class directories that cannot be listed |
+| `failures` | unreadable files and directories (`permission_denied`), a chip that disappeared (dangling link), invalid numbers and text that is not UTF-8 (`invalid_data`), empty files, the os-release fallback, an unknown DRM driver next to amdgpu, no accel class; `/proc/stat` missing (an expected failure) and back (warmup again), a model that is not UTF-8 (an expected failure), class directories that cannot be listed |
 | `jetson` | Tegra device tree, devfreq GPU, nvpmodel mode by name, L4T release, INA3221 rails, pwmfan and pwm_tach; then an invalid nvpmodel status, an unreadable rpm and a GPU without load |
 | `bare` | a host with nothing optional: every group unavailable with its reason |
 | `pi` | Raspberry Pi device tree, a zone whose hwmon twin is named with `_`, a DRM card (`v3d`) named but not read |
@@ -108,8 +114,9 @@ unit test (a FIFO opened while a signal without `SA_RESTART` arrives); it fails 
 system allocator (the default build), C the `cache-alloc` build. User + system % of one core from each
 program's own `getrusage`; use the totals, the user/system split is tick-sampled on these kernels. The board
 services (platmon 1.3.0-1) and the Hub polling them kept running. 120 collections per window, none failed,
-no 1 s deadline missed, no group changed state in any window, no problem logged, the same source ids on
-every side (20 / 5 / 58).
+no 1 s deadline missed, no group changed state in any window, no problem logged, and the last collection
+of every window had the same number of source ids (20 / 5 / 58). That the scope matched is shown by the
+fixtures and the live smoke test; during the bench only these counts were recorded, not the ids.
 
 | host | Python (A, A) | Rust, system allocator (B, B) | Rust, cache-alloc (C, C) |
 | --- | --- | --- | --- |
@@ -126,8 +133,10 @@ Collection time (p50 / p95, ms) and memory (VmRSS at the end of the window):
 | x86 PC | 16.5–17.8 / 22.7–23.2, 21.7 MiB | 16.1–17.2 / 20.3–21.1, 0.7–0.8 MiB | 12.8–14.9 / 19.3–20.6, 1.0–1.1 MiB |
 
 - **The default build already saves most of it.** The system allocator and the raw reads are enough for
-  −61–62 % on the boards. The allocator cache adds 0.04–0.08 pp of one core there (0.10 pp on x86, whose two B
-  windows differ by 0.12 pp: a desktop host, the noisiest of the three). It is not needed for the saving.
+  −61–62 % on the boards. The allocator cache lowers CPU by a further 0.08 pp of one core on the Orin and
+  0.04 pp on the Raspberry Pi (the saving against Python grows by 5–6 percentage points). On x86 it is
+  0.10 pp, but the two B windows there differ by 0.12 pp (a desktop host, the noisiest of the three), so
+  that figure is not settled. It is not needed for the saving.
 - **Collection time** halves on the Orin and falls to about a third on the Raspberry Pi. On the x86 PC it is
   about the same: there it is spent waiting for device reads (GPU, NPU, ACPI), not in the collector.
 - **RSS over the window** stays flat on every side (sampled every 30 collections). RSS of the cache-alloc
