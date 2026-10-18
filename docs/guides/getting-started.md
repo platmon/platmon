@@ -12,7 +12,33 @@ The primary distribution is a `.deb` package for Ubuntu and Debian-derived Linux
 Package files are architecture-independent, but that does not imply every OS or kernel
 has been validated.
 
-Download a fixed release and its `SHA256SUMS` from
+Install from the signed APT repository at <https://platmon.github.io/apt>. It holds
+the same `.deb` files as GitHub Releases. Before running `apt update`, check that
+`gpg --show-keys` prints the fingerprint
+`6D42 C14A BFB9 412F 34BA 4BEF F38B 9BB5 26A3 B0C6`:
+
+```sh
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://platmon.github.io/apt/platmon-archive-keyring.gpg \
+  | sudo tee /etc/apt/keyrings/platmon.gpg > /dev/null
+gpg --show-keys /etc/apt/keyrings/platmon.gpg
+sudo tee /etc/apt/sources.list.d/platmon.sources > /dev/null <<'EOF'
+Types: deb
+URIs: https://platmon.github.io/apt
+Suites: stable
+Components: main
+Signed-By: /etc/apt/keyrings/platmon.gpg
+EOF
+sudo apt update
+sudo apt install platmon
+systemctl status platmon --no-pager
+platmon --version
+platmon --once
+```
+
+Later updates arrive with `sudo apt update && sudo apt upgrade`.
+
+Without the repository, download a fixed release and its `SHA256SUMS` from
 [GitHub Releases](https://github.com/platmon/platmon/releases). In the directory
 containing all of the release files, verify checksums before installing the chosen
 `.deb`:
@@ -51,6 +77,10 @@ Other Linux systems can use the release source archive and the
 [source-systemd or Docker instructions](deployment.md). See
 [packaging and releases](../reference/packaging.md) for signing/checksums,
 installation lifecycle, migration and rollback.
+
+To watch several devices in one place, run [platmon-hub](https://github.com/platmon/platmon-hub)
+on another computer. platmon-hub 1.0.0 to 1.1.1 reads platmon 1.0.0 to 1.3.0 and checks each endpoint's
+schema rather than the application version; its opt-in raw capture needs platmon 1.3.0 or later.
 
 ## View a running device
 

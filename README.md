@@ -30,9 +30,10 @@ flowchart LR
 
 ## Quick start
 
-On Ubuntu/Debian-derived Linux with Python 3.9+ and systemd, install a verified package from
-[GitHub Releases](https://github.com/platmon/platmon/releases), or build one from this checkout
-(Linux with `dpkg-deb` required):
+On Ubuntu/Debian-derived Linux with Python 3.9+ and systemd, install from the signed
+[APT repository](https://platmon.github.io/apt/) (see [getting started](docs/guides/getting-started.md)),
+download a verified package from [GitHub Releases](https://github.com/platmon/platmon/releases),
+or build one from this checkout (Linux with `dpkg-deb` required):
 
 ```sh
 platmon_version=$(python3 scripts/packaging/package.py --version)

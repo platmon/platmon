@@ -30,8 +30,8 @@ alone does not expose every host filesystem. See [Docker observation scope](../r
 ## Debian package
 
 For Ubuntu/Debian-derived Linux, the `.deb` is the primary distribution.
-Install a checksum-verified package with APT, then use `systemctl`
-and `platmon` to operate it. The package installs the service as
+Install it from the signed APT repository, or a checksum-verified package
+file with APT, then use `systemctl` and `platmon` to operate it. The package installs the service as
 `platmon.service`, code under `/usr/share/platmon` and
 configuration at `/etc/platmon/platmon.ini`.
 
