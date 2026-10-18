@@ -118,6 +118,20 @@ platmon --once
 For a downloaded release, replace the package path with the exact verified `.deb` file,
 including that release's application version and packaging revision.
 
+`SHA256SUMS` comes from the same release page as the package, so it detects a damaged
+download but does not show who built the file. Releases after 1.3.0-1 also carry a GitHub
+build provenance attestation. With the GitHub CLI, check that the package was built by this
+repository's release workflow from the release tag:
+
+```sh
+gh attestation verify platmon_<version>-<revision>_all.deb --repo platmon/platmon \
+  --signer-workflow platmon/platmon/.github/workflows/release.yml \
+  --source-ref refs/tags/v<version>
+```
+
+Use the release's own tag, including a `-<revision>` suffix when it has one.
+The published packages 1.0.0-1 to 1.3.0-1 have no attestation.
+
 Code goes to `/usr/share/platmon/`, the client to `/usr/bin/platmon`, the vendor unit
 to `/usr/lib/systemd/system/platmon.service`, and config to `/etc/platmon/platmon.ini`.
 The CLI manual is available with `man platmon`. Compressed documentation and
@@ -217,10 +231,14 @@ directories are never automatically deleted by subsequent updates or uninstall.
    revision 2. Confirm the intended commit and required checks before pushing the tag.
    Creating a local tag alone does not start the workflow. This document does not create a tag.
 4. The release workflow fetches `main` and rejects tags whose commit is not an ancestor
-   of its current tip, before building. It verifies tag/version/changelog, runs tests and package checks,
-   then creates a **draft** GitHub Release with the four artifacts. Review the attached
-   bytes, acceptance evidence and notes before publishing the draft. Do not distribute
-   a container image; the repository's existing image licensing policy still applies.
+   of its current tip, before building. It verifies tag/version/changelog and runs the tests.
+   It then builds the release files **once** and checks those same files with the package
+   checker, Lintian, the dpkg lifecycle check (against a next-revision fixture that is not
+   released) and `SHA256SUMS`. It records a GitHub build provenance attestation for the
+   `.deb` and source archive, and creates a **draft** GitHub Release with the four artifacts
+   and the version's `CHANGELOG.md` section as notes. Review the attached bytes, acceptance
+   evidence and notes before publishing the draft. Do not distribute a container image;
+   the repository's existing image licensing policy still applies.
 5. After the release is published, add it to the APT repository: run the `apt` workflow of
    [platmon.github.io](https://github.com/platmon/platmon.github.io) with the tag
    (`gh workflow run apt -R platmon/platmon.github.io -f tags=v<version>`) and approve the

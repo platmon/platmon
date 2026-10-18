@@ -5,7 +5,7 @@ Priority: optional
 Architecture: all
 Depends: python3 (>= 3.9), systemd, init-system-helpers (>= 1.56)
 Maintainer: platmon maintainers <jwsung91@users.noreply.github.com>
-Homepage: https://github.com/jwsung91/platmon
+Homepage: https://github.com/platmon/platmon
 Installed-Size: @SIZE@
 Description: lightweight read-only Linux platform monitor
  Collects platform metrics using the Python standard library and exposes

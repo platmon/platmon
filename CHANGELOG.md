@@ -4,6 +4,14 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `frontends/cli.py`; Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+- Releases build their files once and run the package checker, Lintian, the dpkg lifecycle check
+  and checksums on those same files before attaching them to the draft. The `.deb` and source
+  archive get a GitHub build provenance attestation (`gh attestation verify`), and the release
+  notes contain only the version's changelog section (docs/reference/packaging.md).
+- The package homepage and copyright source point to github.com/platmon/platmon.
+
 ## 1.3.0 — 2026-10-17
 
 - Battery charge and the connected Wi-Fi signal get warning and critical levels, `[thresholds] battery`

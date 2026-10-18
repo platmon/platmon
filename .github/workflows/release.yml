@@ -26,11 +26,16 @@ jobs:
     needs: verify-main
     uses: ./.github/workflows/test.yml
 
-  draft:
+  # Build once; the checks, the attestation and the draft all use these same files.
+  build:
     needs: checks
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,19 +57,65 @@ jobs:
           if f"## {release} —" not in Path("CHANGELOG.md").read_text():
               raise SystemExit("release has no changelog entry")
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("version=" + release + "\n")
               output.write("revision=" + (match.group(1) or "1") + "\n")
           PY
       - name: Build fixed-version release files
         env:
           REVISION: ${{ steps.version.outputs.revision }}
         run: python3 scripts/packaging/package.py --revision "$REVISION"
+      - name: Install package policy checker
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lintian
+      - name: Check package policy
+        run: lintian --no-cfg --info --pedantic --fail-on error,warning dist/*.deb
       - run: python3 scripts/packaging/check_package.py dist/*.deb
+      - name: Verify dpkg lifecycle of the release package
+        env:
+          REVISION: ${{ steps.version.outputs.revision }}
+        run: |
+          # The next revision is only an upgrade fixture; it is not released.
+          python3 scripts/packaging/package.py --revision "$((REVISION + 1))" --output "$RUNNER_TEMP/upgrade"
+          python3 scripts/packaging/check_package_install.py dist/*.deb "$RUNNER_TEMP"/upgrade/*.deb
       - name: Verify checksums
         working-directory: dist
+        run: sha256sum -c SHA256SUMS
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+
+  draft:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Verify checksums
+        working-directory: release
         run: sha256sum -c SHA256SUMS
       - name: Create draft release for acceptance review
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.deb dist/*.tar.gz dist/BUILD.json dist/SHA256SUMS \
-            --verify-tag --draft --title "platmon $GITHUB_REF_NAME" --notes-file CHANGELOG.md
+          python3 - <<'PY' > notes.md
+          import os
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          start = text.index("## " + os.environ["VERSION"] + " —")
+          end = text.find("\n## ", start + 1)
+          print(text[start:end if end != -1 else None].strip())
+          PY
+          gh release create "$GITHUB_REF_NAME" release/*.deb release/*.tar.gz release/BUILD.json release/SHA256SUMS \
+            --verify-tag --draft --title "platmon $GITHUB_REF_NAME" --notes-file notes.md
