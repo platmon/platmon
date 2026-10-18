@@ -6,8 +6,8 @@ budget, then the current evidence. The release decision itself is in [release re
 
 ## Target
 
-- [budget.md](budget.md): the target (the default configuration's whole process at most 2.0 % of one
-  core per board) and how features are judged against it.
+- [budget.md](budget.md): the target (the default configuration's whole process at most 2.5 % of one
+  core per board, 2.0 % until 2026-10-18) and how features are judged against it.
 
 ## Current evidence
 

@@ -1,5 +1,14 @@
 # Performance budget
 
+## Release target raised to 2.5 % (2026-10-18)
+
+The owner raised the default configuration's release target from 2.0 % to **2.5 % of one core**
+per board, after the 1.3.0 A B B A run on the boards
+([readiness](../releases/readiness.md#arm-acceptance-2026-10-18)): with full-publication replay on by
+default the Raspberry Pi 4 measured 2.108 % and 2.067 %, the Orin Nano 1.884 % and 1.875 %; replay
+adds about 0.11 pp (Orin) and 0.22 pp (Pi). Conditions, units and the per-feature criteria are
+unchanged. Results recorded before this date were judged against 2.0 % and stay as written.
+
 ## Default enablement policy update (2026-10-09)
 
 After #40–#46 merged at `dc2875428892e99055e4dfe9c9afab0c2f7f1c52`, the owner requested
@@ -24,7 +33,7 @@ share says nothing about a task's worst-case latency or deadlines.
 
 | Level | Target | Role |
 | --- | --- | --- |
-| **Default configuration (release target)** | daemon CPU (user + system, the whole process) **≤ 2.0 % of one core** with every feature that is on by default | the gate for what runs by default |
+| **Default configuration (release target)** | daemon CPU (user + system, the whole process) **≤ 2.5 % of one core** with every feature that is on by default (2.0 % until 2026-10-18) | the gate for what runs by default |
 | **Feature collection cost (review criterion)** | the increase in collector-thread CPU per collection (`Sampler._attempt`, so the feature's own call plus checking and publishing its data) **about ≤ 2 ms per collection**, reported next to the increase per request (`do_GET`) | finds expensive features early and starts a design review; not an automatic pass or fail |
 | **Responsiveness** | a periodic passive collection's own call: elapsed p95 ≤ 2 ms | a low average must not hide a slow call |
 | **Regressions** | no lasting memory growth, new collection failures, overruns, data-age fallbacks or data-ownership problems | correctness, apart from the numbers |
@@ -54,7 +63,7 @@ board and the cadence.
 2. Check the feature criteria (collection ms, request ms, call p95, regressions). Above about 2 ms per
    collection, review the design before going further.
 3. Check the release target for the configuration the feature would ship in. On by default only if
-   the default configuration stays ≤ 2.0 % on every board; otherwise it ships off by default (opt-in)
+   the default configuration stays ≤ 2.5 % on every board; otherwise it ships off by default (opt-in)
    with its measured cost stated, or is reworked.
 4. Write the measured cost in the feature's documentation.
 
