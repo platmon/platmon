@@ -40,6 +40,41 @@ Publishing the draft therefore needs, at minimum, the CI Lintian result and the 
 open ARM and service gates. The draft release and its artifacts are the review point, not a release
 decision.
 
+### After publication (2026-10-17)
+
+CI, Lintian included, passed on the tagged commit, and the owner published 1.3.0 with the ARM gates
+open. The same day the x86_64 PC (Ubuntu 26.04) was upgraded by the owner from
+`1.2.0-2` to the published `platmon_1.3.0-1_all.deb`, which closes the service gate for x86 only:
+
+| check | result |
+| --- | --- |
+| installed version | `dpkg-query` `1.3.0-1`; `platmon --version` and the server both report 1.3.0; `dpkg -V platmon` clean |
+| service | restarted by the upgrade, `active`, `NRestarts=0`, `ExecMainStatus=0`; no journal entry at warning or above |
+| sandbox | `DynamicUser=yes`, `User=platmon`, `ProtectSystem=strict`, `NoNewPrivileges=yes` |
+| configuration | the unedited 1.2.0-2 `platmon.ini` was replaced by the 1.3.0 default (adds `[replay]` and the battery and Wi-Fi levels) with no `.dpkg-old` or `.dpkg-dist` left; preserving an *edited* file was not exercised here and rests on the container lifecycle check |
+| API | `/api/status` ready, `levels` includes `battery` and `wifi`; `/api/samples` 200 (404 before the upgrade); `/api/observation-samples` 200 for storage, Wi-Fi and battery, 404 for probe (no target configured, as documented) |
+
+Replay memory on this PC, sampled every minute from the restart with the default `[replay]` settings
+(600 s, 16 MiB) and one core publication per second:
+
+| minutes after start | RSS | cgroup `MemoryCurrent` | replay records |
+| --- | --- | --- | --- |
+| 0.7 | 35.6 MiB | 24.5 MiB | 40 |
+| 5 | 42.3 MiB | 31.3 MiB | 340 |
+| 9 | 48.5 MiB | 37.5 MiB | 581 |
+| 10 | 49.1 MiB | 36.8 MiB | 600 (full) |
+| 11 | 49.1 MiB | 38.0 MiB | 600, IDs 102–701 |
+
+RSS grew about 1.5 MiB a minute while the buffer filled and stopped growing once it held 600 s, so
+the default buffer costs about 13.5 MiB of resident memory on x86_64. The whole service used 9 s of
+CPU in 11 min 46 s (about 1.3 % of one core), collection included; replay was not isolated. This is
+one PC over 12 minutes: long runs and every ARM board remain unmeasured, and the ARM acceptance
+gate stays open.
+
+The journal also showed one storage line below warning level, `permission_denied` for a removable
+disk mounted under `/run/media/<user>`, most likely because the sandboxed service user cannot read
+that mount.
+
 ## 1.2.0 release gate (2026-10-11)
 
 Changes since 1.1.0: batteries and external power supplies as the low-frequency group `battery` (#68),
