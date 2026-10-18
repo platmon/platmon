@@ -7,6 +7,8 @@ pub enum Value {
     Null,
     Bool(bool),
     Int(i64),
+    /// an unsigned counter, or a product of one, beyond i64 (Python's ints have no limit)
+    Big(u128),
     Float(f64),
     Str(String),
     Arr(Vec<Value>),
@@ -55,6 +57,7 @@ impl Value {
             Value::Null => out.push_str("null"),
             Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
             Value::Int(i) => { let _ = write!(out, "{}", i); }
+            Value::Big(i) => { let _ = write!(out, "{}", i); }
             Value::Float(f) => write_float(out, *f),
             Value::Str(s) => write_str(out, s),
             Value::Arr(items) => {
@@ -89,9 +92,12 @@ impl Value {
     }
 }
 
+impl Default for Value { fn default() -> Value { Value::Null } }
 impl From<&str> for Value { fn from(s: &str) -> Value { Value::Str(s.to_string()) } }
 impl From<String> for Value { fn from(s: String) -> Value { Value::Str(s) } }
 impl From<i64> for Value { fn from(i: i64) -> Value { Value::Int(i) } }
+impl From<u64> for Value { fn from(i: u64) -> Value { Value::Big(i as u128) } }
+impl From<u128> for Value { fn from(i: u128) -> Value { Value::Big(i) } }
 impl From<f64> for Value { fn from(f: f64) -> Value { Value::Float(f) } }
 impl<T: Into<Value>> From<Option<T>> for Value {
     fn from(o: Option<T>) -> Value { o.map(Into::into).unwrap_or(Value::Null) }
@@ -166,7 +172,7 @@ mod tests {
     #[test]
     fn sorted_compact_objects() {
         let mut v = Value::obj();
-        v.set("v", 1.into());
+        v.set("v", 1i64.into());
         v.set("provider", "hwmon".into());
         v.set("attr", "temp1_input".into());
         assert_eq!(v.to_string(true), r#"{"attr":"temp1_input","provider":"hwmon","v":1}"#);

@@ -1,6 +1,7 @@
 """The Python side of fixture.py: `platmon-native script` for the Python collector. For each stdin line
-"BASE_NS WALL_US", one collect_recorded on those clocks, printed as one JSON line {"stats", "sensors",
-"required"} or {"error": ...}. The elapsed clock returns BASE_NS, BASE_NS + 1000, ... call by call and
+"BASE_NS WALL_US", one collect_recorded on those clocks, wired as the service does by default (network,
+disk_io and pressure on, max_gap 5 s), printed as one JSON line {"stats", "sensors", "required", "passive"}
+or {"error": ...}; "passive" has the read spans of network, disk_io and pressure. The elapsed clock returns BASE_NS, BASE_NS + 1000, ... call by call and
 time.time() returns WALL_US / 1e6, as platmon-native's set clocks do (metadata::set_clocks).
 
   PYTHONPATH=<platmon tree> python3 fixture_py.py
@@ -22,19 +23,24 @@ time.time = lambda: state["wall"]  # stats["time"]; only this process, which run
 
 from collector import collect_recorded  # noqa: E402  (after the patch; the import reads the tree)
 from collector.common import CpuCounters  # noqa: E402
+from collector.disk_io import DiskCounters  # noqa: E402
 from collector.gpu import Gpu  # noqa: E402
+from collector.network import NetworkCounters  # noqa: E402
 from collector.npu import Npu  # noqa: E402
+from collector.pressure import Pressure  # noqa: E402
 
 
 def main():
     cpu, gpu, npu = CpuCounters(clock, max_gap=5.0), Gpu(clock, max_gap=5.0), Npu(clock, max_gap=5.0)
+    net, dio, psi = NetworkCounters(clock, max_gap=5.0), DiskCounters(clock, max_gap=5.0), Pressure(clock)
     logged = {}
     for line in sys.stdin:
         base, wall = (int(x) for x in line.split())
         state.update(base=base, calls=0, wall=wall / 1e6)
         try:
-            col = collect_recorded(cpu, logged, clock, None, None, None, gpu, npu)
-            out = {"stats": col.stats, "sensors": col.sensors, "required": col.required}
+            col = collect_recorded(cpu, logged, clock, net, dio, psi, gpu, npu)
+            out = {"stats": col.stats, "sensors": col.sensors, "required": col.required,
+                   "passive": {"network": col.network, "disk_io": col.disk_io, "pressure": col.pressure}}
         except Exception as e:  # noqa: BLE001  the harness compares only that both failed
             out = {"error": f"{type(e).__name__}: {e}"}
         print(json.dumps(out), flush=True)

@@ -1,10 +1,11 @@
 //! Experimental Rust port of collector.collect_recorded (docs/performance/rust-feasibility.md, next step 1).
 //! Not part of the product. Covers the core groups: CPU, clocks, thermal zones, hwmon, memory, disk,
-//! identity, the Jetson extension, DRM GPU and accel NPU, collectors and sensor source ids. Network,
-//! Disk I/O, Pressure, the slow groups and nvidia-smi are not ported.
+//! identity, the Jetson extension, DRM GPU and accel NPU, collectors and sensor source ids, and the
+//! passive groups Network, Disk I/O and Pressure as the service enables them by default. The slow groups
+//! and nvidia-smi are not ported.
 //!
 //!   platmon-native collect            one recorded collection 1 s after a first one, as JSON
-//!                                     {"stats", "sensors" (with spans), "required", "clock"}
+//!                                     {"stats", "sensors" (with spans), "required", "passive", "clock"}
 //!   platmon-native script             fixture tests: for each stdin line "BASE_NS WALL_US", one collection
 //!                                     on those clocks (see metadata::set_clocks), one JSON line each
 //!                                     ({"error": ...} for a failed collection)
@@ -17,6 +18,7 @@ mod common;
 mod jetson;
 mod json;
 mod metadata;
+mod passive;
 mod sha256;
 mod sysfs;
 
@@ -37,17 +39,22 @@ pub struct Groups {
     pub fans: Group,
     pub power_mode: Group,
     pub board_info: Group,
+    pub network: Group,
+    pub disk_io: Group,
+    pub pressure: Group,
 }
 
 impl Groups {
     fn new(trace: bool) -> Groups {
         let g = |n| Group::new(n, trace);
         Groups { cpu_frequency: g("cpu_frequency"), gpu: g("gpu"), npu: g("npu"), temperature: g("temperature"),
-                 power: g("power"), fans: g("fans"), power_mode: g("power_mode"), board_info: g("board_info") }
+                 power: g("power"), fans: g("fans"), power_mode: g("power_mode"), board_info: g("board_info"),
+                 network: g("network"), disk_io: g("disk_io"), pressure: g("pressure") }
     }
 
     fn into_vec(self) -> Vec<Group> {
-        vec![self.cpu_frequency, self.gpu, self.npu, self.temperature, self.power, self.fans, self.power_mode, self.board_info]
+        vec![self.cpu_frequency, self.gpu, self.npu, self.temperature, self.power, self.fans, self.power_mode, self.board_info,
+             self.network, self.disk_io, self.pressure]
     }
 }
 
@@ -74,6 +81,8 @@ struct Collector {
     cpu: CpuCounters,
     gpu: accel::Accel,
     npu: accel::Accel,
+    network: passive::Network,
+    disks: passive::Disks,
     logged: Vec<(String, Vec<String>)>,
 }
 
@@ -81,10 +90,12 @@ struct Collected {
     stats: Value,
     sensors: Vec<(String, Value)>,
     required: common::Required,
+    /// the reads of network, disk_io and pressure (Collected.network, .disk_io, .pressure)
+    passive: [metadata::Span; 3],
 }
 
 impl Collected {
-    /// {"stats", "sensors", "required"}: Collected's fields as the Python harnesses print them.
+    /// {"stats", "sensors", "required", "passive"}: Collected's fields as the Python harnesses print them.
     fn to_value(self) -> Value {
         let mut required = Value::obj();
         for name in ["cpu", "memory", "disk", "uptime"] { // record.REQUIRED_READS
@@ -95,6 +106,11 @@ impl Collected {
         out.set("stats", self.stats);
         out.set("sensors", Value::Obj(self.sensors));
         out.set("required", required);
+        let mut spans = Value::obj();
+        for (name, span) in ["network", "disk_io", "pressure"].iter().zip(self.passive) {
+            spans.set(name, span_value(span));
+        }
+        out.set("passive", spans);
         out
     }
 }
@@ -107,10 +123,12 @@ impl Collector {
     fn new() -> Collector {
         let (platform, board) = detect();
         Collector { platform, board, cpu: CpuCounters::new(Some(5.0), "interval"), gpu: accel::Accel::gpu(),
-                    npu: accel::Accel::npu(), logged: Vec::new() }
+                    npu: accel::Accel::npu(), network: passive::Network::new(Some(5.0)), disks: passive::Disks::new(Some(5.0)),
+                    logged: Vec::new() }
     }
 
-    /// collect_recorded(cpu, logged, clock) without network, disk_io and pressure.
+    /// collect_recorded(cpu, logged, clock, network, disk_io, pressure, gpu, npu), wired as the service does
+    /// at its default 1 s interval (max_gap 5 s).
     fn collect(&mut self) -> Result<Collected, String> {
         let mut g = Groups::new(true);
         let mut required = Vec::new();
@@ -136,10 +154,17 @@ impl Collector {
         }
         let v = self.npu.sample(&mut g.npu);
         stats.set("npu", v.into());
+        // after the required data: a failed collection never reaches them
+        let (v, network) = self.network.sample(&mut g.network);
+        stats.set("network", v);
+        let (v, disk_io) = self.disks.sample(&mut g.disk_io);
+        stats.set("disk_io", v);
+        let (v, pressure) = passive::pressure(&mut g.pressure);
+        stats.set("pressure", v);
         let sensors = sensor_entries(&stats, &fans, &g);
         let groups = g.into_vec();
         stats.set("collectors", metadata::summarize(&groups, &mut self.logged));
-        Ok(Collected { stats, sensors, required })
+        Ok(Collected { stats, sensors, required, passive: [network, disk_io, pressure] })
     }
 }
 
@@ -214,7 +239,8 @@ fn rss_kib() -> (i64, i64) {
 }
 
 /// What the loop reports besides CPU, the same as tools/pyloop.py: collection times, missed 1 s deadlines,
-/// RSS over the run, and per group how often each state came up, with the source ids of the last collection.
+/// RSS over the run, per group how often each state came up, the number of source ids of the last
+/// collection, and how many different read scopes (read_scope) came up, with the last one.
 #[derive(Default)]
 struct Stats {
     elapsed_ms: Vec<f64>,
@@ -222,6 +248,29 @@ struct Stats {
     rss: Vec<i64>,
     states: Vec<(String, Vec<(String, u32)>)>,
     sources: usize,
+    scopes: Vec<String>,
+    scope: Value,
+}
+
+/// pyloop.read_scope: the SHA-256 (16 hex digits) of the sorted source ids, and the names of the interfaces,
+/// disks and pressure resources read.
+fn read_scope(col: &Collected) -> Value {
+    let mut ids: Vec<&str> = col.sensors.iter().filter_map(|(_, v)| match v.get("id") { Some(Value::Str(s)) => Some(s.as_str()), _ => None }).collect();
+    ids.sort();
+    let names = |group: &str, list: &str| Value::Arr(match col.stats.get(group).and_then(|g| g.get(list)) {
+        Some(Value::Arr(items)) => items.iter().filter_map(|x| x.get("name").cloned()).collect(),
+        _ => vec![],
+    });
+    let mut v = Value::obj();
+    v.set("source_ids", crate::sha256::hex(ids.join("\n").as_bytes())[..16].into());
+    v.set("interfaces", names("network", "interfaces"));
+    v.set("disks", names("disk_io", "disks"));
+    let pressure = match col.stats.get("pressure").and_then(|p| p.get("resources")) {
+        Some(Value::Obj(items)) => items.iter().map(|(k, _)| Value::Str(k.clone())).collect(),
+        _ => vec![],
+    };
+    v.set("pressure", Value::Arr(pressure));
+    v
 }
 
 impl Stats {
@@ -241,6 +290,12 @@ impl Stats {
             }
         }
         self.sources = col.sensors.iter().filter(|(_, v)| matches!(v.get("id"), Some(Value::Str(_)))).count();
+        let scope = read_scope(col);
+        let key = scope.to_string(true);
+        if !self.scopes.contains(&key) {
+            self.scopes.push(key);
+        }
+        self.scope = scope;
     }
 
     fn value(&mut self) -> Value {
@@ -259,6 +314,8 @@ impl Stats {
             (n.clone(), Value::Obj(c.iter().map(|(s, k)| (s.clone(), (*k as i64).into())).collect()))
         }).collect()));
         v.set("source_ids", (self.sources as i64).into());
+        v.set("read_scopes", (self.scopes.len() as i64).into());
+        v.set("read_scope", self.scope.clone());
         v
     }
 }

@@ -17,9 +17,12 @@ Ported, with the same output as the Python collector:
 - `collectors` states, reasons and issues
 - sensor source ids (SHA-256 descriptors), the JSON Pointers of `sensor_meta`, every value's read span and
   the required reads' spans
+- the passive groups, wired as the service enables them by default (max_gap 5 s): Network
+  (`/proc/self/net/dev`, the namespace id, ifindex from `if_nameindex`), Disk I/O (`/proc/diskstats`, physical
+  disks by their `/sys/block` link) and Pressure (`/proc/pressure`), with their read spans
 
-Not ported: Network, Disk I/O, Pressure, the slow groups (storage, Wi-Fi, battery, probe), the
-nvidia-smi fallback, and everything in `runtime/` (Sampler, history, replay, HTTP).
+Not ported: the slow groups (storage, Wi-Fi, battery, probe), the nvidia-smi fallback, and everything in
+`runtime/` (Sampler, history, replay, HTTP).
 
 Behaviour kept from Python where bypassing std made it explicit:
 
@@ -32,6 +35,12 @@ Behaviour kept from Python where bypassing std made it explicit:
   instead of returning the entries read so far.
 - **Text that is not UTF-8:** a group read notes `invalid_data`. A plain read (model, os-release, uptime, the
   device tree's compatible) fails the collection, or the start, as Python's `UnicodeDecodeError` does.
+- **Counters are Python ints:** 64-bit counters, and bytes (sectors × 512) beyond 64 bits, are written as
+  the exact integer. A rate converts the delta to a float before multiplying, as `delta * 1e9 / window`
+  does in Python, so a large delta rounds the same way.
+- **Names:** `str.split`, `str.strip` and `str.isprintable` as Python defines them. `isprintable` is exact
+  for ASCII; beyond it Python follows its Unicode database, which this does not carry (see
+  [Not covered](#equivalence-on-fake-trees)).
 
 Dependencies: `libc` (MIT or Apache-2.0, no dependencies of its own) for system call numbers, flags and
 struct layouts per target. JSON output and SHA-256 are implemented here, because the output has to match
@@ -62,7 +71,9 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
   give that and exit with 0 at the end, and a side that exits, hangs or writes something else fails the
   run. Before the scenarios, the harness checks itself against fake sides (`fixture.py --self-test`, no
   container needed): both failing where a collection is expected, a nonzero exit, a hang or output that is
-  not JSON must each be reported.
+  not JSON must each be reported. Interfaces are real ones in the container's own network namespace (empty
+  bridges, created and removed by ioctl, so the kernel gives them their ifindex); the container has
+  `NET_ADMIN` there and no network.
 - `compare.py`: **a live smoke test** on a real host, both collectors at the same moment. Structure, types,
   identities, `collectors`, source ids, which values have a span, the clock source, and spans within 5 s of
   each other are exact. Readings that move between two reads are only checked to be plausible (a GPU clock
@@ -70,14 +81,16 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
 - `bench.sh`: the Python collector (A) against platmon-native (B), and optionally a second build (C), over
   the same scope: A B B A, or A B C C B A, with 30 s warmup and 120 s windows. Each window reports its own
   CPU (`getrusage`), RSS at the start, every 30 collections and the end, collection time p50/p95/max,
-  missed 1 s deadlines, how often each group was in each state, and the source ids of the last collection.
-  stderr goes to `OUT.jsonl.log`.
+  missed 1 s deadlines, how often each group was in each state, the number of source ids of the last
+  collection, and its read scope: the SHA-256 of the sorted source ids and the interfaces, disks and
+  pressure resources it read, with how many different scopes came up in the window. stderr goes to
+  `OUT.jsonl.log`.
 
 ## Results
 
 ### Equivalence on fake trees
 
-`fixture.sh`, 2026-10-19, x86_64 build: 5 of 5 scenarios, no difference: 18 collections equal and the 2
+`fixture.sh`, 2026-10-19, x86_64 build: 7 of 7 scenarios, no difference: 35 collections equal and the 2
 expected failures (below) failed on both sides; every side exited with 0. Harness self-test: 12 of 12
 controls reported as they must be.
 
@@ -88,27 +101,73 @@ controls reported as they must be.
 | `jetson` | Tegra device tree, devfreq GPU, nvpmodel mode by name, L4T release, INA3221 rails, pwmfan and pwm_tach; then an invalid nvpmodel status, an unreadable rpm and a GPU without load |
 | `bare` | a host with nothing optional: every group unavailable with its reason |
 | `pi` | Raspberry Pi device tree, a zone whose hwmon twin is named with `_`, a DRM card (`v3d`) named but not read |
+| `passive` | interfaces with and without an ifindex (one named beyond ASCII), physical, virtual and partition disks, a disk with the 11 fields of older kernels; rates, counters reset (no rate, a new baseline), in flight falling (a gauge, not a reset), an interface and a disk removed and others added, an interface back under its name with a new ifindex, a counter at 2^64−1 and one beyond (not a counter), bytes beyond 64 bits, a delta whose rate depends on the float conversion, windows of 1.7 s and 0.3 s, a gap, the same clock twice, the network namespace changed and the rates after it, a disk whose `/sys/block` link went away (its classification is kept) |
+| `passive_failures` | a header that is not `/proc/net/dev`'s, diskstats that is not UTF-8, a pressure file that cannot be read, one that is not ASCII, one without `some`; then bad rows (an interface listed twice, 15 fields, invalid names, a line without `:`, a negative counter; a disk listed twice, too few fields, a later field that is not a counter, a major that is not a number, a line without a name, a `/sys/block` entry that is not a link), a namespace that cannot be identified, `some` twice, CRLF line ends; then every file gone, back (warmup), empty files, recovered |
 
-The harness was checked against itself: six deliberate defects in a copy of the Rust code were each
-reported (rail rounding, the span of a computed value, the RC6 clamp, the gap limit, `disappeared` vs
-`not_exposed`, a 0 MHz clock dropped). The RC6 clamp was first missed, which added the clamped case to
-`pc`.
+The harness was checked against itself: deliberate defects in a copy of the Rust code were each reported.
+Core groups, six: rail rounding, the span of a computed value, the RC6 clamp, the gap limit, `disappeared`
+vs `not_exposed`, a 0 MHz clock dropped. Passive groups, eleven: `window_ms` dropped on a reset, in flight
+taken for a counter, a namespace change ignored, no reuse of a disk's classification, CPU `full` kept,
+counters written as 64-bit signed, the I/O ratio rounded to 3 digits, the pressure span ending at its
+first read, duplicate interfaces kept, line numbers off by one, the rate computed without Python's float
+conversion. The RC6 clamp, the I/O ratio and the float conversion were first missed (every window was
+exactly 1 s), which added the clamped case to `pc` and the 1.7 s / 0.3 s windows and the large delta to
+`passive`.
 
 Not covered by the fixtures: `ENODATA` and `EIO` (a tmpfs cannot return them; the reason mapping has a
-unit test), an error in the middle of a listing, and a file that vanishes while it is read. `EINTR` has a
+unit test), an error in the middle of a listing, a file that vanishes while it is read, a failing
+`if_nameindex`, interface names that are not UTF-8 (Python keeps them with surrogate escapes, this replaces
+the bytes), names beyond ASCII that Python's Unicode database does not call printable (unassigned code
+points), and a pressure total beyond 128 bits. `EINTR` has a
 unit test (a FIFO opened while a signal without `SA_RESTART` arrives); it fails when the retry is removed.
 
 ### Live smoke test
 
-`compare.py`, 2026-10-19: no difference, three runs per host. Both sides used `boottime`.
+`compare.py`, 2026-10-19, with Network, Disk I/O and Pressure: no difference, three runs per host. Both sides
+used `boottime`, had the same network namespace id, and timed the same passive reads.
 
-| host | sensors with a source id | with a read span | temperatures | power | fans | CPUs | covered |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Jetson Orin Nano Super (L4T R36.5.2) | 20 | 20 | 6 | 3 (INA3221 rails) | 2 (pwmfan, pwm_tach) | 6 | Tegra GPU, nvpmodel `MAXN_SUPER`, L4T |
-| Raspberry Pi 4 (Debian 13) | 5 | 5 | 1 | 0 | 0 | 4 | DRM card `v3d` named, not read |
-| x86 PC (Ubuntu 26.04) | 58 | 56 | 28 | 0 | 1 | 22 | i915 GPU, intel_vpu NPU |
+| host | sensors with a source id | with a read span | temperatures | power | fans | CPUs | interfaces | disks | pressure | covered |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Jetson Orin Nano Super (L4T R36.5.2) | 20 | 20 | 6 | 3 (INA3221 rails) | 2 (pwmfan, pwm_tach) | 6 | 9 | 1 (NVMe) | none: the L4T kernel has no PSI (both sides `not_exposed`) | Tegra GPU, nvpmodel `MAXN_SUPER`, L4T, CAN and USB gadget interfaces |
+| Raspberry Pi 4 (Debian 13) | 5 | 5 | 1 | 0 | 0 | 4 | 3 | 1 (SD card) | cpu, memory, io | DRM card `v3d` named, not read |
+| x86 PC (Ubuntu 26.04) | 58 | 56 | 28 | 0 | 1 | 22 | 4 | 2 (NVMe, USB) | cpu, memory, io | i915 GPU, intel_vpu NPU |
 
-### CPU, same scope
+Every interface and disk had a rate on both sides (the second collection, 1 s after the first).
+
+### CPU with the passive groups
+
+2026-10-19 (step 2B), the collection the service makes by default: the core groups plus Network, Disk I/O
+and Pressure. A B C C B A, 30 s warmup and 120 s windows; A the Python collector, B platmon-native with the
+system allocator (the default build), C the `cache-alloc` build. User + system % of one core from each
+program's own `getrusage`. The board services (platmon 1.3.0-1) and the Hub polling them kept running.
+Every window: 120 collections, none failed, no 1 s deadline missed, no group changed state, nothing logged,
+and one read scope throughout, the same on all six windows of a host (source ids, 9 / 3 / 4 interfaces,
+the disks, the pressure resources; the Orin's kernel has no PSI).
+
+| host | Python (A, A) | Rust, system allocator (B, B) | Rust, cache-alloc (C, C) |
+| --- | --- | --- | --- |
+| Orin | 1.436, 1.432 | 0.570, 0.569: −60 % | 0.505, 0.513: −65 % |
+| Raspberry Pi 4 | 1.103, 0.943 | 0.402, 0.406: −61 % | 0.369, 0.369: −64 % |
+| x86 PC | 0.756, 0.756 | 0.521, 0.562: −28 % | 0.491, 0.436: −39 % |
+
+Collection time (p50 / p95, ms) and memory (VmRSS at the end of the window):
+
+| host | Python | Rust, system allocator | Rust, cache-alloc |
+| --- | --- | --- | --- |
+| Orin | 18.7 / 19.6–19.8, 16.0 MiB | 9.8–9.9 / 10.5, 0.7 MiB | 9.3 / 9.8–9.9, 0.9 MiB |
+| Raspberry Pi 4 | 10.2–11.8 / 11.2–12.0, 20.1 MiB | 4.2 / 4.4–4.5, 0.7 MiB | 3.9 / 3.9–4.0, 0.8 MiB |
+| x86 PC | 18.9–21.6 / 24.4–25.0, 22.1 MiB | 15.7–16.9 / 21.5, 0.9 MiB | 15.4–16.1 / 20.5–21.0, 1.2 MiB |
+
+- **The saving holds with the passive groups:** −60–61 % on the boards with the default build, as in 2A.
+  The three groups cost Python 0.08 (Orin) and 0.24 (Raspberry Pi) pp of one core, Rust 0.06 and 0.10 pp.
+- **Every Rust window is below every Python window** on each host. The Raspberry Pi's two Python windows
+  differ by 0.16 pp, so its −61 % is from their mean.
+- **The allocator cache** lowers CPU by a further 0.06 pp of one core on the Orin and 0.035 pp on the
+  Raspberry Pi (5 and 3 percentage points more saving against Python). On x86 the two B windows differ by
+  0.04 pp and the two C windows by 0.06 pp, so its figure is not settled. It is not needed for the saving.
+- Collection only: no HTTP, no response JSON, no history or replay, no slow groups.
+
+### CPU, core groups only (step 2A)
 
 2026-10-19, A B C C B A, 30 s warmup and 120 s windows; A the Python collector, B platmon-native with the
 system allocator (the default build), C the `cache-alloc` build. User + system % of one core from each
@@ -162,7 +221,9 @@ compare vetted allocators instead of this cache (mimalloc: MIT; jemalloc: BSD-2-
 and bundled sources to be checked separately).
 
 Raw records are kept outside the repository. SHA-256, first 16 hex digits:
-- 2026-10-19: results Orin `ecad202e537830f8`, Raspberry Pi `94a036d9804393e1`, x86 `d4128078aeb6597d`
+- 2026-10-19, with the passive groups: results Orin `bc7f4bfc203ca6a1`, Raspberry Pi `3840f075d3d1bc54`, x86
+  `924f307d60ae6ac6`
+- 2026-10-19, core groups only: results Orin `ecad202e537830f8`, Raspberry Pi `94a036d9804393e1`, x86 `d4128078aeb6597d`
 - 2026-10-18: results Orin `ecbd98eda8b499d9`, Raspberry Pi `d2290973d157211a`, x86 `e044f35c961b0856`
 
 The files used on the boards were removed afterwards.

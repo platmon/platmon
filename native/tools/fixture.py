@@ -16,10 +16,12 @@ pass, and both sides failing where a collection is expected, a nonzero exit, a h
 
   fixture.py BINARY [SCENARIO ...]
   fixture.py --self-test          # the controls only; needs no container"""
+import fcntl
 import json
 import os
 import select
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -66,12 +68,67 @@ def stat_text(cpus):
     return "\n".join(rows + ["intr 1 0", "ctxt 100", "btime 1700000000", "processes 10"]) + "\n"
 
 
-def base_proc(cpus):
+def base_proc(cpus, passive=True):
+    """/proc for the required reads and /proc/self; with passive, lo, one disk and the pressure files."""
     put(proc("stat"), stat_text(cpus))
     put(proc("meminfo"), "MemTotal:        8000000 kB\nMemFree:         1000000 kB\nMemAvailable:    5000000 kB\n"
                          "Buffers:           10000 kB\nSwapTotal:       2000000 kB\nSwapFree:        1500000 kB\n")
     put(proc("uptime"), "1234.56 4000.00\n")
-    link(proc("self"), "/realproc/self")
+    proc_self()
+    if passive:
+        put(proc("self/net/dev"), net_dev_text({"lo": [500, 5] + [0] * 6 + [500, 5] + [0] * 6}))
+        put(proc("diskstats"), diskstats_text([(8, 0, "sda", [100, 0, 2000, 50, 20, 0, 400, 30, 0, 60, 80] + [0] * 6)]))
+        link(sys_("block/sda"), "../devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block/sda")
+        for r in ("cpu", "memory", "io"):
+            put(proc(f"pressure/{r}"), pressure_text(1.5, 100))
+
+
+# /proc/self/net/dev and /proc/self/ns/net are what the network group reads. The rest of /proc/self links to
+# the real one (/realproc/self is each reader's own), so the collectors' /proc/self/fd lookups keep working.
+NS = "/realproc/self/ns"
+
+
+def proc_self():
+    os.makedirs(proc("self/ns"))
+    for n in os.listdir("/realproc/self"):
+        if n not in ("net", "ns"):
+            os.symlink(f"/realproc/self/{n}", proc(f"self/{n}"))
+    for n in os.listdir(NS):
+        os.symlink(f"{NS}/{n}", proc(f"self/ns/{n}"))
+
+
+def netns(target):
+    """Points /proc/self/ns/net elsewhere: another namespace file is another namespace to the collectors."""
+    os.remove(proc("self/ns/net"))
+    os.symlink(target, proc("self/ns/net"))
+
+
+def net_dev_text(rows):
+    """/proc/net/dev with {name: 16 counters} (receive, then transmit) or {name: a row's text after ":"}."""
+    head = ["Inter-|   Receive                                                |  Transmit",
+            " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed"]
+    return "\n".join(head + [f"{n:>6}:" + (r if isinstance(r, str) else " ".join(f"{v:8d}" for v in r))
+                            for n, r in rows.items()]) + "\n"
+
+
+def diskstats_text(rows):
+    """/proc/diskstats with (major, minor, name, counters) rows; a str row is written as it is."""
+    return "".join(r + "\n" if isinstance(r, str) else f"{r[0]:4d} {r[1]:7d} {r[2]} " + " ".join(map(str, r[3])) + "\n"
+                   for r in rows)
+
+
+def pressure_text(avg, total, full=True):
+    some = f"some avg10={avg:.2f} avg60={avg / 2:.2f} avg300=0.00 total={total}"
+    return some + "\n" + (f"full avg10={avg / 4:.2f} avg60=0.00 avg300=0.00 total={total // 3}\n" if full else "")
+
+
+SIOCBRADDBR, SIOCBRDELBR = 0x89a0, 0x89a1  # an empty bridge: an interface without a module to load
+
+
+def iface(name, add=True):
+    """Adds or removes an interface in the container's network namespace, so if_nameindex lists it."""
+    with socket.socket() as s:
+        fcntl.ioctl(s, SIOCBRADDBR if add else SIOCBRDELBR, name.encode() + b"\0")
 
 
 def hwmon(n, device, attrs):
@@ -279,8 +336,9 @@ def jetson_steps():
 
 
 def bare_tree():
-    """A Linux host with nothing optional: no DMI, no device tree, no thermal, hwmon, DRM or accel."""
-    base_proc({0: CPUS[0]})
+    """A Linux host with nothing optional: no DMI, no device tree, no thermal, hwmon, DRM or accel, no
+    /proc/self/net/dev, /proc/diskstats or /proc/pressure."""
+    base_proc({0: CPUS[0]}, passive=False)
     os.makedirs(sys_("class"))
 
 
@@ -301,18 +359,200 @@ def two_steps():
         {n: c for n, c in enumerate([advance(CPUS, 30, 70)[0]] * 4)})), 11 * S, OK)]
 
 
+# Network, Disk I/O and Pressure. NET and DISK hold the counters a step changes before rewriting the files.
+MAX = 2**64 - 1
+SDA = "../devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block/sda"
+BLOCK = {"sda": SDA, "nvme0n1": "../devices/pci0000:00/0000:00:1d.0/nvme/nvme0/nvme0n1",
+         "loop0": "../devices/virtual/block/loop0", "dm-0": "../devices/virtual/block/dm-0",
+         "mmcblk0": "../devices/platform/fe340000.mmc/mmc_host/mmc0/mmc0:0001/block/mmcblk0",
+         "sdb": "../devices/pci0000:00/0000:00:14.0/usb2/2-1/2-1:1.0/host1/target1:0:0/1:0:0:0/block/sdb"}
+NET, DISK = {}, {}
+
+
+def net_row(rx_bytes, rx_packets, tx_bytes=0, tx_packets=0, errors=0):
+    return [rx_bytes, rx_packets, errors, 0, 0, 0, 0, 0, tx_bytes, tx_packets, 0, errors, 0, 0, 0, 0]
+
+
+def disk_row(reads, sectors, writes, wsectors, in_flight, io_ms, fields=17):
+    return ([reads, 1, sectors, reads * 2, writes, 2, wsectors, writes * 3, in_flight, io_ms, io_ms * 2] + [0] * 6)[:fields]
+
+
+def write_passive(avg=1.5):
+    put(proc("self/net/dev"), net_dev_text(NET))
+    put(proc("diskstats"), diskstats_text([(*k, v) for k, v in DISK.items()]))
+    put(proc("pressure/cpu"), pressure_text(avg, int(avg * 1e6)))
+    put(proc("pressure/memory"), pressure_text(avg / 3, int(avg * 1e5)))
+    put(proc("pressure/io"), pressure_text(avg * 2, int(avg * 3e6)))
+
+
+def passive_tree():
+    base_proc({0: CPUS[0], 1: CPUS[1]}, passive=False)
+    for n in ("eth0", "wlan0"):
+        iface(n)
+    NET.clear()
+    NET.update({"lo": net_row(500, 5, 500, 5), "eth0": net_row(10**6, 1000, 2 * 10**5, 300),
+                "wlan0": net_row(5000, 50), "ghost0": net_row(1, 1),  # ghost0: not an interface (no ifindex)
+                "wl\u00e90": net_row(7, 7)})  # a name beyond ASCII, valid for Linux; no ifindex either
+    DISK.clear()
+    DISK.update({(8, 0, "sda"): disk_row(100, 2000, 20, 400, 0, 60), (8, 1, "sda1"): disk_row(90, 1800, 10, 200, 0, 50),
+                 (259, 0, "nvme0n1"): disk_row(500, 9000, 300, 7000, 3, 900), (7, 0, "loop0"): disk_row(5, 10, 0, 0, 0, 1),
+                 (253, 0, "dm-0"): disk_row(50, 900, 20, 300, 0, 20),
+                 (179, 0, "mmcblk0"): disk_row(30, 300, 5, 50, 0, 10, fields=11)})  # a kernel before discard fields
+    for name in ("sda", "nvme0n1", "loop0", "dm-0", "mmcblk0"):  # sda1: a partition, no /sys/block entry
+        link(sys_(f"block/{name}"), BLOCK[name])
+    write_passive()
+
+
+def bump(d, key, by):
+    d[key] = [a + b for a, b in zip(d[key], by + [0] * (len(d[key]) - len(by)))]
+
+
+def passive_steps():
+    def traffic():
+        bump(NET, "eth0", [125000, 100, 0, 0, 0, 0, 0, 0, 25000, 30])
+        bump(NET, "wlan0", [5000, 5])
+        bump(DISK, (8, 0, "sda"), [100, 0, 2048, 200, 10, 0, 512, 30, 2, 250])
+        DISK[259, 0, "nvme0n1"][8] = 0  # in flight is a gauge: falling is not a reset
+        bump(DISK, (179, 0, "mmcblk0"), [0, 0, 0, 0, 7, 0, 64, 21, 0, 40])
+        write_passive(2.25)
+
+    def reset():
+        NET["eth0"] = net_row(3000, 3, 100, 1)  # counters went back: a new baseline, no rate
+        DISK[8, 0, "sda"] = disk_row(5, 40, 0, 0, 0, 3)
+        bump(DISK, (259, 0, "nvme0n1"), [10, 0, 80, 5])
+        DISK[259, 0, "nvme0n1"][8] = 1
+        write_passive(0.0)
+
+    def after_reset():
+        bump(NET, "eth0", [6000, 6, 0, 0, 0, 0, 0, 0, 100, 1])
+        bump(DISK, (8, 0, "sda"), [5, 0, 40, 3, 0, 0, 0, 0, 0, 1])  # 1 ms of I/O in 1700 ms: a ratio of 0.0006
+        write_passive(0.01)
+
+    def devices_changed():
+        iface("wlan0", add=False)
+        del NET["wlan0"]
+        iface("usb0")
+        NET["usb0"] = net_row(42, 1)
+        NET["eth0"][0] = MAX  # the largest counter there is: a rate of about 6e19 B/s
+        # a delta whose rate depends on converting it to float before multiplying, as Python does
+        NET["eth0"][8] += 5497943851560293437
+        del DISK[259, 0, "nvme0n1"]
+        os.remove(sys_("block/nvme0n1"))
+        DISK[8, 16, "sdb"] = disk_row(1, 8, 0, 0, 0, 1)
+        link(sys_("block/sdb"), BLOCK["sdb"])
+        write_passive()
+
+    def wlan_back():
+        iface("wlan0")  # the same name with a new ifindex: another interface, so a warmup
+        NET["wlan0"] = net_row(10, 1)
+        NET["eth0"][0] = MAX + 1  # beyond 64 bits: not a counter
+        DISK[8, 16, "sdb"] = disk_row(2, MAX, 0, 0, 0, 2)  # bytes beyond 64 bits once multiplied by 512
+        write_passive()
+
+    def gap():
+        os.remove(sys_("block/mmcblk0"))  # still listed: its confirmed classification is kept, not looked up
+        NET["eth0"] = net_row(4000, 4)
+        bump(NET, "usb0", [1000, 2])
+        bump(DISK, (8, 0, "sda"), [1, 0, 8, 1])
+        write_passive()
+
+    def namespace_changed():
+        netns(f"{NS}/uts")
+        bump(NET, "eth0", [1000, 1])
+        bump(DISK, (8, 0, "sda"), [1, 0, 8, 1])
+        write_passive()
+
+    def recovered():
+        bump(NET, "eth0", [2000, 2])
+        bump(NET, "usb0", [10, 1])
+        bump(DISK, (8, 0, "sda"), [3, 0, 24, 2])
+        bump(DISK, (8, 16, "sdb"), [1, 0, 0, 0, 1, 0, 8, 1, 0, 5])
+        write_passive()
+
+    return [("warmup", None, 10 * S, OK), ("traffic", traffic, 11 * S, OK), ("counters reset", reset, 12 * S, OK),
+            ("rates from the new baseline, over 1.7 s", after_reset, 13_700_000_000, OK),
+            ("wlan0 and nvme0n1 gone, usb0 and sdb added, a counter at 2^64-1", devices_changed, 14 * S, OK),
+            ("wlan0 back with a new index, a counter beyond 64 bits", wlan_back, 15 * S, OK),
+            ("gap", gap, 25 * S, OK), ("same clock: invalid interval", None, 25 * S, OK),
+            ("network namespace changed", namespace_changed, 26 * S, OK), ("recovered", recovered, 27 * S, OK)]
+
+
+def passive_failure_steps():
+    def broken_files():
+        bump(NET, "eth0", [100, 1])
+        write_passive()
+        put(proc("self/net/dev"), net_dev_text(NET).replace("|bytes", "|octets", 1))  # not the known header
+        put(proc("diskstats"), b"   8       0 sd\xff 1 2 3\n")
+        os.chmod(proc("pressure/memory"), 0)
+        put(proc("pressure/io"), "some avg10=0.00 avg60=0.00 avg300=0.00 total=1 \u00b5s\n")  # not ASCII
+        put(proc("pressure/cpu"), "full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n")  # no some line
+
+    def bad_rows():
+        write_passive()
+        rows = dict(NET)
+        text = net_dev_text(rows).rstrip("\n").split("\n")
+        text += [next(t for t in text if t.strip().startswith("eth0:")),  # eth0 twice: neither row is used
+                 "  wlan1: 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15",  # 15 fields
+                 "  bad/name: " + " ".join(["0"] * 16), "no colon here", "0123456789abcdef: " + " ".join(["0"] * 16),
+                 "   tun0: " + " ".join(["1"] * 15 + ["-1"])]
+        put(proc("self/net/dev"), "\n".join(text) + "\n")
+        netns("/nonexistent/net")  # the namespace cannot be identified: no interface has an identity
+        disks = [(*k, v) for k, v in DISK.items()] + [
+            (8, 0, "sda", disk_row(1, 1, 1, 1, 0, 1)),  # sda twice: neither is used
+            (8, 32, "sdc", disk_row(1, 1, 1, 1, 0, 1)[:10]),  # 10 fields: too few
+            "   8      48 sdd " + " ".join(["1"] * 14) + " x",  # a later field that is not a counter
+            "   x      64 sde " + " ".join(["1"] * 17),  # a major that is not a number
+            "   8      80", "   8      96 sdz " + " ".join(["1"] * 17)]  # line without a name; sdz: see below
+        put(proc("diskstats"), diskstats_text(disks))
+        for n in ("sdc", "sdd"):
+            link(sys_(f"block/{n}"), BLOCK["sda"].replace("sda", n))
+        put(sys_("block/sdz"), "not a link\n")  # readlink fails with EINVAL: io_error
+        os.chmod(proc("pressure/memory"), 0o644)
+        put(proc("pressure/cpu"), pressure_text(1.0, 10) + pressure_text(1.0, 10, full=False))  # some twice
+        put(proc("pressure/io"), pressure_text(1.0, 10).replace("\n", "\r\n"))  # universal newlines: fine
+
+    def files_gone():
+        os.remove(proc("self/net/dev"))
+        os.remove(proc("diskstats"))
+        shutil.rmtree(proc("pressure"))
+        os.remove(sys_("block/sdz"))
+
+    def back():
+        netns(f"{NS}/net")
+        write_passive()
+
+    def empty():
+        put(proc("self/net/dev"), net_dev_text({}))  # only the header: no interface
+        put(proc("diskstats"), "\n")  # no row at all: not a diskstats file
+        for r in ("cpu", "memory", "io"):
+            os.remove(proc(f"pressure/{r}"))  # a directory without files
+
+    def recovered():
+        bump(NET, "eth0", [10, 1])
+        write_passive()
+
+    return [("warmup", None, 10 * S, OK), ("broken files", broken_files, 11 * S, OK), ("bad rows", bad_rows, 12 * S, OK),
+            ("files gone", files_gone, 13 * S, OK), ("back: warmup again", back, 14 * S, OK),
+            ("empty files", empty, 15 * S, OK), ("recovered", recovered, 16 * S, OK)]
+
+
 SCENARIOS = {
     "pc": (pc_tree, pc_steps),
     "failures": (failure_tree, failure_steps),
     "jetson": (jetson_tree, jetson_steps),
     "bare": (bare_tree, lambda: [("warmup", None, 10 * S, OK), ("same", None, 11 * S, OK)]),
     "pi": (pi_tree, two_steps),
+    "passive": (passive_tree, passive_steps),
+    "passive_failures": (passive_tree, passive_failure_steps),
 }
 
 
 # --- running and comparing -----------------------------------------------------------------------------
 
 def clear():
+    for _, name in socket.if_nameindex():
+        if name != "lo":
+            iface(name, add=False)
     for root in (f"{FX}/sys", f"{FX}/proc", HOST):
         os.chmod(root, 0o755)
         for n in os.listdir(root):
@@ -349,7 +589,7 @@ def exited(p):
 
 
 def step(p, base, wall, timeout):
-    """One collection: {"stats", "sensors", "required"} or {"error"}, else Broken."""
+    """One collection: {"stats", "sensors", "required", "passive"} or {"error"}, else Broken."""
     try:
         p.stdin.write(f"{base} {wall}\n")
         p.stdin.flush()
@@ -364,7 +604,7 @@ def step(p, base, wall, timeout):
         out = json.loads(line)
     except ValueError:
         raise Broken(f"not JSON: {line[:80]!r}") from None
-    if not isinstance(out, dict) or set(out) not in ({"stats", "sensors", "required"}, {"error"}):
+    if not isinstance(out, dict) or set(out) not in ({"stats", "sensors", "required", "passive"}, {"error"}):
         raise Broken(f"neither a collection nor an error: {line[:80]!r}")
     return out
 
@@ -399,7 +639,11 @@ def states(a):
     out = " ".join(f"{g}={s['state']}" + (f"({s['reason']})" if s["reason"] else "")
                    for g, s in c.items() if s["state"] != "ok") or "all ok"
     issues = sorted({f"{g}:{i['reason']}" for g, s in c.items() for i in s["issues"]})
-    return out + (f" issues: {' '.join(issues)}" if issues else "")
+    out += f" issues: {' '.join(issues)}" if issues else ""
+    for key, items in (("network", "interfaces"), ("disk_io", "disks")):  # each one's reason, "rate" for none
+        if a["stats"].get(key, {}).get(items):
+            out += f" {key}: " + " ".join(f"{x['name']}={x['reason'] or 'rate'}" for x in a["stats"][key][items])
+    return out
 
 
 def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
@@ -479,7 +723,7 @@ for line in sys.stdin:
         continue
     error = kind.startswith("error")
     out = {"error": "control"} if error else {"stats": {"collectors": {}, "x": 2 if kind == "other" else 1},
-                                               "sensors": {}, "required": {}}
+                                               "sensors": {}, "required": {}, "passive": {}}
     print(json.dumps(out), flush=True)
 sys.exit(17 if kind.endswith("exit17") else 0)
 """

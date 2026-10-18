@@ -221,7 +221,7 @@ pub fn source(provider: &str, unit: &str, basis: &str, mut where_: Vec<(&str, Va
         out.set("id", Value::Null);
     } else {
         let mut d = Value::obj();
-        d.set("v", 1.into());
+        d.set("v", 1i64.into());
         d.set("provider", provider.into());
         d.set("unit", unit.into());
         d.set("basis", basis.into());
