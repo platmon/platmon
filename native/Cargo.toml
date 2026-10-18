@@ -1,0 +1,14 @@
+[package]
+name = "platmon-native"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Experimental Rust port of the platmon collector (docs/performance/rust-feasibility.md); not part of the product"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+strip = true
+panic = "abort"
