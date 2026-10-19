@@ -12,7 +12,8 @@ collector's {"error"} answer; exiting, not answering in time or writing somethin
 never a match. Error messages are not compared. Exit 1 on any difference.
 
 Before the scenarios, the harness is run against fake sides that read no tree (CONTROLS): equal ones must
-pass, and both sides failing where a collection is expected, a nonzero exit, a hang or garbage must fail.
+pass, and both sides failing where a collection is expected, a nonzero exit, a hang (also after part of an
+answer, or an answer completed after the timeout), garbage or an oversized line must fail.
 
   fixture.py BINARY [SCENARIO ...]
   fixture.py --self-test          # the controls only; needs no container"""
@@ -25,6 +26,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 FX = "/fx"            # tmpfs; FX/sys is mounted at /sys and FX/proc at /proc
 HOST = "/fxhost"      # PLATMON_HOST_ROOT: os-release, nv_tegra_release; statvfs reads this tmpfs
@@ -33,7 +35,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 NOBODY = 65534
 S = 1_000_000_000
 OK, FAILS = "a collection", "a failed collection"  # what a step expects from both sides
-TIMEOUT = 30  # s for one answer
+TIMEOUT = 30  # s for one whole answer, from the request to its line end
+MAX_ANSWER = 4 << 20  # bytes of one answer line; a real collection is tens of KiB
 
 
 # --- trees ---------------------------------------------------------------------------------------------
@@ -577,8 +580,10 @@ class Broken(Exception):
 def start(cmd, log):
     env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": "/platmon", "PLATMON_HOST_ROOT": HOST, "PYTHONDONTWRITEBYTECODE": "1"}
     user = {"user": NOBODY, "group": NOBODY} if os.geteuid() == 0 else {}  # the self-test also runs unprivileged
-    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True,
-                            env=env, cwd="/", **user)
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True,
+                         env=env, cwd="/", **user)
+    p.pending = b""  # read past the last line end; stdout is read with os.read only, never through p.stdout
+    return p
 
 
 def exited(p):
@@ -595,15 +600,22 @@ def step(p, base, wall, timeout):
         p.stdin.flush()
     except BrokenPipeError:
         raise Broken(exited(p)) from None
-    if not select.select([p.stdout], [], [], timeout)[0]:
-        raise Broken(f"no answer in {timeout} s")
-    line = p.stdout.readline()
-    if not line:
-        raise Broken(exited(p))
+    deadline, fd, buf = time.monotonic() + timeout, p.stdout.fileno(), p.pending
+    while b"\n" not in buf and len(buf) <= MAX_ANSWER:  # one deadline for the whole line, not per chunk
+        left = deadline - time.monotonic()
+        if left <= 0 or not select.select([fd], [], [], left)[0]:
+            raise Broken(f"no whole answer in {timeout} s" + (f" ({len(buf)} bytes, no line end)" if buf else ""))
+        chunk = os.read(fd, 1 << 16)
+        if not chunk:
+            raise Broken(exited(p) + (f" after {len(buf)} bytes with no line end" if buf else ""))
+        buf += chunk
+    line, _, p.pending = buf.partition(b"\n")
+    if len(line) > MAX_ANSWER:
+        raise Broken(f"an answer longer than {MAX_ANSWER} bytes")
     try:
         out = json.loads(line)
     except ValueError:
-        raise Broken(f"not JSON: {line[:80]!r}") from None
+        raise Broken(f"not JSON: {line[:80]!r}") from None  # also not UTF-8
     if not isinstance(out, dict) or set(out) not in ({"stats", "sensors", "required", "passive"}, {"error"}):
         raise Broken(f"neither a collection nor an error: {line[:80]!r}")
     return out
@@ -721,9 +733,18 @@ for line in sys.stdin:
     if kind == "garbage":
         print("not json", flush=True)
         continue
+    if kind == "part_hang":  # a valid start, then nothing
+        sys.stdout.write('{"stats": {'); sys.stdout.flush(); time.sleep(60)
+    if kind == "trickle":  # each piece within the timeout, the whole answer after it
+        for c in '{"error": "control"}':
+            sys.stdout.write(c); sys.stdout.flush(); time.sleep(0.3)
+        print(flush=True)
+        continue
     error = kind.startswith("error")
     out = {"error": "control"} if error else {"stats": {"collectors": {}, "x": 2 if kind == "other" else 1},
                                                "sensors": {}, "required": {}, "passive": {}}
+    if kind == "big":  # valid and equal on both sides, but past MAX_ANSWER
+        out["stats"]["pad"] = "x" * (5 << 20)
     print(json.dumps(out), flush=True)
 sys.exit(17 if kind.endswith("exit17") else 0)
 """
@@ -741,6 +762,9 @@ CONTROLS = [  # name, python side, rust side, what the steps expect, whether the
     ("rust does not answer", "ok", "hang", [OK, OK], False),
     ("rust writes something that is not JSON", "ok", "garbage", [OK, OK], False),
     ("rust writes something that is not JSON where a failure is expected", "error", "garbage", [FAILS], False),
+    ("rust stops after part of an answer", "ok", "part_hang", [OK, OK], False),
+    ("rust completes its answer in pieces, after the timeout", "error", "trickle", [FAILS], False),
+    ("both sides answer with a line past the size limit", "big", "big", [OK], False),
 ]
 
 

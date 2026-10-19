@@ -22,7 +22,9 @@ Ported, with the same output as the Python collector:
   disks by their `/sys/block` link) and Pressure (`/proc/pressure`), with their read spans
 
 Not ported: the slow groups (storage, Wi-Fi, battery, probe), the nvidia-smi fallback, and everything in
-`runtime/` (Sampler, history, replay, HTTP).
+`runtime/` (Sampler, history, replay, HTTP). So this is the 1 s core collection used on the three hosts
+checked, extended with Network, Disk I/O and Pressure, with the same output on the fixtures defined here;
+not the whole default collection of the product.
 
 Behaviour kept from Python where bypassing std made it explicit:
 
@@ -69,9 +71,11 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
   compared exactly: JSON types, key order, numbers, read spans, required reads, `collectors` and source ids.
   No tolerance. Each step states whether it expects a collection or a failed collection; both sides must
   give that and exit with 0 at the end, and a side that exits, hangs or writes something else fails the
-  run. Before the scenarios, the harness checks itself against fake sides (`fixture.py --self-test`, no
-  container needed): both failing where a collection is expected, a nonzero exit, a hang or output that is
-  not JSON must each be reported. Interfaces are real ones in the container's own network namespace (empty
+  run. The timeout (30 s) is one deadline for the whole answer line, not for its first byte or each piece,
+  and a line over 4 MiB is not read further. Before the scenarios, the harness checks itself against fake
+  sides (`fixture.py --self-test`, no container needed): both failing where a collection is expected, a
+  nonzero exit, a hang (also after part of an answer, or an answer completed in pieces past the deadline),
+  output that is not JSON and an oversized line must each be reported. Interfaces are real ones in the container's own network namespace (empty
   bridges, created and removed by ioctl, so the kernel gives them their ifindex); the container has
   `NET_ADMIN` there and no network.
 - `compare.py`: **a live smoke test** on a real host, both collectors at the same moment. Structure, types,
@@ -91,7 +95,7 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
 ### Equivalence on fake trees
 
 `fixture.sh`, 2026-10-19, x86_64 build: 7 of 7 scenarios, no difference: 35 collections equal and the 2
-expected failures (below) failed on both sides; every side exited with 0. Harness self-test: 12 of 12
+expected failures (below) failed on both sides; every side exited with 0. Harness self-test: 15 of 15
 controls reported as they must be.
 
 | scenario | what it covers |
@@ -136,8 +140,8 @@ Every interface and disk had a rate on both sides (the second collection, 1 s af
 
 ### CPU with the passive groups
 
-2026-10-19 (step 2B), the collection the service makes by default: the core groups plus Network, Disk I/O
-and Pressure. A B C C B A, 30 s warmup and 120 s windows; A the Python collector, B platmon-native with the
+2026-10-19 (step 2B), the 1 s collection the service makes by default without the slow groups: the core
+groups plus Network, Disk I/O and Pressure. A B C C B A, 30 s warmup and 120 s windows; A the Python collector, B platmon-native with the
 system allocator (the default build), C the `cache-alloc` build. User + system % of one core from each
 program's own `getrusage`. The board services (platmon 1.3.0-1) and the Hub polling them kept running.
 Every window: 120 collections, none failed, no 1 s deadline missed, no group changed state, nothing logged,
@@ -159,7 +163,9 @@ Collection time (p50 / p95, ms) and memory (VmRSS at the end of the window):
 | x86 PC | 18.9–21.6 / 24.4–25.0, 22.1 MiB | 15.7–16.9 / 21.5, 0.9 MiB | 15.4–16.1 / 20.5–21.0, 1.2 MiB |
 
 - **The saving holds with the passive groups:** −60–61 % on the boards with the default build, as in 2A.
-  The three groups cost Python 0.08 (Orin) and 0.24 (Raspberry Pi) pp of one core, Rust 0.06 and 0.10 pp.
+  The means of 2B are above those of 2A by 0.08 (Orin) and 0.24 (Raspberry Pi) pp of one core for Python,
+  0.06 and 0.10 pp for Rust. That is a difference between two runs, not the groups' own cost: [budget.md](../docs/performance/budget.md)
+  measures a feature on one tree with only its setting changed, which was not done here.
 - **Every Rust window is below every Python window** on each host. The Raspberry Pi's two Python windows
   differ by 0.16 pp, so its −61 % is from their mean.
 - **The allocator cache** lowers CPU by a further 0.06 pp of one core on the Orin and 0.035 pp on the
