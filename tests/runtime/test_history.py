@@ -7,9 +7,9 @@ import pytest
 
 from runtime.history import History, observation_points, points_of
 from runtime.sampler import Sampler
-from frontends.server import make_handler
+from runtime.server import make_handler
 from tests.runtime.test_sampler import Clock, fake
-from tests.frontends.test_server import get
+from tests.runtime.test_server import get
 
 S = 10**9
 

@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 from runtime.sampler import METADATA_KEYS, Sampler
-from frontends.cli import VERSION, render
-from frontends.server import BoundedHTTPServer, REQUEST_TIMEOUT, WRITE_TIMEOUT, make_handler
+from frontends.cli import render
+from runtime import VERSION
+from runtime.server import BoundedHTTPServer, REQUEST_TIMEOUT, WRITE_TIMEOUT, make_handler
 
 
 class NoWait(Sampler):
@@ -284,7 +285,7 @@ def test_web_asset_paths_are_allowlisted(tmp_path, monkeypatch):
     brand_dir.mkdir(parents=True)
     (brand_dir / "private.svg").write_text("private asset")
     (tmp_path / "index.html").write_text("private page")
-    monkeypatch.setattr("frontends.server.WEB_DIR", str(tmp_path))
+    monkeypatch.setattr("runtime.server.WEB_DIR", str(tmp_path))
     httpd, base = serve(None)
     try:
         for path in (

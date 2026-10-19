@@ -79,7 +79,7 @@ def run_cli(*args):
 
 
 def test_once_prints_one_snapshot():
-    from tests.frontends.test_server import serve
+    from tests.runtime.test_server import serve
     httpd, base = serve(FULL)
     try:
         r = run_cli("--once", base[len("http://"):])
@@ -109,7 +109,7 @@ def test_not_running_explains_and_exits():
 
 
 def test_no_current_data_is_explained():
-    from tests.frontends.test_server import serve
+    from tests.runtime.test_server import serve
     httpd, base = serve(None)  # service up, but no snapshot: 503
     try:
         r = run_cli("--once", base[len("http://"):])

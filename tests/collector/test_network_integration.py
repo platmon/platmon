@@ -16,7 +16,7 @@ from tests.collector.test_common import Proc, idle_busy
 from tests.collector.test_network import Host
 from tests.collector.test_provenance import BASE, MS, at, good_required, recorded_with
 from tests.runtime.test_sampler import Clock, fake
-from tests.frontends.test_server import get, serve
+from tests.runtime.test_server import get, serve
 
 S = 10**9
 

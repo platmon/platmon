@@ -38,12 +38,12 @@ def file_md5(path):
 
 def version(root=ROOT):
     """Read the single source without importing Linux collectors during a build."""
-    tree = ast.parse((root / "frontends/cli.py").read_text(encoding="utf-8"))
+    tree = ast.parse((root / "runtime/__init__.py").read_text(encoding="utf-8"))
     values = [ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign)
               and any(isinstance(t, ast.Name) and t.id == "VERSION" for t in node.targets)]
     if len(values) != 1 or not isinstance(values[0], str) or not re.fullmatch(
             r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", values[0]):
-        raise ValueError("frontends/cli.py must define one VERSION = 'MAJOR.MINOR.PATCH'")
+        raise ValueError("runtime/__init__.py must define one VERSION = 'MAJOR.MINOR.PATCH'")
     return values[0]
 
 
