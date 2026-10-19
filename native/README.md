@@ -92,16 +92,20 @@ The collector-only RSS above (0.7–0.9 MiB) is not an estimate of the service's
 
 **What 3A has** (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`, `platmon-native serve`):
 - One writer thread collects every interval. A publication is immutable: its stats (with the passive
-  groups' `read` set from the records), `collectors` and `sensor_meta` are serialized once, when it is
+  groups' `read` set from the records), `collectors` and `sensor_meta` are serialized once, before it is
   published. Each answer writes only what depends on its moment around them: `sample` with the ages,
-  `state`, `ready`. The lock is held to swap the publication and to read it, never to collect or serialize.
+  `state`, `ready`. The state lock is held only to count the attempt, give the sequence and swap the
+  publication, and to read it; the replaced publication is let go after the lock (a unit test stops a
+  writer inside serialization and reads the previous snapshot meanwhile).
 - States, freshness, `collection_failed`, `collection_too_slow`, consecutive failures and the data age with
   its basis follow `runtime/sampler.py`, including every reason to fall back to the collection start.
 - JSON as `json.dumps` writes it (`", "`, `": "`, non-ASCII escaped), so the answers are byte for byte the
   Python service's for the same state.
 - HTTP/1.0 on std sockets, one thread per connection, at most 32 (excess ones closed before a thread
   starts), backlog 5, 10 s per request read, 10 s per response write without progress, 64 KiB writes;
-  request line and header limits, errors and their status lines as `http.server` gives them.
+  request line and header limits (the blank line that ends the headers counts), errors and their status
+  lines as `http.server` gives them; HEAD gets the 501's headers without its page; HTTP/0.9, also when
+  said, gets the body alone.
 - Slow groups: one thread each, the next observation an interval after the last one started; their entries
   as `runtime/slow.py` writes them. No reader is ported, so `serve` starts none and `/api/observations`
   has `groups: {}`, as the Python service with them off.
@@ -294,23 +298,36 @@ degraded rule, span limits, the clock check, the passive rule, the fallback, `co
 and added the boundary cases (exactly `stale_after`, a read at the collection's start, `read` not last).
 
 Rust unit tests also run the threads: a slow reader that blocks keeps its group at one read in flight
-(stale, `collecting_for_ms` growing) while another group publishes; 16 clients × 25 requests never
-collect and never see a sequence go back; excess connections are closed, a silent client is dropped after
-the request timeout; request-line errors as `http.server` gives them.
+(stale, `collecting_for_ms` growing) while another group publishes; a writer stopped inside serializing a
+record does not hold up a reader, who gets the previous snapshot; 16 clients × 25 requests never collect
+and never see a sequence go back; excess connections are closed; a silent client is dropped after the
+request timeout; a client that stops reading a 64 MiB answer is dropped after the write timeout, freeing
+its slot while collecting goes on; request-line, HEAD and header-limit answers as `http.server` gives them.
 
 ### Live HTTP check (step 3A)
 
-`live_http.py`, 2026-10-19, 3 runs each on the x86 PC, the Orin and the Raspberry Pi: no difference.
-Every path gave the same status code, Content-Type and Cache-Control except `/text` (not ported); the web
-page and its files were the same bytes; `/api/stats`, `/api/status` and `/api/observations` had the same
-keys, order and types. On both servers: 320 concurrent requests all 200 with one instance and no
+`live_http.py`, 2026-10-19, on the x86 PC, the Orin and the Raspberry Pi: no difference (3 runs each, and
+one more each after the fixes below). Every path gave the same status code, Content-Type and
+Cache-Control except `/text` (not ported); the web page and its files were the same bytes;
+`/api/stats`, `/api/status` and `/api/observations` had the same keys, order and types. Raw requests at the
+protocol's edges (HEAD, POST, HTTP/0.9 said or implied, HTTP/00.9, 2.0 and a bad version, 99 and 100
+headers, a long header, a long request line, an empty line, `//path`) gave the same answer shape. On both
+servers: 320 concurrent requests, all 320 verified with no client error (last run), one instance and no
 sequence going back, at most 2 snapshots published while they ran; of 40 idle connections 8 closed, a
 request refused while 32 were held and answered after; a cut-off request line closed after 10.0–10.2 s.
 
-Not covered: the write timeout against a reader that stops (needs a response larger than the socket
-buffers), a burst of connections against the backlog of 5 (with 40 opened at once the Python server
-answered a request while the client held 40; the check opens them 20 ms apart), HTTP/0.9 bodies beyond
-the unit test, Python versions' error page markup (only status codes are compared there).
+Fixed after review: the concurrent check counted the requests it planned, and an exception in a client
+thread (a timeout, an answer that was not JSON or had no sample) was lost with that thread; it now counts
+attempted, verified and failed answers, collects every client's errors, and passes only with all verified.
+Its self-test feeds it each of those failures. The Sampler serialized a record under its state lock;
+HEAD got the 501 page; HTTP/0.9 said in the request line got headers; the blank line that ends the headers
+was not counted. 414's reason is `URI Too Long` (Python 3.13+; 3.10 says `Request-URI Too Long`, which the
+check treats as the same).
+
+Not covered: a burst of connections against the backlog of 5 (with 40 opened at once the Python server
+answered a request while the client held 40; the check opens them 20 ms apart; a burst is for 3B as a
+stability check: handler count bound, resources, recovery), Python versions' error page markup (the shape
+of the answer is compared, not the page).
 
 ### Earlier run (2026-10-18)
 

@@ -33,9 +33,9 @@ pub fn clock_value(source: &str) -> Value {
     v
 }
 
-/// One published snapshot, never changed after it is published (a new one replaces it).
+/// One published snapshot's data, never changed after it is published (a new one replaces it). Built and
+/// serialized before the Sampler's lock is taken; the sequence is given under it (Publication).
 pub struct Record {
-    pub sequence: i64,
     pub started_at: f64,
     pub completed_at: f64,
     pub started: i64,
@@ -59,6 +59,13 @@ impl Record {
     }
 }
 
+/// What the Sampler holds and readers take: a record and the sequence it was published as.
+#[derive(Clone)]
+pub struct Publication {
+    pub sequence: i64,
+    pub record: Arc<Record>,
+}
+
 struct Attempt {
     reason: Option<&'static str>,
     completed_at: f64,
@@ -68,7 +75,7 @@ struct Attempt {
 
 #[derive(Default)]
 struct State {
-    record: Option<Arc<Record>>,
+    record: Option<Publication>,
     attempt: Option<Attempt>,
     collecting_since: Option<i64>,
     sequence: i64,
@@ -83,6 +90,9 @@ pub struct Sampler {
     state: Mutex<State>,
     ready: Condvar,
     provenance_problem: Mutex<Option<String>>,
+    /// tests: runs inside the serialization of a record, to show that readers are not held up meanwhile
+    #[cfg(test)]
+    pub during_build: Mutex<Option<Box<dyn FnMut() + Send>>>,
 }
 
 /// What a collection gives the Sampler: Collected.to_value()'s {"stats", "sensors", "required", "passive"}.
@@ -93,7 +103,9 @@ impl Sampler {
     pub fn new(interval: f64, stale_after: Option<f64>, instance_id: String, clock_source: &'static str) -> Sampler {
         let stale_after = stale_after.unwrap_or((3.0 * interval).max(5.0));
         Sampler { interval, instance_id, clock_source, stale_ns: seconds_ns(stale_after), state: Mutex::default(),
-                  ready: Condvar::new(), provenance_problem: Mutex::new(None) }
+                  ready: Condvar::new(), provenance_problem: Mutex::new(None),
+                  #[cfg(test)]
+                  during_build: Mutex::new(None) }
     }
 
     /// The writer's loop (Sampler._run): one attempt, then sleep until an interval after its start.
@@ -115,10 +127,11 @@ impl Sampler {
     }
 
     /// The collection that began at started ends: publish it or record the failure, as one update. Checking
-    /// the records and serializing happen before the lock, which is only held to publish. same_clock: the
-    /// read spans are on this Sampler's clock (always, from the service's collector).
+    /// the records and serializing happen before the lock, which is only held to count the attempt and
+    /// swap the publication; the one it replaces is let go after the lock. same_clock: the read spans are on
+    /// this Sampler's clock (always, from the service's collector).
     pub fn finish(&self, result: Collection, same_clock: bool, started_at: f64, started: i64, completed_at: f64,
-                  completed: i64) -> Option<Arc<Record>> {
+                  completed: i64) -> Option<Publication> {
         let duration = completed - started;
         let mut reason = None;
         let mut prepared = None;
@@ -132,18 +145,23 @@ impl Sampler {
                           duration as f64 / 1e9, self.stale_ns as f64 / 1e9);
                 reason = Some("collection_too_slow");
             }
-            Ok(col) => prepared = Some(self.prepare(col, same_clock, started, completed)),
+            Ok(col) => {
+                let (stats, meta, oldest) = self.prepare(col, same_clock, started, completed);
+                prepared = Some(Arc::new(self.build(&stats, meta, oldest, started_at, completed_at, started, completed)));
+            }
         }
         let mut st = self.state.lock().unwrap();
         st.collecting_since = None;
         st.failures = if reason.is_none() { 0 } else { st.failures + 1 };
         st.attempt = Some(Attempt { reason, completed_at, duration_ns: duration, consecutive_failures: st.failures });
-        let (stats, meta, oldest) = prepared?;
+        let record = prepared?;
         st.sequence += 1;
-        let record = Arc::new(build(&stats, meta, oldest, st.sequence, started_at, completed_at, started, completed));
-        st.record = Some(record.clone());
+        let publication = Publication { sequence: st.sequence, record };
+        let replaced = st.record.replace(publication.clone());
         self.ready.notify_all();
-        Some(record)
+        drop(st);
+        drop(replaced); // its last reference may go here: not under the lock
+        Some(publication)
     }
 
     /// The stats (sensor_meta removed), sensor_meta and the oldest read, from a collection's records.
@@ -179,9 +197,9 @@ impl Sampler {
             let a = st.attempt.as_ref().map(|a| (a.reason, a.completed_at, a.duration_ns, a.consecutive_failures));
             (now(), st.record.clone(), a, st.collecting_since)
         };
-        let fresh = record.as_ref().is_some_and(|r| now - r.basis() <= self.stale_ns);
+        let fresh = record.as_ref().is_some_and(|p| now - p.record.basis() <= self.stale_ns);
         let state = if fresh {
-            if attempt.is_some_and(|a| a.0.is_some()) || record.as_ref().unwrap().unreadable { "degraded" } else { "ready" }
+            if attempt.is_some_and(|a| a.0.is_some()) || record.as_ref().unwrap().record.unreadable { "degraded" } else { "ready" }
         } else if record.is_none() && attempt.is_none() && since.map_or(true, |s| now - s <= self.stale_ns) {
             "starting"
         } else {
@@ -192,9 +210,10 @@ impl Sampler {
         status.set("instance_id", self.instance_id.as_str().into());
         status.set("state", state.into());
         status.set("ready", Value::Bool(fresh));
-        status.set("sample", record.as_ref().map_or(Value::Null, |r| {
+        status.set("sample", record.as_ref().map_or(Value::Null, |p| {
+            let r = &p.record;
             let mut s = Value::obj();
-            s.set("sequence", r.sequence.into());
+            s.set("sequence", p.sequence.into());
             s.set("age_ms", ms(now - r.completed).into());
             s.set("cycle_age_ms", ms(now - r.started).into());
             s.set("data_age_ms", ms(now - r.basis()).into());
@@ -212,15 +231,16 @@ impl Sampler {
         }));
         status.set("collecting_for_ms", since.map(|s| ms(now - s)).into());
         status.set("clock", clock_value(self.clock_source));
-        (if fresh { record.map(|r| self.snapshot(&r, now)) } else { None }, status)
+        (if fresh { record.map(|p| self.snapshot(&p, now)) } else { None }, status)
     }
 
     /// Sampler._snapshot as JSON: the stored members, then schema_version and sample as of now, then the
     /// stored collectors and sensor_meta.
-    pub fn snapshot(&self, r: &Record, now: i64) -> String {
+    pub fn snapshot(&self, p: &Publication, now: i64) -> String {
+        let r = &p.record;
         let mut s = Value::obj();
         s.set("instance_id", self.instance_id.as_str().into());
-        s.set("sequence", r.sequence.into());
+        s.set("sequence", p.sequence.into());
         s.set("started_at", r.started_at.into());
         s.set("completed_at", r.completed_at.into());
         s.set("duration_ms", ms(r.completed - r.started).into());
@@ -246,9 +266,23 @@ impl Sampler {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build(stats: &Value, meta: Value, oldest: Option<i64>, sequence: i64, started_at: f64, completed_at: f64,
-         started: i64, completed: i64) -> Record {
+impl Sampler {
+    /// The record of a collection whose records were checked: its members serialized once.
+    #[allow(clippy::too_many_arguments)]
+    fn build(&self, stats: &Value, meta: Value, oldest: Option<i64>, started_at: f64, completed_at: f64,
+             started: i64, completed: i64) -> Record {
+        let (head, tail, unreadable) = serialize(stats, &meta);
+        #[cfg(test)]
+        if let Some(hook) = self.during_build.lock().unwrap().as_mut() {
+            hook();
+        }
+        Record { started_at, completed_at, started, completed, oldest_read: oldest, unreadable, head, tail }
+    }
+}
+
+/// (head, tail, unreadable) of a record: the stats' members but collectors; collectors (core first) and
+/// sensor_meta; whether an optional group of these stats is partial or error.
+fn serialize(stats: &Value, meta: &Value) -> (String, String, bool) {
     let mut head = String::new();
     let mut optional = Value::obj();
     if let Value::Obj(items) = stats {
@@ -283,8 +317,8 @@ fn build(stats: &Value, meta: Value, oldest: Option<i64>, sequence: i64, started
     let mut tail = String::new();
     Value::write_member(&mut tail, "collectors", &collectors);
     tail.push_str(", ");
-    Value::write_member(&mut tail, "sensor_meta", &meta);
-    Record { sequence, started_at, completed_at, started, completed, oldest_read: oldest, unreadable, head, tail }
+    Value::write_member(&mut tail, "sensor_meta", meta);
+    (head, tail, unreadable)
 }
 
 fn is_number(v: &Value) -> bool {
@@ -480,5 +514,28 @@ mod tests {
         let (_, status) = s.view(|| 9_000);
         assert_eq!(status.get("sample").and_then(|x| x.get("sequence")), Some(&Value::Int(2)));
         assert_eq!(status.get("last_attempt").and_then(|x| x.get("consecutive_failures")), Some(&Value::Int(0)));
+    }
+
+    #[test]
+    fn readers_are_not_held_up_while_a_record_is_serialized() {
+        use std::sync::mpsc;
+        let s = Arc::new(Sampler::new(1.0, None, "id".into(), "boottime"));
+        s.finish(collection(r#"{"n": 1}"#), true, 1.0, 1_000, 1.1, 2_000);
+        let (inside, entered) = mpsc::channel();
+        let (go, wait) = mpsc::channel::<()>();
+        *s.during_build.lock().unwrap() = Some(Box::new(move || {
+            inside.send(()).unwrap();
+            wait.recv().unwrap();
+        }));
+        let w = s.clone();
+        let writer = std::thread::spawn(move || w.finish(collection(r#"{"n": 2}"#), true, 2.0, 3_000, 2.1, 4_000));
+        entered.recv_timeout(Duration::from_secs(5)).unwrap(); // the writer is serializing the second record
+        let (r, (answer, got)) = (s.clone(), mpsc::channel());
+        std::thread::spawn(move || answer.send(r.view(|| 5_000)).unwrap());
+        let (stats, _) = got.recv_timeout(Duration::from_secs(2)).expect("a view waited for the serialization");
+        assert!(stats.unwrap().starts_with(r#"{"n": 1, "schema_version": 1, "sample": {"instance_id": "id", "sequence": 1,"#));
+        go.send(()).unwrap();
+        assert_eq!(writer.join().unwrap().map(|p| p.sequence), Some(2));
+        assert!(s.view(|| 5_000).0.unwrap().starts_with(r#"{"n": 2,"#));
     }
 }

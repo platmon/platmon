@@ -8,14 +8,19 @@ stopped, by their own handles.
 Per server:
 - every path: status code, Content-Type, Cache-Control (/text is not ported: a 404 from Rust, not compared)
 - the web page and its files: the same bytes
+- raw requests at the protocol's edges (HEAD, HTTP/0.9, versions, header and line limits): the same answer
+  shape from its bytes (status line and headers or none, header names, a body or none)
 - /api/stats, /api/status, /api/observations: the same keys, order and JSON types; values exact except
   those that move (compare.py's plausibility rules, sample identity and ages, read offsets)
-- 16 clients × 20 requests at once: all 200, one instance, sequences never going back, and no more
-  collections than intervals (requests do not collect)
+- 16 clients × 20 requests at once: all 320 answers verified (200, JSON, a sample), no client error, one
+  instance, sequences never going back, and no more collections than intervals (requests do not collect).
+  A self-test runs first (`--self-test` alone): fake answers that time out, are not JSON, have no sample,
+  are a 503 or go back after a client's first answer must each fail the check
 - 40 idle connections, opened 20 ms apart: 32 held, the rest closed without an answer, a request refused
   while 32 are held and answered after they close
 - a request line cut off: the connection closed after the 10 s request timeout
 Exit 1 on any difference or failed check."""
+import concurrent.futures as concurrent_futures
 import configparser
 import json
 import os
@@ -104,38 +109,101 @@ def endpoints(port):
     return out
 
 
-def concurrent(port, interval, clients=16, requests=20):
-    problems, ids, lock = [], set(), threading.Lock()
-    first = json.loads(fetch(port, "/api/status")[2])["sample"]["sequence"]
+def concurrent(port, interval, clients=16, requests=20, get=fetch):
+    """clients × requests /api/stats at once. Each answer is verified (HTTP 200, JSON, a sample with an int
+    sequence and an instance id, the sequence not going back for its client); anything a client raises is
+    collected, never lost in its thread. Passes only with every answer verified and no error."""
+    problems, planned = [], clients * requests
+    first = json.loads(get(port, "/api/status")[2])["sample"]["sequence"]
     t0 = time.monotonic()
 
     def client():
+        out = {"attempted": 0, "verified": 0, "errors": [], "ids": set()}
         last = 0
         for _ in range(requests):
-            code, _, body = fetch(port, "/api/stats")
-            if code != 200:
-                with lock:
-                    problems.append(f"HTTP {code}")
+            out["attempted"] += 1
+            try:
+                code, _, body = get(port, "/api/stats")
+                if code != 200:
+                    raise ValueError(f"HTTP {code}")
+                sample = json.loads(body)["sample"]
+                seq, iid = sample["sequence"], sample["instance_id"]
+                if type(seq) is not int or not isinstance(iid, str):
+                    raise ValueError(f"sample {sample!r:.80}")
+            except Exception as e:  # a connection, read, decoding or structure error is a failed request
+                out["errors"].append(f"{type(e).__name__}: {e}"[:120])
                 continue
-            s = json.loads(body)["sample"]
-            with lock:
-                ids.add(s["instance_id"])
-                if s["sequence"] < last:
-                    problems.append(f"sequence {s['sequence']} after {last}")
-            last = s["sequence"]
+            if seq < last:
+                out["errors"].append(f"sequence {seq} after {last}")
+                continue
+            last = seq
+            out["ids"].add(iid)
+            out["verified"] += 1
+        return out
 
-    threads = [threading.Thread(target=client) for _ in range(clients)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    with concurrent_futures.ThreadPoolExecutor(clients) as pool:
+        futures = [pool.submit(client) for _ in range(clients)]
+    results = []
+    for f in futures:
+        try:
+            results.append(f.result())  # re-raises what the client raised outside its requests
+        except Exception as e:
+            problems.append(f"a client ended with {type(e).__name__}: {e}"[:160])
     elapsed = time.monotonic() - t0
-    published = json.loads(fetch(port, "/api/status")[2])["sample"]["sequence"] - first
-    if len(ids) != 1:
+    attempted, verified = sum(r["attempted"] for r in results), sum(r["verified"] for r in results)
+    errors = [e for r in results for e in r["errors"]]
+    ids = set().union(*(r["ids"] for r in results)) if results else set()
+    if verified != planned:
+        problems.append(f"{verified} of {planned} answers verified ({attempted} attempted, {len(errors)} failed)")
+    problems += sorted(set(errors))[:5]
+    if len(ids) > 1:
         problems.append(f"{len(ids)} instance ids")
+    published = json.loads(get(port, "/api/status")[2])["sample"]["sequence"] - first
     if published > elapsed / interval + 2:
         problems.append(f"{published} snapshots in {elapsed:.1f} s: requests collected")
-    return {"requests": clients * requests, "seconds": round(elapsed, 2), "published": published, "problems": problems}
+    return {"planned": planned, "attempted": attempted, "verified": verified, "failed": len(errors),
+            "seconds": round(elapsed, 2), "published": published, "problems": problems}
+
+
+def fake_get(fail):
+    """A fetch for the self-test: answers like a server until a client's second request, then fails."""
+    local = threading.local()
+
+    def get(port, path, timeout=10):
+        if path == "/api/status":
+            return 200, {}, b'{"sample": {"sequence": 7}}'
+        local.n = getattr(local, "n", 0) + 1
+        good = b'{"sample": {"sequence": 7, "instance_id": "a"}}'
+        if local.n == 1 or fail == "none":
+            return 200, {}, good
+        if fail == "timeout":
+            raise socket.timeout("timed out")
+        if fail == "garbage":
+            return 200, {}, b"{not json"
+        if fail == "no_sample":
+            return 200, {}, b'{"cpu": []}'
+        if fail == "http_503":
+            return 503, {}, b"{}"
+        if fail == "back":
+            return 200, {}, b'{"sample": {"sequence": 6, "instance_id": "a"}}'
+    return get
+
+
+CONTROLS = [("none", True), ("timeout", False), ("garbage", False), ("no_sample", False), ("http_503", False),
+            ("back", False)]
+
+
+def self_test():
+    """The concurrent check against fake answers: every failure after a client's first answer must fail it."""
+    wrong = []
+    for fail, passes in CONTROLS:
+        r = concurrent(0, 1.0, get=fake_get(fail))
+        if (not r["problems"]) != passes:
+            wrong.append(f"  {fail}: {'failed' if passes else 'passed'}, must {'pass' if passes else 'fail'}: {r}")
+    print(f"harness self-test: {len(CONTROLS) - len(wrong)}/{len(CONTROLS)} controls as expected", file=sys.stderr)
+    for w in wrong:
+        print(w, file=sys.stderr)
+    return not wrong
 
 
 def closed(sock, wait):
@@ -182,10 +250,48 @@ def request_timeout(port):
     return {"closed_after_s": round(time.monotonic() - t0, 2), "answered": data != b""}
 
 
+RAW = {  # request -> what is compared of the answer: bare (no status line), status line, header names, body or not
+    "HEAD": b"HEAD /api/status HTTP/1.0\r\n\r\n",
+    "POST": b"POST /api/stats HTTP/1.0\r\n\r\n",
+    "HTTP/0.9 said": b"GET /api/status HTTP/0.9\r\n\r\n",
+    "HTTP/0.9 two words": b"GET /api/status\r\n\r\n",
+    "HTTP/00.9": b"GET /api/status HTTP/00.9\r\n\r\n",
+    "HTTP/2.0": b"GET /api/status HTTP/2.0\r\n\r\n",
+    "bad version": b"GET /api/status HTTP/x\r\n\r\n",
+    "99 headers": b"GET /api/status HTTP/1.0\r\n" + b"A: b\r\n" * 99 + b"\r\n",
+    "100 headers": b"GET /api/status HTTP/1.0\r\n" + b"A: b\r\n" * 100 + b"\r\n",
+    "long header": b"GET /api/status HTTP/1.0\r\nA: " + b"x" * 70000 + b"\r\n\r\n",
+    "long request line": b"GET /" + b"a" * 70000 + b" HTTP/1.0\r\n\r\n",
+    "empty line": b"\r\n",
+    "//path": b"GET //api/status HTTP/1.0\r\n\r\n",
+}
+
+
+def raw(port, request):
+    """The answer's shape, from its bytes: bare or not, status line, header names (not Date, Server), body."""
+    s = socket.create_connection(("127.0.0.1", port))
+    s.settimeout(5)
+    s.sendall(request)
+    data = b""
+    try:
+        while chunk := s.recv(65536):
+            data += chunk
+    except (socket.timeout, ConnectionResetError) as e:
+        data += f"<{type(e).__name__}>".encode()
+    s.close()
+    if not data.startswith(b"HTTP/"):
+        return {"bare": True, "body": bool(data)}
+    head, _, body = data.partition(b"\r\n\r\n")
+    lines = head.decode("latin-1").replace("Request-URI Too Long", "URI Too Long").split("\r\n")  # Python < 3.13
+    names = sorted(h.split(":")[0] for h in lines[1:] if h.split(":")[0] not in ("Date", "Server"))
+    return {"bare": False, "status": lines[0], "headers": names, "body": bool(body)}
+
+
 def check(port, interval):
     eps = endpoints(port)
     bodies = {p: json.loads(eps[p]["body"]) for p in ("/api/stats", "/api/status", "/api/observations")}
-    return {"endpoints": eps, "bodies": bodies, "concurrent": concurrent(port, interval),
+    return {"endpoints": eps, "bodies": bodies, "raw": {k: raw(port, r) for k, r in RAW.items()},
+            "concurrent": concurrent(port, interval),
             "connection_limit": connection_limit(port), "request_timeout": request_timeout(port)}
 
 
@@ -206,6 +312,10 @@ def version():
 
 
 def main():
+    if sys.argv[1:] == ["--self-test"]:
+        sys.exit(0 if self_test() else 1)
+    if not self_test():
+        sys.exit(1)
     binary, interval = os.path.abspath(sys.argv[1]), 1.0
     ports = {"python": free_port(), "rust": free_port()}
     logs = {n: tempfile.TemporaryFile("w+") for n in ports}
@@ -245,6 +355,9 @@ def main():
                 out.append(f"{path}: {k} {a[k]!r} (python) != {b[k]!r} (rust)")
         if path in WEB and a["body"] != b["body"]:
             out.append(f"{path}: the bodies differ ({len(a['body'])} / {len(b['body'])} bytes)")
+    for name in RAW:
+        if py["raw"][name] != rs["raw"][name]:
+            out.append(f"raw {name}: {py['raw'][name]} (python) != {rs['raw'][name]} (rust)")
     for path in py["bodies"]:
         diff(py["bodies"][path], rs["bodies"][path], "", (d := []))
         out += [f"{path}{x}" for x in d]
@@ -260,6 +373,7 @@ def main():
     report = {"host_platform": stats["platform"], "sensor_meta": len(stats.get("sensor_meta", {})),
               "interfaces": len(stats.get("network", {}).get("interfaces", [])),
               "codes": {p: [py["endpoints"][p]["code"], rs["endpoints"][p]["code"]] for p in PATHS},
+              "raw": py["raw"],
               **{n: {k: r[k] for k in ("concurrent", "connection_limit", "request_timeout")} for n, r in res.items()},
               "differences": out}
     if "--json" in sys.argv:

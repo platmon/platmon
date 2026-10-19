@@ -98,7 +98,7 @@ fn phrase(code: u16) -> (&'static str, &'static str) {
         200 => ("OK", "Request fulfilled, document follows"),
         400 => ("Bad Request", "Bad request syntax or unsupported method"),
         404 => ("Not Found", "Nothing matches the given URI"),
-        414 => ("Request-URI Too Long", "URI is too long."),
+        414 => ("URI Too Long", "URI is too long."), // RFC 9110's name, Python 3.13+ (3.10: Request-URI Too Long)
         431 => ("Request Header Fields Too Large", "The server refused this request because the request header fields are too large."),
         501 => ("Not Implemented", "Server does not support this operation"),
         503 => ("Service Unavailable", "The server cannot process the request due to a high load"),
@@ -120,8 +120,11 @@ fn words(line: &str) -> Vec<&str> {
 struct Exchange<'a> {
     stream: &'a TcpStream,
     /// HTTP/0.9: the answer is the body alone. As in Python, a request counts as that until its version is
-    /// read, so errors about the request line itself have no status line or headers either.
+    /// read, so errors about the request line itself have no status line or headers either; so does one
+    /// that says HTTP/0.9.
     bare: bool,
+    /// a HEAD request: an error's headers without its page (the only answer HEAD gets is 501)
+    head_only: bool,
 }
 
 impl Exchange<'_> {
@@ -171,6 +174,9 @@ impl Exchange<'_> {
                            html_escape(message), html_escape(explain));
         self.head(code, message, &[("Connection", "close".into()), ("Content-Type", "text/html;charset=utf-8".into()),
                                    ("Content-Length", body.len().to_string())])?;
+        if self.head_only {
+            return Ok(());
+        }
         self.body(body.as_bytes())
     }
 }
@@ -214,7 +220,7 @@ impl Server {
         stream.set_read_timeout(Some(self.request_timeout))?;
         stream.set_write_timeout(Some(self.write_timeout))?;
         let mut r = BufReader::new(stream);
-        let mut x = Exchange { stream, bare: true };
+        let mut x = Exchange { stream, bare: true, head_only: false };
         let raw = read_line(&mut r, MAX_LINE)?;
         if raw.len() > MAX_LINE {
             x.bare = false; // Python's request_version is "" there, not HTTP/0.9
@@ -235,7 +241,7 @@ impl Server {
             match numbers {
                 None => return x.error(400, Some(&format!("Bad request version ({})", py_repr(version)))),
                 Some(n) if n[0] >= 2 => return x.error(505, Some(&format!("Invalid HTTP version ({})", &version[5..]))),
-                _ => x.bare = false,
+                _ => x.bare = version == "HTTP/0.9", // Python compares the text, so HTTP/00.9 has headers
             }
         }
         if !(2..=3).contains(&w.len()) {
@@ -245,21 +251,22 @@ impl Server {
         if w.len() == 2 && command != "GET" {
             return x.error(400, Some(&format!("Bad HTTP/0.9 request type ({})", py_repr(command))));
         }
+        x.head_only = command == "HEAD";
         if path.starts_with("//") {
             path = format!("/{}", path.trim_start_matches('/'));
         }
-        let mut headers = 0;
-        loop {
+        let mut lines = 0;
+        loop { // as http.client._read_headers: the blank line (or the end) that ends them counts too
             let h = read_line(&mut r, MAX_LINE)?;
             if h.len() > MAX_LINE {
                 return x.error(431, Some("Line too long"));
             }
+            lines += 1;
+            if lines > MAX_HEADERS {
+                return x.error(431, Some("Too many headers"));
+            }
             if h.is_empty() || h == b"\r\n" || h == b"\n" {
                 break;
-            }
-            headers += 1;
-            if headers > MAX_HEADERS {
-                return x.error(431, Some("Too many headers"));
             }
         }
         if command != "GET" {
@@ -430,7 +437,7 @@ mod tests {
         assert!(get(addr, "GET /api/stats HTTP/2.0\r\n\r\n").starts_with("<!DOCTYPE HTML>"));
         assert!(get(addr, "GET / HTTP/x\r\n\r\n").contains("<p>Message: Bad request version ('HTTP/x').</p>"));
         assert!(get(addr, "A B C D\r\n\r\n").contains("Error code: 400"));
-        assert_eq!(status(&get(addr, &format!("GET /{} HTTP/1.0\r\n\r\n", "a".repeat(70000)))), "HTTP/1.0 414 Request-URI Too Long");
+        assert_eq!(status(&get(addr, &format!("GET /{} HTTP/1.0\r\n\r\n", "a".repeat(70000)))), "HTTP/1.0 414 URI Too Long");
         assert_eq!(status(&get(addr, &format!("GET / HTTP/1.0\r\n{}\r\n", "A: b\r\n".repeat(101)))),
                    "HTTP/1.0 431 Too many headers");
         let r = get(addr, "GET /api/samples?after=1 HTTP/1.0\r\n\r\n");
@@ -438,6 +445,47 @@ mod tests {
         assert_eq!(get(addr, "GET //api/status HTTP/1.0\r\n\r\n").lines().next(), Some("HTTP/1.0 200 OK"));
         assert!(get(addr, "GET /api/status\r\n\r\n").starts_with("{\"schema_version\": 1")); // HTTP/0.9: the body alone
         assert_eq!(get(addr, "\r\n"), ""); // an empty request line: no answer
+        let head = get(addr, "HEAD /api/status HTTP/1.0\r\n\r\n"); // 501: its headers, no page
+        assert!(head.starts_with("HTTP/1.0 501 Unsupported method ('HEAD')\r\n") && head.ends_with("\r\n\r\n"), "{}", head);
+        assert!(head.contains("\r\nContent-Length: "));
+        assert!(get(addr, "GET /api/status HTTP/0.9\r\n\r\n").starts_with("{\"schema_version\": 1")); // said 0.9: bare
+        assert!(get(addr, "GET /api/status HTTP/00.9\r\n\r\n").starts_with("HTTP/1.0 200 OK")); // not the text
+        // 99 header lines and the blank one: 100 lines, accepted; 100 and the blank one: 101, refused
+        assert!(get(addr, &format!("GET /api/status HTTP/1.0\r\n{}\r\n", "A: b\r\n".repeat(99))).starts_with("HTTP/1.0 200 OK"));
+        assert_eq!(status(&get(addr, &format!("GET / HTTP/1.0\r\n{}\r\n", "A: b\r\n".repeat(100)))),
+                   "HTTP/1.0 431 Too many headers");
+    }
+
+    #[test]
+    fn a_reader_that_stops_is_dropped() {
+        // an answer far larger than the socket buffers, a client that never reads it: the write stops making
+        // progress, times out, and the one connection slot is free again while the core keeps collecting
+        let dir = std::env::temp_dir().join(format!("platmon-native-web-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("app.js"), vec![b'x'; 64 << 20]).unwrap();
+        let web = dir.to_str().unwrap().to_string();
+        let (addr, calls) = server(|s| {
+            s.web = Some(web);
+            s.max_connections = 1;
+            s.write_timeout = Duration::from_millis(300);
+        });
+        let mut stuck = TcpStream::connect(addr).unwrap();
+        stuck.write_all(b"GET /app.js HTTP/1.0\r\n\r\n").unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let before = calls.load(Ordering::SeqCst);
+        let t0 = std::time::Instant::now();
+        let answer = loop { // refused while the slot is held, answered once the write gave up
+            let r = get(addr, "GET /api/status HTTP/1.0\r\n\r\n");
+            if !r.is_empty() || t0.elapsed() > Duration::from_secs(5) {
+                break r;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(answer.starts_with("HTTP/1.0 200 OK"), "{:?}", &answer[..answer.len().min(80)]);
+        assert!(t0.elapsed() < Duration::from_secs(3), "slot held for {:?}", t0.elapsed());
+        assert!(calls.load(Ordering::SeqCst) > before); // collecting went on meanwhile
+        drop(stuck);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
