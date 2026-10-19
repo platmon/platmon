@@ -14,12 +14,13 @@ Per server:
   groups' times and readings)
 - /api/history: the same series ids, cadences, bounds and dropped count, every point [int, float, number or
   null]; /api/samples: the same envelope, records with /api/stats' keys and sample.stale
-- replay from the start, page by page: ids rising, the cursor moving on, every id up to the last cursor
-  returned or in a missing range
+- replay from the start, page by page, as walk.py checks it: one instance and stream, ids rising strictly,
+  every page explaining exactly the ids it moves the cursor over, the cursor moving while has_more and
+  ending at latest_id; a walk that does not end within 50 pages fails
 - 16 clients × 20 requests at once: all 320 answers verified (200, JSON, a sample), no client error, one
   instance, sequences never going back, and no more collections than intervals (requests do not collect).
   A self-test runs first (`--self-test` alone): fake answers that time out, are not JSON, have no sample,
-  are a 503 or go back after a client's first answer must each fail the check
+  are a 503 or go back after a client's first answer must each fail the check; walk.py's own self-test too
 - 40 idle connections, opened 20 ms apart: 32 held, the rest closed without an answer, a request refused
   while 32 are held and answered after they close
 - a request line cut off: the connection closed after the 10 s request timeout
@@ -40,6 +41,7 @@ import time
 import urllib.error
 import urllib.request
 
+import walk
 from compare import kind, plausible
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -337,32 +339,17 @@ def burst(port, pid, n=200):
 
 
 def replay_walk(port):
-    """Every core publication from the start, page by page: ids rising, the cursor moving on, every id up to
-    the latest either returned or in a missing range."""
-    after, instance, seen, missing, pages, problems = 0, None, [], [], 0, []
-    while pages < 50:
-        q = f"/api/samples?limit=7&after={after}" + (f"&instance_id={instance}" if instance else "")
+    """Every core publication from the start, page by page, checked by walk.Walk; at most 50 pages of 2."""
+    def get(after, instance):
+        q = f"/api/samples?limit=2&after={after}" + (f"&instance_id={instance}" if instance else "")
         code, _, body = fetch(port, q)
         if code != 200:
-            problems.append(f"HTTP {code} for {q}")
-            break
-        b = json.loads(body)
-        instance, pages = b["instance_id"], pages + 1
-        ids = [r["id"] for r in b["records"]]
-        if ids != sorted(ids) or (ids and ids[0] <= after):
-            problems.append(f"ids {ids} after {after}")
-        seen += ids
-        missing += [(m["from"], m["to"]) for m in b["missing_ranges"]]
-        if b["next_after"] < after or (ids and b["next_after"] < ids[-1]):
-            problems.append(f"next_after {b['next_after']} after {after}")
-        after = b["next_after"]
-        if not b["has_more"]:
-            break
-    covered = set(seen) | {i for a, z in missing for i in range(a, z + 1)}
-    if covered != set(range(1, after + 1)):
-        problems.append(f"ids 1..{after} not all returned or missing")
-    return {"pages": pages, "records": len(seen), "missing": missing, "next_after": after, "instance": instance,
-            "problems": problems}
+            raise RuntimeError(f"HTTP {code} for {q}")
+        return json.loads(body)
+    try:
+        return walk.walk(get, "core")
+    except RuntimeError as e:
+        return {"instance": None, "problems": [str(e)]}
 
 
 def check(port, interval, pid):
@@ -413,10 +400,9 @@ def heads(text):
 
 
 def main():
-    if sys.argv[1:] == ["--self-test"]:
-        sys.exit(0 if self_test() else 1)
-    if not self_test():
-        sys.exit(1)
+    tested = self_test() & walk.self_test()
+    if sys.argv[1:] == ["--self-test"] or not tested:
+        sys.exit(0 if tested else 1)
     binary, interval = os.path.abspath(sys.argv[1]), 1.0
     ports = {"python": free_port(), "rust": free_port()}
     logs = {n: tempfile.TemporaryFile("w+") for n in ports}
