@@ -81,17 +81,35 @@ device identity starts a new series; series that went away are dropped after the
 restart, and moves the cursor on also when everything asked for has expired. Published data can be reused,
 but never a finished answer: ages and `stale` are computed per answer, also for replayed samples.
 
-**3C measurements** (planned, A B B A with the default allocator only):
-- the release budget as it stands (docs/performance/budget.md): default features, 1 s collection, one
-  client reading `/api/stats` every second, whole-process CPU ≤ 2.5 %, plus response times;
-- everyday Hub polling: the same endpoints, period and page size as the Hub uses;
-- a Hub reconnect: the same accumulated data fetched with consecutive replay requests, for CPU, memory and
-  the collection cadence while it runs.
-The load comes from a test client; the production Hub is not pointed at the candidate. Memory is not
-judged from 120 s CPU windows: history and replay keep 600 s by default (and replay's `max_bytes` is its
-JSON payload budget, not an RSS limit), so memory runs cover at least two retention periods, with VmRSS
-throughout and `smaps_rollup` RSS/PSS at the main points (buffers full, during and after a backlog fetch).
-The collector-only RSS above (0.7–0.9 MiB) is not an estimate of the service's.
+**3C, set before it was run (2026-10-20).** `tools/service_ab.py`, one A B B A round per host:
+- A: the Python service of v1.3.0 (`e767176`, the code the 1.3.0-1 package runs), `python3 platmon.py
+  INI` from a `git archive` of the tag, with the host's own python3. B: `platmon-native serve INI --web
+  TREE/frontends/web --app-version 1.3.0`, native source `35cdbdf`, rebuilt to the same sha256 as recorded
+  for 3B, default system allocator. Both as the same login user, one at a time, on 127.0.0.1:19797, with the
+  same INI: the defaults with `[core] interval = 1.0`. The packaged service and the production Hub keep
+  running beside it, as in the 1.3.0 board runs.
+- Load: 0-150 s the budget client (`/api/stats` every 1 s), w1 = 30-150 s, the release window as
+  budget.md has it; the same client until w2 = 1290-1410 s, the release window again with history and
+  replay full and expiring (two retention periods in); then a poller doing what platmon-hub does for one
+  node (status and stats every 5 s, observations every 10 s, replay turns of 100 over every stream), w3 =
+  1440-1560 s; then no client for 480 s (idle window 1590-1710 s); then the poller reconnects from its
+  cursors and fetches the 480 s backlog, five times from the same cursors, then polls 120 s more.
+- Recorded: CPU over each window (whole process, /proc ticks), response times, the cadence from the
+  published samples and the replayed records, requests, records and bytes the poller got, its data lag,
+  every replay page checked by `walk.py`; VmRSS every 5 s (50 ms during the reconnect) and smaps_rollup
+  RSS/PSS with the replay ranges and history points held at w1's end, with full buffers, after the poller,
+  before and after the reconnect and at the end.
+- Judged per host, never averaged, A against B: w1 and w2 against the 2.5 % release target each; the
+  proposed gates of docs/performance/rust-feasibility.md (whole-service CPU at least 30 % lower, RSS/PSS
+  at least 50 % lower) from w2 and w3 and the full-buffer memory, w1 shown beside them, not used alone; the
+  reconnect by its time, CPU seconds and peak memory for the same backlog.
+- Not allowed for B, whatever the CPU: an error answer, a loss (a missing range after a stream's first
+  page, or in the backlog), a walk problem, a missing collection id, `gap_before`, a cadence step over
+  1.5 s, a response p95 above A's in the same window by more than 1 ms.
+- Budget: one round per host, about 2.5 h, the three hosts at once. A run is repeated once at most, and
+  only when it is invalid (the tool failed, the host was disturbed); the candidate is not changed during
+  3C. If B breaks a rule above, 3C stops there and is reported, not fixed inside 3C.
+- Not in 3C: the 24 h stability gate, other hosts (a PC with nvidia-smi), the `cache-alloc` build.
 
 **What the candidate has** (`platmon-native serve [platmon.ini] --web DIR --app-version V`):
 
