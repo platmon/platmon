@@ -22,6 +22,11 @@ budget, then the current evidence. The release decision itself is in [release re
 - [identity-resolution.md](identity-resolution.md), [snapshot-copy.md](snapshot-copy.md): measured design
   decisions behind code that is still in place (sysfs identity reuse, the `/api/stats` copy).
 
+## Exploratory
+
+- [rust-feasibility.md](rust-feasibility.md): what a native (Rust) collector could save, and one binary per
+  architecture. One exploratory round, not a release judgment; no rewrite decided.
+
 ## Superseded
 
 Kept for their raw data and history; their conclusions were replaced by the reports above.
