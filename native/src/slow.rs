@@ -2,27 +2,31 @@
 //! Sampler, and served by /api/observations with their own id, times, age and state. A blocked read stalls
 //! only its group (its age grows, collecting_for_ms says for how long); no new thread is started for it.
 //! Contract: docs/reference/observations.md.
-//!
-//! Step 3A has the execution structure only: the groups' readers (storage, Wi-Fi, battery, probe) are not
-//! ported, so the service starts none; tests and the runtime script give their own.
+use crate::history::History;
 use crate::json::Value;
 use crate::metadata::{self, Group};
+use crate::replay::Replay;
 use crate::runtime::{clock_value, ms, seconds_ns};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const SCHEMA_VERSION: i64 = 2;
 
-/// One published observation, never changed afterwards; its collector and data are serialized once.
+/// One published observation, never changed afterwards.
 pub struct Observation {
     pub id: i64,
     pub started: i64,
     pub completed: i64,
     pub started_at: f64,
     pub completed_at: f64,
-    state: String,
-    collector: String,
-    data: String,
+    pub collector: Value,
+    pub data: Value,
+}
+
+impl Observation {
+    fn state(&self) -> &str {
+        match self.collector.get("state") { Some(Value::Str(s)) => s, _ => "" }
+    }
 }
 
 #[derive(Default)]
@@ -33,26 +37,29 @@ struct State {
 }
 
 /// What a reader returns: the group's data, or an unexpected error (the group's internal_error).
-#[cfg_attr(not(test), allow(dead_code))] // step 3A: no reader is ported, the service starts no group
 pub type Reader = Box<dyn FnMut(&mut Group) -> Result<Value, String> + Send>;
 
 pub struct Slow {
     pub name: String,
+    pub interval: f64,
     interval_ns: i64,
     stale_ns: i64,
     state: Mutex<State>,
     logged: Mutex<Vec<(String, Vec<String>)>>,
+    /// the service's elapsed clock, for replay's expiry when publishing
+    pub clock: Box<dyn Fn() -> i64 + Send + Sync>,
+    pub history: Option<Arc<History>>,
+    pub replay: Option<Arc<Replay>>,
 }
 
 impl Slow {
     /// interval: seconds between the starts of two observations; stale after 3 intervals.
     pub fn new(name: &str, interval: f64) -> Slow {
         let interval_ns = seconds_ns(interval);
-        Slow { name: name.into(), interval_ns, stale_ns: 3 * interval_ns, state: Mutex::default(),
-               logged: Mutex::default() }
+        Slow { name: name.into(), interval, interval_ns, stale_ns: 3 * interval_ns, state: Mutex::default(),
+               logged: Mutex::default(), clock: Box::new(metadata::clock), history: None, replay: None }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     /// Starts the group's one thread: observe, then wait until an interval after that observation started
     /// (no catch-up bursts). A read that blocks holds this thread only.
     pub fn start(self: &Arc<Self>, mut read: Reader) -> std::thread::JoinHandle<()> {
@@ -64,7 +71,6 @@ impl Slow {
         }).expect("cannot start a slow group's thread")
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     fn observe_once(&self, read: &mut Reader) -> i64 {
         let (started_at, started) = (metadata::wall(), metadata::clock());
         self.begin(started);
@@ -78,7 +84,8 @@ impl Slow {
         self.state.lock().unwrap().since = Some(started);
     }
 
-    /// Publishes one observation as one update; completed_at is read under the lock, as in Python.
+    /// Publishes one observation as one update (completed_at is read under the lock, as in Python), then,
+    /// outside the lock, gives it to replay and history.
     pub fn finish(&self, mut group: Group, data: Result<Value, String>, started_at: f64, started: i64, completed: i64,
                   completed_at: impl FnOnce() -> f64) -> Arc<Observation> {
         let data = data.unwrap_or_else(|e| { // never the service's: this group's internal_error
@@ -87,35 +94,53 @@ impl Slow {
         });
         let collector = metadata::summarize(std::slice::from_ref(&group), &mut self.logged.lock().unwrap())
             .get(&self.name).cloned().unwrap_or_default();
-        let state = match collector.get("state") { Some(Value::Str(s)) => s.clone(), _ => String::new() };
-        let (collector, data) = (collector.to_py(), data.to_py());
-        let mut st = self.state.lock().unwrap();
-        st.count += 1;
-        let o = Arc::new(Observation { id: st.count, started, completed, started_at, completed_at: completed_at(),
-                                       state, collector, data });
-        st.last = Some(o.clone());
-        st.since = None;
+        let o = {
+            let mut st = self.state.lock().unwrap();
+            st.count += 1;
+            let o = Arc::new(Observation { id: st.count, started, completed, started_at, completed_at: completed_at(),
+                                           collector, data });
+            st.last = Some(o.clone());
+            st.since = None;
+            o
+        };
+        if let Some(replay) = &self.replay {
+            if let Err(e) = replay.append(&self.name, o.id, started, completed, &self.entry_of(Some(&o), completed, None), false, &self.clock) {
+                eprintln!("platmon: observation replay append failed: {}", e);
+            }
+        }
+        if let Some(history) = &self.history {
+            if history.append_observation(&self.name, self.interval, o.id, started, completed, o.state(), &o.data).is_err() {
+                eprintln!("platmon: observation history append failed");
+            }
+        }
         o
     }
 
-    /// This group's /api/observations entry as JSON (Slow._entry); now() is read under the lock.
-    pub fn entry(&self, now: impl FnOnce() -> i64) -> String {
+    /// This group's /api/observations entry (Slow.view); now() is read under the lock.
+    pub fn entry(&self, now: impl FnOnce() -> i64) -> Value {
         let (now, last, since) = {
             let st = self.state.lock().unwrap();
             (now(), st.last.clone(), st.since)
         };
-        let mut head = Value::obj();
-        head.set("interval_ms", ms(self.interval_ns).into());
-        head.set("stale_after_ms", ms(self.stale_ns).into());
-        head.set("collecting_for_ms", since.map(|s| ms(now - s)).into());
-        let mut out = head.to_py();
-        out.pop(); // the closing brace: the members below follow in Python's order
+        self.entry_of(last.as_deref(), now, since)
+    }
+
+    /// Slow._entry: one publication with ages as of now; Python's key order (state last).
+    fn entry_of(&self, last: Option<&Observation>, now: i64, since: Option<i64>) -> Value {
+        let mut e = Value::obj();
+        e.set("interval_ms", ms(self.interval_ns).into());
+        e.set("stale_after_ms", ms(self.stale_ns).into());
+        e.set("collecting_for_ms", since.map(|s| ms(now - s)).into());
+        e.set("observation", Value::Null);
+        e.set("collector", Value::Null);
+        e.set("data", Value::Null);
         let Some(last) = last else {
             let state = if since.map_or(true, |s| now - s <= self.stale_ns) { "starting" } else { "stale" };
-            out.push_str(&format!(", \"observation\": null, \"collector\": null, \"data\": null, \"state\": \"{}\"}}", state));
-            return out;
+            e.set("state", state.into());
+            return e;
         };
         let stale = now - last.started > self.stale_ns;
+        e.set("state", (if stale { "stale" } else { last.state() }).into());
         let mut o = Value::obj();
         o.set("id", last.id.into());
         o.set("started_at", last.started_at.into());
@@ -124,16 +149,10 @@ impl Slow {
         o.set("age_ms", ms(now - last.completed).into());
         o.set("data_age_ms", ms(now - last.started).into());
         o.set("stale", Value::Bool(stale));
-        out.push_str(", ");
-        Value::write_member(&mut out, "observation", &o);
-        out.push_str(", \"collector\": ");
-        out.push_str(&last.collector);
-        out.push_str(", \"data\": ");
-        out.push_str(&last.data);
-        out.push_str(", ");
-        Value::write_member(&mut out, "state", &(if stale { "stale" } else { last.state.as_str() }).into());
-        out.push('}');
-        out
+        e.set("observation", o);
+        e.set("collector", last.collector.clone());
+        e.set("data", last.data.clone());
+        e
     }
 }
 
@@ -146,30 +165,19 @@ pub struct Observations {
 
 impl Observations {
     /// The /api/observations body; each group reads the clock for its own entry, as Python's view() does.
-    pub fn view(&self, now: impl Fn() -> i64) -> String {
-        let mut head = Value::obj();
-        head.set("schema_version", SCHEMA_VERSION.into());
-        head.set("instance_id", self.instance_id.as_str().into());
-        head.set("clock", clock_value(self.clock_source));
-        let mut out = head.to_py();
-        out.pop();
-        out.push_str(", \"groups\": {");
-        for (i, g) in self.groups.iter().enumerate() {
-            if i > 0 {
-                out.push_str(", ");
-            }
-            Value::write_key(&mut out, &g.name);
-            out.push_str(&g.entry(&now));
-        }
-        out.push_str("}}");
-        out
+    pub fn view(&self, now: impl Fn() -> i64) -> Value {
+        let mut v = Value::obj();
+        v.set("schema_version", SCHEMA_VERSION.into());
+        v.set("instance_id", self.instance_id.as_str().into());
+        v.set("clock", clock_value(self.clock_source));
+        v.set("groups", Value::Obj(self.groups.iter().map(|g| (g.name.clone(), g.entry(&now))).collect()));
+        v
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::json;
     use std::sync::mpsc;
 
     #[test]
@@ -185,7 +193,7 @@ mod tests {
         }));
         other.start(Box::new(|g| Ok(g.got(Value::obj()))));
         std::thread::sleep(Duration::from_millis(300));
-        let entry = |s: &Slow| json::parse(&s.entry(metadata::clock)).unwrap();
+        let entry = |s: &Slow| s.entry(metadata::clock);
         let (b, o) = (entry(&blocked), entry(&other));
         assert_eq!(b.get("state"), Some(&"stale".into())); // first one still running after 3 intervals
         assert!(matches!(b.get("collecting_for_ms"), Some(Value::Float(f)) if *f > 200.0));

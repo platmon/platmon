@@ -46,9 +46,22 @@ def result(stats, sensors=None, req=None, passive=None):
     return {"stats": stats, "sensors": sensors or {}, "required": req, "passive": passive or {}}
 
 
-def setup(interval=1.0, slow=(), clock="boottime"):
-    return ("setup", {"op": "setup", "interval": interval, "instance_id": "8dfad9fa-9bf0-4d61-91e0-ef22aebd2b91",
-                      "clock": clock, "slow": [list(g) for g in slow]})
+INSTANCE = "8dfad9fa-9bf0-4d61-91e0-ef22aebd2b91"
+LEVELS = {"cpu": [80.0, 90.0], "gpu": [80.0, 90.0], "memory": [80.0, 90.0], "filesystem": [80.0, 90.0],
+          "temperature": [80.0, 90.0], "battery": [20.0, 10.0], "wifi": [-70.0, -80.0]}
+
+
+def setup(interval=1.0, slow=(), clock="boottime", history=None, replay=None):
+    """history: its retention or None (off); replay: (retention, max_bytes) or None."""
+    return ("setup", {"op": "setup", "interval": interval, "instance_id": INSTANCE, "clock": clock,
+                      "slow": [list(g) for g in slow], "levels": LEVELS,
+                      "history": history and {"retention": history},
+                      "replay": replay and {"retention": replay[0], "max_bytes": replay[1]}})
+
+
+def http(label, t, path, raw=None):
+    """One request to each side's HTTP server at elapsed time t: GET path, or a raw request."""
+    return (label, {"op": "http", "now": t, "request": raw or f"GET {path} HTTP/1.0\r\n\r\n"})
 
 
 def collection(label, t, duration, res, clock="same", wall=None):
@@ -260,15 +273,165 @@ def observation_steps():
     ]
 
 
-SCENARIOS = {"core": core_steps, "provenance": provenance_steps, "observations": observation_steps}
+def stats_hist(t, n, temps=3, cpus=2, ns="netns:4026531840", ifs=(("eth0", 2), ("wlan0", 3)), rate=None, first=()):
+    """Collector-shaped stats for history: CPU usage, memory, GPU, temperature and power with source ids,
+    interfaces with a namespace and ifindex, disks; rate None gives rates, "none" gives gaps."""
+    rates = (lambda k: None) if rate == "none" else (lambda k: float(n * 100 + len(k)))
+    stats = {"cpu": [{"id": i, "usage": float(n + i) if i != 1 or n % 3 else None} for i in range(cpus)],
+             "memory": {"total": 8 << 30, "used": (1 << 30) + n * 4096},
+             "gpu": {"usage": 12.5, "freq": 1, "max_freq": None}, "npu": None,
+             "temperature": {**{k: 30.0 for k in first}, **{f"t{i}": 40.0 + i + n / 10 for i in range(temps)}},
+             "power": {"VDD_IN": 4.5, "x": "y"},
+             "network": {"scope": {"kind": "process_network_namespace", "id": ns},
+                         "interfaces": [{"name": name, "ifindex": idx, "rates": None if rate == "none" else
+                                         {"rx_bytes_per_s": rates("rx"), "tx_bytes_per_s": 2**70 if n == 4 else rates("tx")}}
+                                        for name, idx in ifs] + [{"name": "ghost0", "ifindex": None, "rates": {}}]},
+             "disk_io": {"disks": [{"name": "sda", "major": 8, "minor": 0,
+                                    "rates": {"read_bytes_per_s": float("1e300") if n == 5 else 1.5, "write_bytes_per_s": True}}]},
+             "collectors": {}}
+    sensors = {f"/temperature/t{i}": {"id": f"src1:{i:064x}" if i % 2 == 0 else None, "provider": "thermal",
+                                      "identity_basis": "resolved_path", "unit": "celsius", "span": [t + 10, t + 20]}
+               for i in range(temps)}
+    sensors["/power/VDD_IN"] = {"id": "src1:" + "b" * 64, "provider": "ina3221", "identity_basis": "device_channel",
+                                "unit": "watt", "span": [t + 10, t + 20]}
+    sensors["/power/x"] = {"id": "src1:" + "c" * 64, "provider": "ina3221", "identity_basis": "device_channel",
+                           "unit": "watt", "span": None}
+    sensors["/gpu/usage"] = {"id": None, "provider": "drm", "identity_basis": "unresolved", "unit": "percent", "span": [t + 10, t + 20]}
+    sensors["/gpu/freq"] = {**sensors["/gpu/usage"], "unit": "hertz"}
+    sensors["/gpu/max_freq"] = {**sensors["/gpu/usage"], "unit": "hertz", "span": None}
+    return result(stats, sensors, required(t + 5, t + 50_000), {"network": [t + 40, t + 50], "disk_io": [t + 60, t + 70]})
+
+
+def history_steps():
+    """Core and slow publications into History, read through each side's real /api/history."""
+    out, t = [setup(slow=[("storage", 30.0), ("wifi", 5.0), ("battery", 60.0), ("probe", 10.0)], history=60.0)], T0
+    for n in range(6):
+        out += collection(f"core {n + 1}", t, 20 * MS, stats_hist(t, n))
+        t += S
+    out += [http("all series", t, "/api/history"),
+            http("a prefix, percent-encoded", t, "/api/history?prefix=cpu%2F"),
+            http("the last 2.5 s", t, "/api/history?seconds=2.5"),
+            http("3 points: buckets with a null stay null", t, "/api/history?points=3"),
+            http("1 point", t, "/api/history?points=1&prefix=memory")]
+    out += collection("failed", t, 10 * MS, {"error": "x"})
+    t += S
+    out += collection("after a failure: a break", t, 10 * MS, stats_hist(t, 6))
+    t += 9 * S
+    out += collection("after 9 s without a publication: a break", t, 10 * MS, stats_hist(t, 7, rate="none"))
+    t += S
+    out += collection("another namespace, wlan0 gone, two more CPUs", t, 10 * MS,
+                      stats_hist(t, 8, cpus=4, ns="netns:999", ifs=(("eth0", 2),)))
+    out.append(http("new series, missing ones null", t + 1, "/api/history?prefix=network"))
+    out += observation("storage", "storage", t, MS, {"filesystems": [
+        {"major": 8, "minor": 1, "device": "sda1", "fstype": "ext4", "source": "/dev/sda1", "used_bytes": 10, "available_bytes": 20},
+        {"major": 0, "minor": 30, "device": None, "fstype": "vfat", "source": "é", "used_bytes": 1.5, "available_bytes": None}]})
+    out += observation("wifi", "wifi", t, MS, {"scope": {"id": "netns:1"}, "interfaces": [
+        {"name": "wlan0", "ifindex": 3, "connected": True, "signal_dbm": -60},
+        {"name": "wlan1", "ifindex": 4, "connected": False, "signal_dbm": -70},
+        {"name": "wlan2", "ifindex": None, "connected": True, "signal_dbm": -50}]})
+    out += observation("battery", "battery", t, MS, {"batteries": [
+        {"name": "BAT0", "percent": 80, "charge_now_uah": None, "energy_now_uwh": 1000, "power_uw": None}]})
+    out += observation("probe", "probe", t, MS, {"targets": [
+        {"address": "192.0.2.1", "port": 22, "connect_ms": 1.25}, {"address": "2001:db8::1", "port": 443, "connect_ms": None}]})
+    out += observation("storage started before its last one: ignored", "storage", t - S, MS, {"filesystems": [
+        {"major": 8, "minor": 1, "device": "sda1", "fstype": "ext4", "source": "/dev/sda1", "used_bytes": 99, "available_bytes": 1}]})
+    out.append(http("observation series", t + 2 * S, "/api/history?prefix=observation"))
+    out += observation("wifi taking longer than 3 intervals: nulls", "wifi", t + 5 * S, 16 * S, {"scope": {"id": "netns:1"},
+                       "interfaces": [{"name": "wlan0", "ifindex": 3, "connected": True, "signal_dbm": -61}]})
+    out += observation("battery in error: nulls", "battery", t + 61 * S, MS, None, notes=[("BAT0", "io_error")], values=0)
+    out.append(http("observation series and their intervals", t + 62 * S, "/api/history?prefix=observation"))
+    t += 70 * S
+    out += collection("70 s later: expired series dropped", t, 10 * MS, stats_hist(t, 9, temps=70, cpus=4))
+    out.append(http("70 temperatures: the limit, by priority", t + 1, "/api/history?points=2"))
+    out += collection("8 CPUs: core drops its own least important", t + S, 10 * MS, stats_hist(t + S, 10, temps=70, cpus=8))
+    out.append(http("dropped counted once each", t + S + 1, "/api/history?points=1&prefix=cpu"))
+    out += collection("two new temperatures listed first: the kept ones keep their slots", t + 2 * S, 10 * MS,
+                      stats_hist(t + 2 * S, 11, temps=70, cpus=8, first=("a0", "a1")))
+    out.append(http("no slot taken by the newcomers", t + 2 * S + 1, "/api/history?points=1&prefix=temperature"))
+    for label, q in [("unknown field", "x=1"), ("repeated", "points=1&points=2"), ("four fields", "a&b&c&d"),
+                     ("seconds 0", "seconds=0"), ("seconds past retention", "seconds=60.5"), ("seconds nan", "seconds=nan"),
+                     ("seconds with underscores", "seconds=1_0"), ("seconds _1", "seconds=_1"), ("points 601", "points=601"),
+                     ("points +5", "points=+5"), ("points empty", "points="), ("points not a number", "points=x"),
+                     ("prefix of 129", "prefix=" + "a" * 129), ("prefix of 128", "prefix=" + "a" * 128),
+                     ("seconds with spaces", "seconds=%201%20"), ("blank fields", "&&points=2")]:
+        out.append(http(f"query: {label}", t + 2 * S, f"/api/history?{q}"))
+    return out
+
+
+def replay_steps():
+    """Core and slow publications into Replay, read through each side's real /api/samples."""
+    out, t = [setup(slow=[("storage", 30.0), ("wifi", 5.0)], replay=(30.0, 15000))], T0
+    for n in range(5):
+        out += collection(f"core {n + 1}", t, 20 * MS + n, good(t, n))
+        t += S
+    out += [http("from the start", t, "/api/samples"),
+            http("a page of 2", t, "/api/samples?limit=2"),
+            http("after 2", t, f"/api/samples?after=2&instance_id={INSTANCE}&limit=2"),
+            http("at the latest", t, f"/api/samples?after=5&instance_id={INSTANCE}"),
+            http("ahead of it", t, f"/api/samples?after=6&instance_id={INSTANCE}"),
+            http("another instance", t, "/api/samples?instance_id=x"),
+            http("after without an instance", t, "/api/samples?after=1")]
+    for label, q in [("limit 0", "limit=0"), ("limit 101", "limit=101"), ("limit x", "limit=x"), ("limit 0100", "limit=0100"),
+                     ("after -1", "after=-1"), ("after 01", f"after=01&instance_id={INSTANCE}"), ("after 2^63", f"after=9223372036854775808&instance_id={INSTANCE}"),
+                     ("after empty", "after="), ("unknown", "x=1"), ("repeated", "limit=1&limit=2"), ("five fields", "a&b&c&d&e"),
+                     ("group on the core stream", "group=storage"), ("instance of 129", "instance_id=" + "i" * 129),
+                     ("instance empty", "instance_id=")]:
+        out.append(http(f"query: {label}", t, f"/api/samples?{q}"))
+    out += collection("failed", t, 10 * MS, {"error": "x"})
+    out += collection("too slow", t + S, 6 * S, good(t + S, 9))
+    t += 8 * S
+    out += collection("recovered: gap_before", t, 10 * MS, good(t, 6))
+    big = good(t + S, 7)
+    big["stats"]["blob"] = "x" * 50000
+    out += collection("larger than max_bytes: not kept", t + S, 10 * MS, big)
+    out.append(http("its id is known: latest and a missing range", t + S + 20 * MS, f"/api/samples?after=6&instance_id={INSTANCE}"))
+    t += 2 * S
+    out += collection("after it", t, 10 * MS, good(t, 8))
+    out += observation("storage", "storage", t, MS, {"filesystems": [{"mount": "/", "nom": "é"}]})
+    out += observation("wifi partial", "wifi", t, MS, {"connected": None}, notes=[("wlan0", "io_error")])
+    out += [http("capacity evicted the oldest; the big one is missing", t + S, "/api/samples"),
+            http("storage", t + S, "/api/observation-samples?group=storage"),
+            http("wifi, 20 s later: stale", t + 20 * S, f"/api/observation-samples?group=wifi&instance_id={INSTANCE}"),
+            http("no such group stream", t + S, "/api/observation-samples?group=probe"),
+            http("not a group", t + S, "/api/observation-samples?group=disk"),
+            http("no group", t + S, "/api/observation-samples"),
+            http("core 25 s later: stale", t + 25 * S, f"/api/samples?after=7&instance_id={INSTANCE}"),
+            http("all expired: the cursor still moves on", t + 60 * S, f"/api/samples?after=3&instance_id={INSTANCE}")]
+    return out
+
+
+def replay_off_steps():
+    return [setup(), *collection("one", T0, MS, good(T0)),
+            http("replay off", T0 + S, "/api/samples"), http("history off", T0 + S, "/api/history"),
+            http("status with levels", T0 + S, "/api/status"), http("stats", T0 + S, "/api/stats"),
+            http("observations", T0 + S, "/api/observations"), http("unknown", T0 + S, "/x"),
+            http("HEAD", T0 + S, None, "HEAD /api/status HTTP/1.0\r\n\r\n")]
+
+
+SCENARIOS = {"core": core_steps, "provenance": provenance_steps, "observations": observation_steps,
+             "history": history_steps, "replay": replay_steps, "features_off": replay_off_steps}
 
 
 # --- comparing -----------------------------------------------------------------------------------------
 
+def unstamped(response):
+    """An HTTP answer without its Date and Server headers, which differ by design, and without the markup of
+    an error page and its length, which differ between Python versions (the status line, with the
+    error's message, stays)."""
+    head, sep, body = response.partition("\r\n\r\n")
+    if not head.startswith("HTTP/"):
+        return response
+    lines = [h for h in head.split("\r\n") if not h.startswith(("Date: ", "Server: "))]
+    if "Content-Type: text/html;charset=utf-8" in lines:
+        lines = [h for h in lines if not h.startswith("Content-Length: ")]
+        body = "<error page>" if body else ""
+    return "\r\n".join(lines) + sep + body
+
+
 def show(name, a, b, out):
     """The first differences of two JSON texts, by pointer when both parse."""
     try:
-        x, y = json.loads(a), json.loads(b)
+        x, y = json.loads(a.partition("\r\n\r\n")[2] or a), json.loads(b.partition("\r\n\r\n")[2] or b)
     except (TypeError, ValueError):
         out.append(f"/{name}: {a!r:.200} (python) != {b!r:.200} (rust)")
         return
@@ -297,8 +460,9 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
                 out.append(f"answers {json.dumps(a)[:120]} (python) != {json.dumps(b)[:120]} (rust)")
             else:
                 for k in a:
-                    if a[k] != b[k]:
-                        show(k, a[k], b[k], out)
+                    x, y = (unstamped(a[k]), unstamped(b[k])) if k == "response" else (a[k], b[k])
+                    if x != y:
+                        show(k, x, y, out)
         if not out:
             equal += 1
         report.append(f"  {i + 1}. {label}: " + ("OK" if not out else f"{len(out)} DIFFERENCES"))

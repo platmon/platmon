@@ -8,9 +8,14 @@ can be taken while one runs, and they nest (an observation inside a collection) 
 
   PYTHONPATH=<platmon tree> python3 runtime_py.py"""
 import json
+import socket
 import sys
+import threading
 
 from collector.record import Collected
+from frontends.server import BoundedHTTPServer, make_handler
+from runtime.history import History
+from runtime.replay import Replay
 from runtime.sampler import Sampler
 from runtime.slow import Observations, Slow
 
@@ -36,7 +41,8 @@ def answer(value):
 
 
 def at(op):
-    now["ns"] = op["now"]
+    if "now" in op:
+        now["ns"] = op["now"]
     if "wall" in op:
         now["wall"] = op["wall"]
 
@@ -98,8 +104,23 @@ def run(op):
         sampler = Sampler(collect, op["interval"], clock=clock, wall=wall)
         sampler.instance_id = op["instance_id"]
         groups = {name: Slow(name, observer(name), interval, elapsed, wall) for name, interval in op.get("slow", [])}
-        state.update(sampler=sampler, groups=groups,
-                     observations=Observations(list(groups.values()), op["instance_id"], clock[1]))
+        observations = Observations(list(groups.values()), op["instance_id"], clock[1])
+        # wired as platmon.py does
+        history = None
+        if op.get("replay"):
+            replay = Replay(sampler.instance_id, elapsed, clock[1], list(groups), op["replay"]["retention"],
+                            op["replay"]["max_bytes"])
+            sampler.replay = replay
+            for g in groups.values():
+                g.replay = replay
+        if op.get("history"):
+            history = History(op["history"]["retention"], op["interval"])
+            sampler.on_publish = history.append
+            for g in groups.values():
+                g.on_publish = history.append_observation
+        httpd = BoundedHTTPServer(("127.0.0.1", 0), make_handler(sampler, False, observations, history, op.get("levels")))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        state.update(sampler=sampler, groups=groups, observations=observations, port=httpd.server_address[1])
         answer({})
     elif kind == "begin":
         at(op)
@@ -116,6 +137,14 @@ def run(op):
     elif kind == "observations":
         at(op)
         answer({"observations": json.dumps(state["observations"].view())})
+    elif kind == "http":
+        at(op)
+        with socket.create_connection(("127.0.0.1", state["port"])) as c:
+            c.sendall(op["request"].encode("latin-1"))
+            data = b""
+            while chunk := c.recv(65536):
+                data += chunk
+        answer({"response": data.decode("utf-8", "replace")})
     else:
         sys.exit(f"runtime_py: {kind} outside a collection or an observation")
 

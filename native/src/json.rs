@@ -62,24 +62,24 @@ impl Value {
     }
 
     pub fn write(&self, out: &mut String, sort_keys: bool) {
-        self.write_styled(out, sort_keys, false)
+        self.write_styled(out, sort_keys, false, false)
     }
 
-    /// py: json.dumps(value) with its defaults (", ", ": ", non-ASCII escaped); else compact UTF-8.
-    pub fn write_styled(&self, out: &mut String, sort_keys: bool, py: bool) {
-        let (item_sep, key_sep) = if py { (", ", ": ") } else { (",", ":") };
+    /// spaced: json.dumps' default separators (", ", ": "), else compact; ascii: its ensure_ascii.
+    pub fn write_styled(&self, out: &mut String, sort_keys: bool, spaced: bool, ascii: bool) {
+        let (item_sep, key_sep) = if spaced { (", ", ": ") } else { (",", ":") };
         match self {
             Value::Null => out.push_str("null"),
             Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
             Value::Int(i) => { let _ = write!(out, "{}", i); }
             Value::Big(i) => { let _ = write!(out, "{}", i); }
             Value::Float(f) => write_float(out, *f),
-            Value::Str(s) => write_str(out, s, py),
+            Value::Str(s) => write_str(out, s, ascii),
             Value::Arr(items) => {
                 out.push('[');
                 for (i, v) in items.iter().enumerate() {
                     if i > 0 { out.push_str(item_sep); }
-                    v.write_styled(out, sort_keys, py);
+                    v.write_styled(out, sort_keys, spaced, ascii);
                 }
                 out.push(']');
             }
@@ -91,9 +91,9 @@ impl Value {
                 out.push('{');
                 for (i, (k, v)) in refs.into_iter().enumerate() {
                     if i > 0 { out.push_str(item_sep); }
-                    write_str(out, k, py);
+                    write_str(out, k, ascii);
                     out.push_str(key_sep);
-                    v.write_styled(out, sort_keys, py);
+                    v.write_styled(out, sort_keys, spaced, ascii);
                 }
                 out.push('}');
             }
@@ -109,14 +109,31 @@ impl Value {
     /// json.dumps(self)
     pub fn to_py(&self) -> String {
         let mut s = String::new();
-        self.write_styled(&mut s, false, true);
+        self.write_styled(&mut s, false, true, true);
         s
+    }
+
+    /// json.dumps(self, separators=(",", ":")): compact, non-ASCII escaped
+    pub fn to_py_compact(&self) -> String {
+        let mut s = String::new();
+        self.write_styled(&mut s, false, false, true);
+        s
+    }
+
+    /// Whether every float in it is finite (json.dumps(allow_nan=False) accepts it).
+    pub fn finite(&self) -> bool {
+        match self {
+            Value::Float(f) => f.is_finite(),
+            Value::Arr(items) => items.iter().all(Value::finite),
+            Value::Obj(items) => items.iter().all(|(_, v)| v.finite()),
+            _ => true,
+        }
     }
 
     /// One `"key": value` member as json.dumps writes it inside an object.
     pub fn write_member(out: &mut String, key: &str, value: &Value) {
         Value::write_key(out, key);
-        value.write_styled(out, false, true);
+        value.write_styled(out, false, true, true);
     }
 
     /// `"key": ` as json.dumps writes it before a member's value.

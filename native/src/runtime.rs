@@ -47,6 +47,11 @@ pub struct Record {
     head: String,
     /// "collectors" (core first) and "sensor_meta", the same way
     tail: String,
+    /// the same as values, for history and replay: the stats (with collectors as collected), the
+    /// snapshot's collectors and sensor_meta
+    pub stats: Value,
+    collectors: Value,
+    pub meta: Value,
 }
 
 impl Record {
@@ -90,6 +95,10 @@ pub struct Sampler {
     state: Mutex<State>,
     ready: Condvar,
     provenance_problem: Mutex<Option<String>>,
+    /// the elapsed clock, for what history and replay are given after a publication
+    pub clock: Box<dyn Fn() -> i64 + Send + Sync>,
+    pub history: Option<Arc<crate::history::History>>,
+    pub replay: Option<Arc<crate::replay::Replay>>,
     /// tests: runs inside the serialization of a record, to show that readers are not held up meanwhile
     #[cfg(test)]
     pub during_build: Mutex<Option<Box<dyn FnMut() + Send>>>,
@@ -103,7 +112,8 @@ impl Sampler {
     pub fn new(interval: f64, stale_after: Option<f64>, instance_id: String, clock_source: &'static str) -> Sampler {
         let stale_after = stale_after.unwrap_or((3.0 * interval).max(5.0));
         Sampler { interval, instance_id, clock_source, stale_ns: seconds_ns(stale_after), state: Mutex::default(),
-                  ready: Condvar::new(), provenance_problem: Mutex::new(None),
+                  ready: Condvar::new(), provenance_problem: Mutex::new(None), clock: Box::new(metadata::clock),
+                  history: None, replay: None,
                   #[cfg(test)]
                   during_build: Mutex::new(None) }
     }
@@ -147,11 +157,12 @@ impl Sampler {
             }
             Ok(col) => {
                 let (stats, meta, oldest) = self.prepare(col, same_clock, started, completed);
-                prepared = Some(Arc::new(self.build(&stats, meta, oldest, started_at, completed_at, started, completed)));
+                prepared = Some(Arc::new(self.build(stats, meta, oldest, started_at, completed_at, started, completed)));
             }
         }
         let mut st = self.state.lock().unwrap();
         st.collecting_since = None;
+        let gap_before = st.failures > 0;
         st.failures = if reason.is_none() { 0 } else { st.failures + 1 };
         st.attempt = Some(Attempt { reason, completed_at, duration_ns: duration, consecutive_failures: st.failures });
         let record = prepared?;
@@ -161,6 +172,17 @@ impl Sampler {
         self.ready.notify_all();
         drop(st);
         drop(replaced); // its last reference may go here: not under the lock
+        // after publishing, outside the lock, as Python's _attempt: replay, then history
+        if let Some(replay) = &self.replay {
+            let data = self.snapshot_value(&publication, completed);
+            if let Err(e) = replay.append("core", publication.sequence, started, completed, &data, gap_before, &self.clock) {
+                eprintln!("platmon: replay append failed: {}", e);
+            }
+        }
+        if let Some(history) = &self.history {
+            let r = &publication.record;
+            history.append(publication.sequence, started, &r.stats, &r.meta, gap_before);
+        }
         Some(publication)
     }
 
@@ -238,18 +260,7 @@ impl Sampler {
     /// stored collectors and sensor_meta.
     pub fn snapshot(&self, p: &Publication, now: i64) -> String {
         let r = &p.record;
-        let mut s = Value::obj();
-        s.set("instance_id", self.instance_id.as_str().into());
-        s.set("sequence", p.sequence.into());
-        s.set("started_at", r.started_at.into());
-        s.set("completed_at", r.completed_at.into());
-        s.set("duration_ms", ms(r.completed - r.started).into());
-        s.set("age_ms", ms(now - r.completed).into());
-        s.set("cycle_age_ms", ms(now - r.started).into());
-        s.set("data_age_ms", ms(now - r.basis()).into());
-        s.set("data_age_basis", r.basis_name().into());
-        s.set("interval_ms", ms(seconds_ns(self.interval)).into());
-        s.set("stale_after_ms", ms(self.stale_ns).into());
+        let s = self.sample(p, now);
         let mut out = String::with_capacity(r.head.len() + r.tail.len() + 400);
         out.push('{');
         out.push_str(&r.head);
@@ -264,25 +275,57 @@ impl Sampler {
         out.push('}');
         out
     }
+
+    /// The same snapshot as a value (what replay keeps of it).
+    pub fn snapshot_value(&self, p: &Publication, now: i64) -> Value {
+        let r = &p.record;
+        let mut items: Vec<(String, Value)> = match &r.stats {
+            Value::Obj(items) => items.iter().filter(|(k, _)| k != "collectors").cloned().collect(),
+            _ => vec![],
+        };
+        items.push(("schema_version".into(), SCHEMA_VERSION.into()));
+        items.push(("sample".into(), self.sample(p, now)));
+        items.push(("collectors".into(), r.collectors.clone()));
+        items.push(("sensor_meta".into(), r.meta.clone()));
+        Value::Obj(items)
+    }
+
+    fn sample(&self, p: &Publication, now: i64) -> Value {
+        let r = &p.record;
+        let mut s = Value::obj();
+        s.set("instance_id", self.instance_id.as_str().into());
+        s.set("sequence", p.sequence.into());
+        s.set("started_at", r.started_at.into());
+        s.set("completed_at", r.completed_at.into());
+        s.set("duration_ms", ms(r.completed - r.started).into());
+        s.set("age_ms", ms(now - r.completed).into());
+        s.set("cycle_age_ms", ms(now - r.started).into());
+        s.set("data_age_ms", ms(now - r.basis()).into());
+        s.set("data_age_basis", r.basis_name().into());
+        s.set("interval_ms", ms(seconds_ns(self.interval)).into());
+        s.set("stale_after_ms", ms(self.stale_ns).into());
+        s
+    }
 }
 
 impl Sampler {
     /// The record of a collection whose records were checked: its members serialized once.
     #[allow(clippy::too_many_arguments)]
-    fn build(&self, stats: &Value, meta: Value, oldest: Option<i64>, started_at: f64, completed_at: f64,
+    fn build(&self, stats: Value, meta: Value, oldest: Option<i64>, started_at: f64, completed_at: f64,
              started: i64, completed: i64) -> Record {
-        let (head, tail, unreadable) = serialize(stats, &meta);
+        let (head, tail, unreadable, collectors) = serialize(&stats, &meta);
         #[cfg(test)]
         if let Some(hook) = self.during_build.lock().unwrap().as_mut() {
             hook();
         }
-        Record { started_at, completed_at, started, completed, oldest_read: oldest, unreadable, head, tail }
+        Record { started_at, completed_at, started, completed, oldest_read: oldest, unreadable, head, tail, stats,
+                 collectors, meta }
     }
 }
 
 /// (head, tail, unreadable) of a record: the stats' members but collectors; collectors (core first) and
 /// sensor_meta; whether an optional group of these stats is partial or error.
-fn serialize(stats: &Value, meta: &Value) -> (String, String, bool) {
+fn serialize(stats: &Value, meta: &Value) -> (String, String, bool, Value) {
     let mut head = String::new();
     let mut optional = Value::obj();
     if let Value::Obj(items) = stats {
@@ -318,7 +361,7 @@ fn serialize(stats: &Value, meta: &Value) -> (String, String, bool) {
     Value::write_member(&mut tail, "collectors", &collectors);
     tail.push_str(", ");
     Value::write_member(&mut tail, "sensor_meta", meta);
-    (head, tail, unreadable)
+    (head, tail, unreadable, collectors)
 }
 
 fn is_number(v: &Value) -> bool {

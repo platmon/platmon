@@ -4,11 +4,11 @@
 //! headers (per read, as Python's socket timeout), 10 s without progress per response write.
 //! Contract: docs/reference/api.md.
 //!
-//! Step 3A: /api/stats, /api/status, /api/observations and the web page. /api/history, /api/samples and
-//! /api/observation-samples answer as the Python server does with history and replay off; /text (the
-//! platmon command's screen) is not ported and is a 404.
+//! /api/stats, /api/status, /api/observations, /api/history, /api/samples, /api/observation-samples and
+//! the web page. /text (the platmon command's screen) is not ported yet and is a 404.
 use crate::json::Value;
 use crate::metadata;
+use crate::replay::Refused;
 use crate::runtime::Sampler;
 use crate::slow::Observations;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -29,6 +29,8 @@ const WEB: [(&str, &str, &str); 7] = [
     ("/assets/brand/platmon-icon-dark.svg", "assets/brand/platmon-icon-dark.svg", "image/svg+xml"),
     ("/assets/brand/favicon.svg", "assets/brand/favicon.svg", "image/svg+xml"),
 ];
+const MAX_POINTS: usize = 600;
+const MAX_PREFIX: usize = 128;
 const MAX_LINE: usize = 65536; // http.client._MAXLINE, and the request line's limit
 const MAX_HEADERS: usize = 100;
 const WRITE_CHUNK: usize = 64 * 1024;
@@ -46,6 +48,8 @@ pub struct Server {
     pub max_connections: usize,
     /// how long /api/stats waits for the first snapshot
     pub first_wait: Duration,
+    /// the elapsed clock answers are aged on (the runtime script sets its own)
+    pub clock: fn() -> i64,
     active: AtomicUsize,
 }
 
@@ -98,6 +102,7 @@ fn phrase(code: u16) -> (&'static str, &'static str) {
         200 => ("OK", "Request fulfilled, document follows"),
         400 => ("Bad Request", "Bad request syntax or unsupported method"),
         404 => ("Not Found", "Nothing matches the given URI"),
+        409 => ("Conflict", "Request conflict"),
         414 => ("URI Too Long", "URI is too long."), // RFC 9110's name, Python 3.13+ (3.10: Request-URI Too Long)
         431 => ("Request Header Fields Too Large", "The server refused this request because the request header fields are too large."),
         501 => ("Not Implemented", "Server does not support this operation"),
@@ -191,7 +196,7 @@ fn read_line(r: &mut impl BufRead, limit: usize) -> std::io::Result<Vec<u8>> {
 impl Server {
     pub fn new(sampler: Arc<Sampler>, observations: Arc<Observations>, web: Option<String>, version: String, levels: Value) -> Server {
         Server { sampler, observations, web, version, levels, request_timeout: Duration::from_secs(10),
-                 write_timeout: Duration::from_secs(10), max_connections: 32, first_wait: Duration::from_secs(5),
+                 write_timeout: Duration::from_secs(10), max_connections: 32, first_wait: Duration::from_secs(5), clock: metadata::clock,
                  active: AtomicUsize::new(0) }
     }
 
@@ -276,20 +281,39 @@ impl Server {
     }
 
     fn get(&self, x: &mut Exchange, full: &str) -> std::io::Result<()> {
-        let path = full.split('?').next().unwrap_or("");
-        if path == "/api/samples" || path == "/api/observation-samples" { // replay is not in step 3A: as when it is off
-            return x.reply(path, 404, br#"{"code":"replay_unavailable"}"#, "application/json");
+        let (path, query) = full.split_once('?').unwrap_or((full, ""));
+        if path == "/api/samples" || path == "/api/observation-samples" {
+            let (code, body) = self.replay_answer(query, path == "/api/observation-samples");
+            return x.reply(path, code, body.as_bytes(), "application/json");
+        }
+        if let (Some(history), "/api/history") = (&self.sampler.history, path) { // read-only, bounded; never collects
+            let Ok((prefix, seconds, points)) = history_query(history.retention, query) else {
+                return x.error(400, Some(&format!("prefix (at most 128 characters), seconds (up to the retention) and points (1 to {}) only", MAX_POINTS)));
+            };
+            let (series, dropped) = history.view((self.clock)(), &prefix, Some(seconds), points);
+            let intervals = history.intervals();
+            let mut body = Value::obj();
+            body.set("schema_version", 1i64.into());
+            body.set("instance_id", self.sampler.instance_id.as_str().into());
+            body.set("retention_s", history.retention.into());
+            body.set("interval_ms", crate::json::round_to(self.sampler.interval * 1000.0, 3).into());
+            body.set("dropped_series", (dropped as i64).into());
+            let intervals = Value::Obj(intervals.into_iter().filter(|(sid, _)| series.contains(sid))
+                .map(|(sid, ms)| (sid, ms.into())).collect());
+            body.set("series", series);
+            body.set("series_intervals_ms", intervals);
+            return x.reply(path, 200, body.to_py().as_bytes(), "application/json");
         }
         match full {
             "/api/status" => { // never waits for the first snapshot; 200 even when not ready
-                let (_, mut status) = self.sampler.view(metadata::clock);
+                let (_, mut status) = self.sampler.view(self.clock);
                 status.set("levels", self.levels.clone());
                 x.reply(full, 200, status.to_py().as_bytes(), "application/json")
             }
-            "/api/observations" => x.reply(full, 200, self.observations.view(metadata::clock).as_bytes(), "application/json"),
+            "/api/observations" => x.reply(full, 200, self.observations.view(self.clock).to_py().as_bytes(), "application/json"),
             "/api/stats" => {
                 self.sampler.wait_ready(self.first_wait);
-                match self.sampler.view(metadata::clock) {
+                match self.sampler.view(self.clock) {
                     (Some(stats), _) => x.reply(full, 200, stats.as_bytes(), "application/json"),
                     (None, status) => { // the last good sample's identity and age, never its values
                         let mut body = Value::obj();
@@ -315,6 +339,127 @@ impl Server {
             },
         }
     }
+}
+
+impl Server {
+    /// /api/samples and /api/observation-samples: (status code, compact JSON body), as server.py.
+    fn replay_answer(&self, query: &str, observation: bool) -> (u16, String) {
+        let compact = |pairs: &[(&str, Value)]| Value::Obj(pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()).to_py_compact();
+        let unavailable = || (404, compact(&[("code", "replay_unavailable".into())]));
+        let Some(replay) = &self.sampler.replay else { return unavailable() };
+        let (stream, instance_id, after, limit) = match replay_query(query, observation) {
+            Ok(q) => q,
+            Err(e) => return (400, compact(&[("code", "invalid_query".into()), ("error", e.into())])),
+        };
+        match replay.view(&stream, instance_id.as_deref(), after, limit, self.clock) {
+            Ok(body) => (200, body),
+            Err(Refused::Cursor(code)) => (409, compact(&[("code", code.into()), ("instance_id", self.sampler.instance_id.as_str().into())])),
+            Err(Refused::Invalid(e)) => (400, compact(&[("code", "invalid_query".into()), ("error", e.into())])),
+            Err(Refused::NoStream) => unavailable(),
+        }
+    }
+}
+
+/// urllib.parse.unquote: %XX runs decoded as UTF-8 (invalid bytes replaced), everything else kept.
+fn unquote(s: &str) -> String {
+    let (mut out, mut bytes) = (String::new(), Vec::new());
+    let mut chars = s.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let hex = s.get(i + 1..i + 3).filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()));
+        if let (Some(h), '%') = (hex, c) {
+            bytes.push(u8::from_str_radix(h, 16).unwrap());
+            chars.next();
+            chars.next();
+            continue;
+        }
+        out.push_str(&String::from_utf8_lossy(&std::mem::take(&mut bytes)));
+        out.push(c);
+    }
+    out.push_str(&String::from_utf8_lossy(&bytes));
+    out
+}
+
+/// urllib.parse.parse_qs(query, keep_blank_values=True, max_num_fields=max): {name: [values]} in order.
+fn parse_qs(query: &str, max: usize) -> Result<Vec<(String, Vec<String>)>, String> {
+    if !query.is_empty() && 1 + query.matches('&').count() > max {
+        return Err("Max number of fields exceeded".into());
+    }
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for field in query.split('&').filter(|f| !f.is_empty()) {
+        let (n, v) = field.split_once('=').unwrap_or((field, ""));
+        let (n, v) = (unquote(&n.replace('+', " ")), unquote(&v.replace('+', " ")));
+        match out.iter_mut().find(|(k, _)| *k == n) {
+            Some(slot) => slot.1.push(v),
+            None => out.push((n, vec![v])),
+        }
+    }
+    Ok(out)
+}
+
+fn one<'a>(q: &'a [(String, Vec<String>)], key: &str) -> Option<&'a str> {
+    q.iter().find(|(k, _)| k == key).map(|(_, v)| v[0].as_str())
+}
+
+const PY_SPACE: fn(char) -> bool = crate::sysfs::py_space;
+
+/// Python's float(text) for the forms a query gives: surrounding whitespace, a sign, digits with single
+/// underscores between them, inf and nan.
+fn py_float(text: &str) -> Option<f64> {
+    let t = text.trim_matches(PY_SPACE);
+    let b = t.as_bytes();
+    let between_digits = |i: usize| i > 0 && b[i - 1].is_ascii_digit() && b.get(i + 1).is_some_and(u8::is_ascii_digit);
+    if (0..b.len()).any(|i| b[i] == b'_' && !between_digits(i)) {
+        return None;
+    }
+    t.replace('_', "").parse().ok()
+}
+
+/// server.history_query: (prefix, seconds, points), bounded.
+fn history_query(retention: f64, query: &str) -> Result<(String, f64, usize), ()> {
+    let q = parse_qs(query, 3).map_err(|_| ())?;
+    if q.iter().any(|(k, v)| !["prefix", "seconds", "points"].contains(&k.as_str()) || v.len() != 1) {
+        return Err(());
+    }
+    let prefix = one(&q, "prefix").unwrap_or("").to_string();
+    let seconds = match one(&q, "seconds") { Some(t) => py_float(t).ok_or(())?, None => retention };
+    let points = match one(&q, "points") { Some(t) => metadata::py_int(t).ok_or(())?, None => 300 };
+    if prefix.chars().count() > MAX_PREFIX || !(0.0 < seconds && seconds <= retention) || !(0 < points && points <= MAX_POINTS as i64) {
+        return Err(());
+    }
+    Ok((prefix, seconds, points as usize))
+}
+
+/// server.replay_query: (stream, instance_id, after, limit), strict and bounded.
+fn replay_query(query: &str, observation: bool) -> Result<(String, Option<String>, i64, i64), String> {
+    let q = parse_qs(query, 4)?;
+    let allowed: &[&str] = if observation { &["instance_id", "after", "limit", "group"] } else { &["instance_id", "after", "limit"] };
+    if q.iter().any(|(k, v)| !allowed.contains(&k.as_str()) || v.len() != 1) {
+        return Err("unknown or repeated query field".into());
+    }
+    let instance_id = one(&q, "instance_id").map(str::to_string);
+    let (after, limit) = (one(&q, "after").unwrap_or("0"), one(&q, "limit").unwrap_or("100"));
+    let decimal = |t: &str, n: usize| !t.is_empty() && t.len() <= n && t.bytes().all(|b| b.is_ascii_digit());
+    if !decimal(after, 19) {
+        return Err("after must be a nonnegative integer".into());
+    }
+    if !decimal(limit, 3) {
+        return Err("invalid limit".into());
+    }
+    let (after, limit): (u64, i64) = (after.parse().unwrap(), limit.parse().unwrap());
+    if after > i64::MAX as u64 || !(1..=crate::replay::MAX_LIMIT).contains(&limit) {
+        return Err("cursor or limit out of range".into());
+    }
+    if instance_id.as_ref().is_some_and(|i| !(1..=128).contains(&i.chars().count())) {
+        return Err("invalid instance_id".into());
+    }
+    if after > 0 && instance_id.is_none() {
+        return Err("instance_id is required when after > 0".into());
+    }
+    let stream = if observation { one(&q, "group").unwrap_or("").to_string() } else { "core".into() };
+    if observation && !crate::history::OBSERVED.contains(&stream.as_str()) {
+        return Err("group must be storage, wifi, battery or probe".into());
+    }
+    Ok((stream, instance_id, after as i64, limit))
 }
 
 /// repr() of a str: in single quotes unless it holds one and no double quote.

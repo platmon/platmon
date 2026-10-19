@@ -20,11 +20,13 @@ mod accel;
 #[cfg(feature = "cache-alloc")]
 mod alloc;
 mod common;
+mod history;
 mod http;
 mod jetson;
 mod json;
 mod metadata;
 mod passive;
+mod replay;
 mod runtime;
 mod sha256;
 mod slow;
@@ -435,7 +437,7 @@ extern "C" fn on_term(_: libc::c_int) {
 }
 
 /// platmon.py with [core] interval and [http] from the options, the rest at its defaults except the slow
-/// groups, history and replay, which step 3A does not have.
+/// groups, which are not ported yet.
 fn serve(args: &[String]) {
     let (mut interval, mut bind, mut port, mut web, mut version) = (1.0f64, "0.0.0.0".to_string(), 9797u16, None, "0.0.0".to_string());
     let mut it = args.iter();
@@ -455,7 +457,11 @@ fn serve(args: &[String]) {
     let mut c = Collector::new((3.0 * interval).max(5.0));
     println!("platmon-native: platform {}, version {} (step 3A runtime)", c.platform, version);
     let source = metadata::clock_source();
-    let sampler = std::sync::Arc::new(runtime::Sampler::new(interval, None, runtime::uuid4(), source));
+    let mut sampler = runtime::Sampler::new(interval, None, runtime::uuid4(), source);
+    // [history] and [replay] at their defaults (on, 600 s, 16 MiB of replay payload)
+    sampler.history = Some(std::sync::Arc::new(history::History::new(600.0, interval)));
+    sampler.replay = Some(std::sync::Arc::new(replay::Replay::new(sampler.instance_id.clone(), source, &[], 600.0, 16 << 20)));
+    let sampler = std::sync::Arc::new(sampler);
     let observations = std::sync::Arc::new(slow::Observations { groups: vec![], instance_id: sampler.instance_id.clone(),
                                                                 clock_source: source });
     let levels = default_levels(c.platform);
@@ -491,9 +497,19 @@ fn text<'a>(op: &'a Value, key: &str) -> &'a str {
     }
 }
 
+static SCRIPT_NOW: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// The runtime script's elapsed clock: the time its last operation gave.
+fn script_now() -> i64 {
+    SCRIPT_NOW.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// The runtime script (tools/runtime_fixture.py; tools/runtime_py.py is the Python side). One JSON
-/// operation per line, one JSON line out for each:
-///   {"op": "setup", "interval", "instance_id", "clock", "slow": [[name, interval], ...]}
+/// operation per line, one JSON line out for each; every "now" also sets the clock that history, replay
+/// and the HTTP answers read:
+///   {"op": "setup", "interval", "instance_id", "clock", "slow": [[name, interval], ...], "levels",
+///    "history": {"retention"} or null, "replay": {"retention", "max_bytes"} or null}
+///                                             also starts the HTTP server on 127.0.0.1 (web off)
 ///   {"op": "begin", "wall", "now"}            a collection starts
 ///   {"op": "finish", "wall", "now", "result", "clock"}  it ends: result is Collected.to_value()'s shape or
 ///                                             {"error": ...}; clock "other": its spans are on another clock
@@ -501,34 +517,64 @@ fn text<'a>(op: &'a Value, key: &str) -> &'a str {
 ///   {"op": "slow_begin", "group", "wall", "now"}
 ///   {"op": "slow_finish", "group", "now", "wall", "data", "notes": [[target, reason]], "values", "raise"}
 ///   {"op": "observations", "now"}             -> {"observations": the /api/observations JSON}
+///   {"op": "http", "now", "request"}          -> {"response": the raw answer to that raw request}
 fn runtime_script() {
-    use std::io::BufRead;
-    let mut sampler: Option<runtime::Sampler> = None;
-    let mut groups: Vec<std::sync::Arc<slow::Slow>> = vec![];
-    let mut obs: Option<slow::Observations> = None;
+    use std::io::{BufRead, Read, Write};
+    use std::sync::Arc;
+    let mut sampler: Option<Arc<runtime::Sampler>> = None;
+    let mut groups: Vec<Arc<slow::Slow>> = vec![];
+    let mut obs: Option<Arc<slow::Observations>> = None;
+    let mut port = 0;
     let (mut begun, mut slow_begun) = ((0.0, 0), vec![]);
+    let set_now = |op: &Value| SCRIPT_NOW.store(integer(op, "now"), std::sync::atomic::Ordering::SeqCst);
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap_or_default();
         let op = json::parse(&line).unwrap_or_else(|e| { eprintln!("runtime-script: {}: {:?}", e, line); std::process::exit(2) });
         let group = |op: &Value| groups.iter().position(|g| g.name == text(op, "group"))
             .unwrap_or_else(|| { eprintln!("runtime-script: no group {:?}", op.get("group")); std::process::exit(2) });
         let mut out = Value::obj();
+        if op.contains("now") {
+            set_now(&op);
+        }
         match text(&op, "op") {
             "setup" => {
                 let source: &'static str = if text(&op, "clock") == "boottime" { "boottime" } else { "monotonic" };
-                sampler = Some(runtime::Sampler::new(number(&op, "interval"), None, text(&op, "instance_id").into(), source));
-                groups = match op.get("slow") {
+                let id: String = text(&op, "instance_id").into();
+                let interval = number(&op, "interval");
+                let names: Vec<(String, f64)> = match op.get("slow") {
                     Some(Value::Arr(items)) => items.iter().map(|g| match (g.get_index(0), g.get_index(1)) {
-                        (Some(Value::Str(name)), Some(Value::Int(_) | Value::Float(_))) => {
-                            let interval = match g.get_index(1) { Some(Value::Int(i)) => *i as f64, Some(Value::Float(f)) => *f, _ => unreachable!() };
-                            std::sync::Arc::new(slow::Slow::new(name, interval))
-                        }
+                        (Some(Value::Str(name)), Some(Value::Int(i))) => (name.clone(), *i as f64),
+                        (Some(Value::Str(name)), Some(Value::Float(f))) => (name.clone(), *f),
                         _ => { eprintln!("runtime-script: slow is [[name, interval], ...]"); std::process::exit(2) }
                     }).collect(),
                     _ => vec![],
                 };
+                let history = op.get("history").filter(|h| !h.is_null())
+                    .map(|h| Arc::new(history::History::new(number(h, "retention"), interval)));
+                let group_names: Vec<&str> = names.iter().map(|(n, _)| n.as_str()).collect();
+                let replay = op.get("replay").filter(|r| !r.is_null()).map(|r| Arc::new(replay::Replay::new(
+                    id.clone(), source, &group_names, number(r, "retention"), integer(r, "max_bytes") as usize)));
+                let mut s = runtime::Sampler::new(interval, None, id.clone(), source);
+                s.clock = Box::new(script_now);
+                s.history = history.clone();
+                s.replay = replay.clone();
+                let s = Arc::new(s);
+                groups = names.iter().map(|(name, interval)| {
+                    let mut g = slow::Slow::new(name, *interval);
+                    g.clock = Box::new(script_now);
+                    g.history = history.clone();
+                    g.replay = replay.clone();
+                    Arc::new(g)
+                }).collect();
                 slow_begun = vec![(0.0, 0); groups.len()];
-                obs = Some(slow::Observations { groups: groups.clone(), instance_id: text(&op, "instance_id").into(), clock_source: source });
+                let o = Arc::new(slow::Observations { groups: groups.clone(), instance_id: id, clock_source: source });
+                let mut srv = http::Server::new(s.clone(), o.clone(), None, "0".into(), op.get("levels").cloned().unwrap_or_default());
+                srv.clock = script_now;
+                let listener = http::bind("127.0.0.1", 0).unwrap_or_else(|e| { eprintln!("runtime-script: {}", e); std::process::exit(1) });
+                port = listener.local_addr().unwrap().port();
+                std::thread::spawn(move || Arc::new(srv).serve(listener));
+                sampler = Some(s);
+                obs = Some(o);
             }
             name => {
                 let Some(s) = sampler.as_ref() else { eprintln!("runtime-script: setup first"); std::process::exit(2) };
@@ -580,7 +626,14 @@ fn runtime_script() {
                     }
                     "observations" => {
                         let now = integer(&op, "now");
-                        out.set("observations", obs.as_ref().unwrap().view(|| now).into());
+                        out.set("observations", obs.as_ref().unwrap().view(|| now).to_py().into());
+                    }
+                    "http" => {
+                        let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).expect("runtime-script: connect");
+                        c.write_all(text(&op, "request").as_bytes()).expect("runtime-script: send");
+                        let mut answer = Vec::new();
+                        let _ = c.read_to_end(&mut answer);
+                        out.set("response", String::from_utf8_lossy(&answer).into_owned().into());
                     }
                     other => { eprintln!("runtime-script: unknown op {:?}", other); std::process::exit(2) }
                 }
