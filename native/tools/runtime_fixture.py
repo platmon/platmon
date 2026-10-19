@@ -405,7 +405,7 @@ def stats_screen(n):
     st = {"model": "NVIDIA Jetson Orin Nano Super", "platform": "Jetson Orin", "power_mode": "MAXN_SUPER" if n % 2 else None,
           "uptime": 93784.9 + n, "system": {"os": "Ubuntu 22.04", "kernel": "5.15", "arch": "aarch64", "hostname": "h",
                                            "l4t": "36.5", "extra": 3, "empty": ""},
-          "cpu": [{"id": i, "usage": [0.0, 12.25, 99.95, 100.0, 0.05][i], "freq": [None, 0, 729600000, 1510400000, 2500][i]}
+          "cpu": [{"id": i, "usage": [0.0, 12.25, 99.95, 100.0, 12.5][i], "freq": [None, 0, 729600000, 1510400000, 2500][i]}
                   for i in range(5)] if n != 2 else [],
           "cpu_sampling": {"mode": "interval", "window_ms": 1000.0,
                            "unavailable": [{"id": 5, "reason": "warmup"}, {"id": 6, "reason": "gap"}, {"id": 7, "reason": "odd"},

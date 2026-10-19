@@ -23,10 +23,11 @@ Ported, with the same output as the Python collector:
   (`/proc/self/net/dev`, the namespace id, ifindex from `if_nameindex`), Disk I/O (`/proc/diskstats`, physical
   disks by their `/sys/block` link) and Pressure (`/proc/pressure`), with their read spans
 
-Not ported: the slow groups (storage, Wi-Fi, battery, probe), the nvidia-smi fallback, and (until step 3)
-everything in `runtime/` (Sampler, history, replay, HTTP). So this is the 1 s core collection used on the
-three hosts checked, extended with Network, Disk I/O and Pressure, with the same output on the fixtures
-defined here; not the whole default collection of the product.
+Not ported in steps 1 and 2: the slow groups (storage, Wi-Fi, battery, probe), the nvidia-smi fallback,
+and everything in `runtime/` (Sampler, history, replay, HTTP). So the collector of steps 1 and 2 is the 1 s
+core collection used on the three hosts checked, extended with Network, Disk I/O and Pressure, with the
+same output on the fixtures defined here; not the whole default collection of the product. Step 3 (below)
+adds the slow groups and `runtime/`; the nvidia-smi fallback is still not ported.
 
 Behaviour kept from Python where bypassing std made it explicit:
 
@@ -67,8 +68,10 @@ same dependency policy (only `libc`); the `cache-alloc` build is not part of ste
 | 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
 | 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
 
-A result without the slow groups is a runtime experiment, not the service: until 3B is done, a comparison
-turns the same features off on both sides.
+Status (2026-10-19, #93): 3A and 3B done; 3C not started. With 3B the candidate has every feature of
+the default configuration on the three hosts compared (x86 PC, Orin, Raspberry Pi), checked against the
+Python service below. Still missing: the nvidia-smi fallback of the GPU (none of the three hosts has
+nvidia-smi; a PC with an NVIDIA card would differ), the `--frontends` option.
 
 **Contracts 3B must keep** (from the Python service and docs/reference): requests never collect; a slow
 group has its own id and times, and a blocked read neither blocks the core nor queues more work for its
@@ -90,7 +93,9 @@ JSON payload budget, not an RSS limit), so memory runs cover at least two retent
 throughout and `smaps_rollup` RSS/PSS at the main points (buffers full, during and after a backlog fetch).
 The collector-only RSS above (0.7–0.9 MiB) is not an estimate of the service's.
 
-**What 3A has** (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`, `platmon-native serve`):
+**What the candidate has** (`platmon-native serve [platmon.ini] --web DIR --app-version V`):
+
+3A (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
 - One writer thread collects every interval. A publication is immutable: its stats (with the passive
   groups' `read` set from the records), `collectors` and `sensor_meta` are serialized once, before it is
   published. Each answer writes only what depends on its moment around them: `sample` with the ages,
@@ -107,11 +112,24 @@ The collector-only RSS above (0.7–0.9 MiB) is not an estimate of the service's
   lines as `http.server` gives them; HEAD gets the 501's headers without its page; HTTP/0.9, also when
   said, gets the body alone.
 - Slow groups: one thread each, the next observation an interval after the last one started; their entries
-  as `runtime/slow.py` writes them. No reader is ported, so `serve` starts none and `/api/observations`
-  has `groups: {}`, as the Python service with them off.
-- Not in 3A: history, replay (`/api/history` is a 404, `/api/samples` the `replay_unavailable` 404, as with
-  them off), `/text` (a 404), `platmon.ini` (options: `--interval`, `--bind`, `--port`, `--web`,
-  `--app-version`; `[thresholds]` at their defaults), the slow readers.
+  as `runtime/slow.py` writes them.
+
+3B:
+- History (`src/history.rs`): one point per publication from its publisher, after it is published and
+  outside the Sampler's lock; gaps as null (failed or stalled publishers, values without a rate, missing
+  identities), identities as series ids, the 64-series priority, expiry, gap-keeping downsampling; reads
+  copy points under the lock and build the answer outside it.
+- Replay (`src/replay.rs`): each publication serialized once by its publisher outside the replay lock;
+  requests take references to the payloads under the lock and decode them outside it; ages and `stale` per
+  answer; cursors, missing ranges, 409s and the byte, record and response bounds as `runtime/replay.py`.
+- `/api/history`, `/api/samples`, `/api/observation-samples` with `server.py`'s query parsing
+  (`parse_qs`, its limits and messages); `/text` (`src/render.rs`, the `platmon` command's `render()`).
+- `platmon.ini` (`src/config.rs`): configparser's syntax (sections, `=`/`:`, comments, continuation lines,
+  DEFAULT, duplicate and parsing errors with its messages), `check()`, `levels()`, the probe targets, the
+  same refusals; groups, history, replay and the web page on and off as configured.
+- The slow readers (`src/observe.rs`): storage (partitions of physical disks, local filesystems by device
+  number, statvfs through a pinned descriptor), Wi-Fi (`/proc/net/wireless`, the namespace and ifindex,
+  the carrier), battery (`/sys/class/power_supply`), the TCP connect probe.
 
 ## Use
 
@@ -122,6 +140,7 @@ PYTHONPATH=. python3 native/tools/compare.py native/target/x86_64-unknown-linux-
 PYTHONPATH=. native/tools/bench.sh native/target/x86_64-unknown-linux-musl/release/platmon-native out.jsonl \
     native/target/cache-alloc/x86_64-unknown-linux-musl/release/platmon-native
 python3 native/tools/runtime_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon-native
+PYTHONPATH=. python3 native/tools/config_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 PYTHONPATH=. python3 native/tools/live_http.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 ```
 
@@ -152,23 +171,27 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
   collection, and its read scope: the SHA-256 of the sorted source ids and the interfaces, disks and
   pressure resources it read, with how many different scopes came up in the window. stderr goes to
   `OUT.jsonl.log`.
-- `runtime_fixture.py`: **the runtime equivalence test** (step 3A). The service's Sampler and slow groups
-  (`runtime_py.py`) and `platmon-native runtime-script` get the same operations: a collection begins, a
-  view is taken while it runs, it ends with a given collection or error; the same for observations. Every
-  answer must be the same text: the `/api/stats` body or none, the `/api/status` body (without `levels`),
-  the `/api/observations` body. Runs on the host, reads no tree; the same self-test and deadlines as
-  `fixture.py`.
-- `live_http.py`: **a live check of the HTTP runtime.** Starts the Python service (slow groups, history and
-  replay off) and `platmon-native serve` on two local ports, checks both the same way and compares them
-  (see its docstring). It stops only the two processes it started, by their handles.
+- `runtime_fixture.py`: **the runtime equivalence test.** The service's Sampler, slow groups, History,
+  Replay and HTTP server (`runtime_py.py`, wired as `platmon.py` wires them) and `platmon-native
+  runtime-script` get the same operations: a collection begins, a view is taken while it runs, it ends
+  with a given collection or error; the same for observations; raw HTTP requests to each side's real
+  server. Every answer must be the same text: the `/api/stats`, `/api/status` and `/api/observations`
+  bodies, and whole HTTP answers without their `Date` and `Server` headers and without the markup of error
+  pages (it differs between Python versions; the status line with the message stays). Runs on the host,
+  reads no tree; the same self-test and deadlines as `fixture.py`.
+- `config_fixture.py`: platmon.ini files read by `platmon.load_config` and `platmon-native config-check`:
+  every setting with its type, the levels and the probe targets, or the same refusal message.
+- `live_http.py`: **a live check of the service.** Starts the Python service and `platmon-native serve`
+  with the same platmon.ini (the defaults, each on its own local port), checks both the same way and
+  compares them (see its docstring). It stops only the two processes it started, by their handles.
 
 ## Results
 
 ### Equivalence on fake trees
 
-`fixture.sh`, 2026-10-19, x86_64 build: 7 of 7 scenarios, no difference: 35 collections equal and the 2
-expected failures (below) failed on both sides; every side exited with 0. Harness self-test: 15 of 15
-controls reported as they must be.
+`fixture.sh`, 2026-10-19, x86_64 build: 8 of 8 scenarios, no difference: 40 collections and observations
+equal and the 2 expected failures (below) failed on both sides; every side exited with 0. Harness
+self-test: 15 of 15 controls reported as they must be.
 
 | scenario | what it covers |
 | --- | --- |
@@ -178,6 +201,7 @@ controls reported as they must be.
 | `bare` | a host with nothing optional: every group unavailable with its reason |
 | `pi` | Raspberry Pi device tree, a zone whose hwmon twin is named with `_`, a DRM card (`v3d`) named but not read |
 | `passive` | interfaces with and without an ifindex (one named beyond ASCII), physical, virtual and partition disks, a disk with the 11 fields of older kernels; rates, counters reset (no rate, a new baseline), in flight falling (a gauge, not a reset), an interface and a disk removed and others added, an interface back under its name with a new ifindex, a counter at 2^64−1 and one beyond (not a counter), bytes beyond 64 bits, a delta whose rate depends on the float conversion, windows of 1.7 s and 0.3 s, a gap, the same clock twice, the network namespace changed and the rates after it, a disk whose `/sys/block` link went away (its classification is kept) |
+| `slow` | the slow groups' readers (`observe-script` against `observe_py.py`), 5 steps: partitions of physical, virtual and missing disks, a row listed twice; mountinfo with the real device numbers of the container's mounts, a bind mount, an escaped path, read only from the super-options, a file bind listed before a directory (`ENOTDIR`, skipped), a mount point gone, another device behind a path (`mount_changed`), one nobody cannot reach, non-local and non-`/dev` mounts, lines that do not parse; Wi-Fi rows connected, down, with a moved ifindex, an unreadable carrier, no ifindex, a level that is not dBm and one of 0, out of range, not a row; batteries present, an empty bay, invalid numbers and text, an unreadable attribute, a UPS, external supplies, one without a type; TCP connects accepted, refused and unreachable (their times only checked to be ≥ 0); then mountinfo unreadable, files gone, files broken, nothing there |
 | `passive_failures` | a header that is not `/proc/net/dev`'s, diskstats that is not UTF-8, a pressure file that cannot be read, one that is not ASCII, one without `some`; then bad rows (an interface listed twice, 15 fields, invalid names, a line without `:`, a negative counter; a disk listed twice, too few fields, a later field that is not a counter, a major that is not a number, a line without a name, a `/sys/block` entry that is not a link), a namespace that cannot be identified, `some` twice, CRLF line ends; then every file gone, back (warmup), empty files, recovered |
 
 The harness was checked against itself: deliberate defects in a copy of the Rust code were each reported.
@@ -281,21 +305,36 @@ Collection time (p50 / p95, ms) and memory (VmRSS at the end of the window):
 - These figures cover collection without network, disk_io or pressure, and not the service: no HTTP, no
   JSON for responses, no history or replay.
 
-### Runtime equivalence (step 3A)
+### Runtime equivalence (steps 3A and 3B)
 
 `runtime_fixture.py`, 2026-10-19, on the x86_64 build and on the aarch64 build on the Orin and the
-Raspberry Pi: 3 of 3 scenarios, 147 answers the same text. Harness self-test: 6 of 6 controls.
+Raspberry Pi: 7 of 7 scenarios, 317 answers the same text. Harness self-test: 6 of 6 controls.
+`config_fixture.py`: 49 of 49 configurations the same on all three hosts.
 
 | Scenario | What it covers |
 | --- | --- |
 | `core` | starting, a running first collection at and past `stale_after`, one dropped as too slow and one taking exactly `stale_after` (kept), ready, the data age at `stale_after` and 1 ns past it (stats withheld), failures (degraded, counted, stale) and recovery, a snapshot degraded by its own optional group, `core` in the collection's `collectors` replaced, `collectors` not a dict or missing, odd wall times, empty stats; non-ASCII keys and text, `1e-05`, `1e+16`, `-0.0`, integers beyond 64 bits |
 | `provenance` | records that check out, and each reason to count the data age from the collection start: another clock, a required read missing or extra, spans before or after the collection, reversed, of floats, booleans or three values, required reads not a dict, a record for a value that is not there or not a dict, a number without its record or with a read outside, a record without a span, records not a dict, passive values without a read (and none without values), a passive read outside, a passive read without values; reads exactly at the collection's start and end (valid) |
 | `observations` | groups starting, running at and past `stale_after`, ok, partial, error, unavailable, an exception (`internal_error`, data null), 40 issues (32 kept, targets cut to 64 characters), stale with its data kept, an observation inside a core collection, a second observation's id |
+| `history` | `/api/history` after core and slow publications: CPU, memory, GPU, temperatures and rails by source id or name, interfaces by namespace and ifindex, disks; gaps from values without a rate, a break after a failure and after 9 s without a publication, missing series as null, another namespace, storage tokens, Wi-Fi only while connected, battery fields that are there, probe targets (IPv6 bracketed), an observation taking over 3 intervals and one in error as null, one started before its last one ignored, expiry, 70 temperatures and 8 CPUs against the 64-series limit (dropped counted once, kept series keeping their slots against newcomers); prefix, seconds, points (gap-keeping buckets, 1 point) and 16 invalid or edge queries |
+| `replay` | `/api/samples` and `/api/observation-samples`: from the start, pages, a cursor at and ahead of the latest, another instance (409), 14 invalid or edge queries, a failed and a too slow collection (`gap_before`), a record over `max_bytes` (a missing range, the latest id known at once), capacity evicting the oldest, observation records stale later, a group without a stream (404), everything expired (the cursor still moves on) |
+| `features_off` | history and replay off (404s), status with levels, stats, observations, an unknown path, HEAD |
+| `text` | `/text` before a snapshot (503), four snapshots (CPU rows and the sampling note, GPU and NPU with and without load, swap, a full disk, temperatures, rails, fans, interfaces with errors and over 12 rows, disks, PSI) with storage, Wi-Fi, battery and probe observations of every kind, a stale snapshot, observations no longer current, and three snapshots or observations Python cannot render (no answer on both) |
 
 Eighteen deliberate defects in copies of the runtime code (state boundaries, failure counting, the
 degraded rule, span limits, the clock check, the passive rule, the fallback, `core` handling, the place of
 `read`, observation staleness and errors, ages, ASCII escaping) were each caught; three were first missed
 and added the boundary cases (exactly `stale_after`, a read at the collection's start, `read` not last).
+
+Thirty-six more deliberate defects in history, replay, config, the slow readers and `/text` (gap markers,
+missing-series nulls, the tie-break, gap-keeping buckets, number bounds, stale observations, out-of-order
+publications, the prefix, the cursor, the latest id of an oversized record, expiry on read, the instance
+check, ages, `gap_before`, the field limit; config ranges, continuation, case, duplicate targets; ESTALE,
+the ENOTDIR skip, the dBm sign, an empty bay, super-options; bar rounding, unit edges, row limit, the blank
+line) were caught except two that cannot be seen from outside: replay setting `collecting_for_ms` to null
+that is null already (as Python does too), and DEFAULT values, which `check()` always refuses first as
+unknown keys. Three more were first missed and added cases (a tie in priority, an out-of-order
+observation, a record over `max_bytes` read at once), and two (a level of 0, a bar on a tie) after them.
 
 Rust unit tests also run the threads: a slow reader that blocks keeps its group at one read in flight
 (stale, `collecting_for_ms` growing) while another group publishes; a writer stopped inside serializing a
@@ -304,10 +343,19 @@ and never see a sequence go back; excess connections are closed; a silent client
 request timeout; a client that stops reading a 64 MiB answer is dropped after the write timeout, freeing
 its slot while collecting goes on; request-line, HEAD and header-limit answers as `http.server` gives them.
 
-### Live HTTP check (step 3A)
+### Live HTTP check
 
-`live_http.py`, 2026-10-19, on the x86 PC, the Orin and the Raspberry Pi: no difference (3 runs each, and
-one more each after the fixes below). Every path gave the same status code, Content-Type and
+3B, 2026-10-19, both services with the same platmon.ini (the defaults: every group, history and replay
+on), x86 PC once, Orin and Raspberry Pi twice each: no difference. Slow groups storage, Wi-Fi and battery
+in the same states on both (battery `unavailable` on the boards); the same `/api/history` series ids
+(64, 42, 20: the x86 PC at the limit) and cadences; replay walked from the start with every id returned or
+missing; the `/text` sections the same; 320 concurrent requests verified on each; 200 connections at once
+raised the handler threads by 32 at most (6 → 38 Python, 5 → 37 Rust), the servers answered again about
+1 s after they closed, and the threads went back; after a restart the old cursor got 409
+`instance_changed` on both.
+
+3A, `live_http.py` with the slow groups, history and replay off, on the x86 PC, the Orin and the Raspberry
+Pi: no difference (3 runs each, and one more each after the fixes below). Every path gave the same status code, Content-Type and
 Cache-Control except `/text` (not ported); the web page and its files were the same bytes;
 `/api/stats`, `/api/status` and `/api/observations` had the same keys, order and types. Raw requests at the
 protocol's edges (HEAD, POST, HTTP/0.9 said or implied, HTTP/00.9, 2.0 and a bad version, 99 and 100
@@ -324,10 +372,13 @@ HEAD got the 501 page; HTTP/0.9 said in the request line got headers; the blank 
 was not counted. 414's reason is `URI Too Long` (Python 3.13+; 3.10 says `Request-URI Too Long`, which the
 check treats as the same).
 
-Not covered: a burst of connections against the backlog of 5 (with 40 opened at once the Python server
-answered a request while the client held 40; the check opens them 20 ms apart; a burst is for 3B as a
-stability check: handler count bound, resources, recovery), Python versions' error page markup (the shape
-of the answer is compared, not the page).
+Not covered: which connections of a burst are refused (timing: with 40 opened at once the Python server
+answered a request while the client held 40; the limit check opens them 20 ms apart, the burst check
+looks at bounds and recovery only), Python versions' error page markup (the shape of the answer is
+compared, not the page), a reader that stops in the live check (a unit test covers it with a 64 MiB
+answer: no live answer is larger than the socket buffers), the nvidia-smi GPU fallback, configparser and
+`float()`/`int()` beyond the forms listed (Unicode digits, other whitespace), non-UTF-8 file names and
+config files, IPv6 scope ids and Python 3.10's text for IPv4-mapped addresses in probe targets.
 
 ### Earlier run (2026-10-18)
 

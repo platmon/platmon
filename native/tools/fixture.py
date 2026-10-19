@@ -615,13 +615,14 @@ def slow_tree():
                "garbage without separator",
                "31 1 x:y / /m rw - ext4 /dev/sdq rw",
                "32 1 x:y / /m rw - nfs host:/ rw"])
-    for n in ("wlan0", "wlan1", "wlan2", "wlan3"):
+    for n in ("wlan0", "wlan1", "wlan2", "wlan3", "zero0"):
         iface(n)
     idx = {name: i for i, name in socket.if_nameindex()}
     net_class("wlan0", idx["wlan0"], 1)
     net_class("wlan1", idx["wlan1"], 0)
     net_class("wlan2", idx["wlan2"] + 100, 1)  # moved meanwhile: not trusted
     net_class("wlan3", idx["wlan3"], 1)
+    net_class("zero0", idx["zero0"], 1)
     os.chmod(sys_("class/net/wlan3/carrier"), 0)
     wireless(["wlan0: 0000   70.  -40.  -256        0      0      0      0      0        0",
               " wlan1: 0000   60.  -50.  -90.        0      0      0      0      0        0",
@@ -629,6 +630,7 @@ def slow_tree():
               "wlan3: 0000   50.  -55.  -95        0      0      0      0      0        0",
               "wlan9: 0000   40   -60   -256        0      0      0      0      0        0",
               "raw0: 0000   30.   45.   -256        0      0      0      0      0        0",
+              "zero0: 0000   30.   0.   -256        0      0      0      0      0        0",  # 0: not dBm
               "big0: 0000   300.  -40.  -256        0      0      0      0      0        0",
               "this is not a row"])
     supply("BAT0", type="Battery", present=1, capacity=80, charge_now=2000000, charge_full=4000000,

@@ -1,17 +1,21 @@
-"""Live check of the HTTP runtime (step 3A) on a real host: starts the Python service (platmon.py, with the
-slow groups, history and replay off, which step 3A does not have) and `platmon-native serve` on two local
-ports at the same interval, checks each the same way and compares them. Only the processes it started are
-stopped, by their own handles.
+"""Live check of the HTTP runtime on a real host: starts the Python service (platmon.py) and `platmon-native
+serve` with the same platmon.ini (the defaults, each on its own local port), checks each the same way and
+compares them. Only the processes it started are stopped (and restarted once), by their own handles.
 
   PYTHONPATH=<platmon tree> python3 live_http.py PATH/TO/platmon-native [--json OUT]
 
 Per server:
-- every path: status code, Content-Type, Cache-Control (/text is not ported: a 404 from Rust, not compared)
-- the web page and its files: the same bytes
+- every path: status code, Content-Type, Cache-Control; the web page and its files: the same bytes; the
+  /text screen: the same sections
 - raw requests at the protocol's edges (HEAD, HTTP/0.9, versions, header and line limits): the same answer
   shape from its bytes (status line and headers or none, header names, a body or none)
 - /api/stats, /api/status, /api/observations: the same keys, order and JSON types; values exact except
-  those that move (compare.py's plausibility rules, sample identity and ages, read offsets)
+  those that move (compare.py's plausibility rules, sample identity and ages, read offsets, the slow
+  groups' times and readings)
+- /api/history: the same series ids, cadences, bounds and dropped count, every point [int, float, number or
+  null]; /api/samples: the same envelope, records with /api/stats' keys and sample.stale
+- replay from the start, page by page: ids rising, the cursor moving on, every id up to the last cursor
+  returned or in a missing range
 - 16 clients × 20 requests at once: all 320 answers verified (200, JSON, a sample), no client error, one
   instance, sequences never going back, and no more collections than intervals (requests do not collect).
   A self-test runs first (`--self-test` alone): fake answers that time out, are not JSON, have no sample,
@@ -19,6 +23,9 @@ Per server:
 - 40 idle connections, opened 20 ms apart: 32 held, the rest closed without an answer, a request refused
   while 32 are held and answered after they close
 - a request line cut off: the connection closed after the 10 s request timeout
+- 200 connections at once: handler threads stay within 32 more than before, the server answers again
+  once they close, and its threads go back (which connections were refused is not compared: timing)
+- a restart: the previous instance's cursor gets 409 instance_changed with the new instance id
 Exit 1 on any difference or failed check."""
 import concurrent.futures as concurrent_futures
 import configparser
@@ -39,7 +46,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 PATHS = ["/api/stats", "/api/status", "/api/observations", "/api/history", "/api/samples",
          "/api/observation-samples?group=storage", "/api/stats?x=1", "/", "/index.html", "/app.js", "/styles.css",
-         "/assets/brand/favicon.svg", "/assets/brand/platmon-logo-dark.svg", "/nothing", "/text"]
+         "/assets/brand/favicon.svg", "/assets/brand/platmon-logo-dark.svg", "/nothing", "/text", "/text?x"]
 WEB = ["/", "/index.html", "/app.js", "/styles.css", "/assets/brand/favicon.svg", "/assets/brand/platmon-logo-dark.svg"]
 
 
@@ -75,13 +82,17 @@ def moving(ptr, a, b):
     if isinstance(a, (int, float)) and not isinstance(a, bool) and plausible("/stats" + ptr, a, b):
         return True
     parts = ptr.split("/")
+    observed = ptr.startswith("/groups/") and len(parts) > 3
     return (ptr.startswith(("/sample/", "/last_attempt/completed_at", "/last_attempt/duration_ms"))
             or ptr in ("/instance_id", "/collecting_for_ms")
-            or "read" in parts[:-1] and parts[-1] in ("started_offset_ms", "completed_offset_ms"))
+            or "read" in parts[:-1] and parts[-1] in ("started_offset_ms", "completed_offset_ms")
+            # slow groups: their own times, and readings that move (bytes in use, a battery, a signal)
+            or observed and (parts[3] in ("observation", "collecting_for_ms") or parts[3] == "data" and parts[2] in ("storage", "battery", "wifi")
+                             and isinstance(a, (int, float)) and isinstance(b, (int, float))))
 
 
 def diff(a, b, ptr, out):
-    if ptr == "/collecting_for_ms" and (a is None or b is None):
+    if ptr.endswith("/collecting_for_ms") and (a is None or b is None):
         return  # a collection may be running at one answer and not at the other
     if kind(a) != kind(b):
         out.append(f"{ptr}: {kind(a)} {a!r:.80} (python) != {kind(b)} {b!r:.80} (rust)")
@@ -287,28 +298,118 @@ def raw(port, request):
     return {"bare": False, "status": lines[0], "headers": names, "body": bool(body)}
 
 
-def check(port, interval):
+def task_status(pid):
+    """(threads, VmRSS KiB) of a process."""
+    with open(f"/proc/{pid}/status") as f:
+        fields = dict(line.split(":", 1) for line in f if ":" in line)
+    return int(fields["Threads"]), int(fields["VmRSS"].split()[0])
+
+
+def burst(port, pid, n=200):
+    """n connections opened at once (non-blocking, so the listen backlog fills): the server must keep its
+    handler threads bounded, and answer again once they are gone. Not a comparison of which connections
+    were refused: that depends on timing."""
+    base = task_status(pid)
+    socks = []
+    for _ in range(n):
+        s = socket.socket()
+        s.setblocking(False)
+        s.connect_ex(("127.0.0.1", port))
+        socks.append(s)
+    peak = base
+    for _ in range(10):
+        time.sleep(0.2)
+        now = task_status(pid)
+        peak = (max(peak[0], now[0]), max(peak[1], now[1]))
+    for s in socks:
+        s.close()
+    t0, code = time.monotonic(), None
+    while time.monotonic() - t0 < 15:
+        try:
+            code = fetch(port, "/api/status", 2)[0]
+            break
+        except OSError:
+            time.sleep(0.2)
+    recovered = round(time.monotonic() - t0, 2)
+    time.sleep(1)
+    return {"connections": n, "threads_before": base[0], "threads_peak": peak[0], "threads_after": task_status(pid)[0],
+            "rss_kib_before": base[1], "rss_kib_peak": peak[1], "answered_after_s": recovered, "code": code}
+
+
+def replay_walk(port):
+    """Every core publication from the start, page by page: ids rising, the cursor moving on, every id up to
+    the latest either returned or in a missing range."""
+    after, instance, seen, missing, pages, problems = 0, None, [], [], 0, []
+    while pages < 50:
+        q = f"/api/samples?limit=7&after={after}" + (f"&instance_id={instance}" if instance else "")
+        code, _, body = fetch(port, q)
+        if code != 200:
+            problems.append(f"HTTP {code} for {q}")
+            break
+        b = json.loads(body)
+        instance, pages = b["instance_id"], pages + 1
+        ids = [r["id"] for r in b["records"]]
+        if ids != sorted(ids) or (ids and ids[0] <= after):
+            problems.append(f"ids {ids} after {after}")
+        seen += ids
+        missing += [(m["from"], m["to"]) for m in b["missing_ranges"]]
+        if b["next_after"] < after or (ids and b["next_after"] < ids[-1]):
+            problems.append(f"next_after {b['next_after']} after {after}")
+        after = b["next_after"]
+        if not b["has_more"]:
+            break
+    covered = set(seen) | {i for a, z in missing for i in range(a, z + 1)}
+    if covered != set(range(1, after + 1)):
+        problems.append(f"ids 1..{after} not all returned or missing")
+    return {"pages": pages, "records": len(seen), "missing": missing, "next_after": after, "instance": instance,
+            "problems": problems}
+
+
+def check(port, interval, pid):
     eps = endpoints(port)
     bodies = {p: json.loads(eps[p]["body"]) for p in ("/api/stats", "/api/status", "/api/observations")}
+    bodies["/api/history"] = json.loads(fetch(port, "/api/history?points=5")[2])
+    bodies["/api/samples"] = json.loads(fetch(port, "/api/samples?limit=2")[2])
     return {"endpoints": eps, "bodies": bodies, "raw": {k: raw(port, r) for k, r in RAW.items()},
-            "concurrent": concurrent(port, interval),
-            "connection_limit": connection_limit(port), "request_timeout": request_timeout(port)}
+            "replay": replay_walk(port), "concurrent": concurrent(port, interval),
+            "connection_limit": connection_limit(port), "request_timeout": request_timeout(port), "burst": burst(port, pid)}
 
 
-def start_python(port, interval, log):
+def config(port, interval):
+    """platmon.ini with the defaults, but this port on 127.0.0.1: the same for both servers."""
     cfg = configparser.ConfigParser()
-    cfg.read_dict({"core": {"interval": str(interval)}, "http": {"bind": "127.0.0.1", "port": str(port)},
-                   **{g: {"enabled": "no"} for g in ("storage", "wifi", "battery", "history", "replay")}})
+    cfg.read_dict({"core": {"interval": str(interval)}, "http": {"bind": "127.0.0.1", "port": str(port)}})
     path = tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False)
     cfg.write(path)
     path.close()
-    return subprocess.Popen([sys.executable, f"{REPO}/platmon.py", path.name], cwd=REPO, stdout=log, stderr=log,
-                            env={**os.environ, "PYTHONPATH": REPO})
+    return path.name
+
+
+def start(name, binary, port, interval, log):
+    if name == "python":
+        return subprocess.Popen([sys.executable, f"{REPO}/platmon.py", config(port, interval)], cwd=REPO, stdout=log,
+                                stderr=log, env={**os.environ, "PYTHONPATH": REPO})
+    return subprocess.Popen([binary, "serve", config(port, interval), "--web", f"{REPO}/frontends/web",
+                             "--app-version", version()], stdout=log, stderr=log)
+
+
+def stop(p):
+    p.terminate()
+    try:
+        p.wait(5)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
 
 
 def version():
     with open(f"{REPO}/frontends/cli.py") as f:
         return next(line.split('"')[1] for line in f if line.startswith("VERSION ="))
+
+
+def heads(text):
+    """The /text screen's sections: the first word of each line that is not indented."""
+    return [line.split()[0] for line in text.split("\n")[2:] if line and not line.startswith(" ")]
 
 
 def main():
@@ -319,49 +420,73 @@ def main():
     binary, interval = os.path.abspath(sys.argv[1]), 1.0
     ports = {"python": free_port(), "rust": free_port()}
     logs = {n: tempfile.TemporaryFile("w+") for n in ports}
-    procs = {}
+    procs, restarted = {}, {}
     try:
-        procs["python"] = start_python(ports["python"], interval, logs["python"])
-        procs["rust"] = subprocess.Popen([binary, "serve", "--bind", "127.0.0.1", "--port", str(ports["rust"]),
-                                          "--interval", str(interval), "--web", f"{REPO}/frontends/web",
-                                          "--app-version", version()], stdout=logs["rust"], stderr=logs["rust"])
+        for n in ports:
+            procs[n] = start(n, binary, ports[n], interval, logs[n])
         deadline = time.monotonic() + 15
         for n, port in ports.items():
             if not wait_ready(port, deadline):
                 sys.exit(f"{n} is not ready after 15 s")
-        time.sleep(3)  # past the first collections' warmup on both
+        time.sleep(6)  # past the first collections' warmup and the first slow observations on both
         res = {}
-        threads = [threading.Thread(target=lambda n=n: res.__setitem__(n, check(ports[n], interval))) for n in ports]
+        threads = [threading.Thread(target=lambda n=n: res.__setitem__(n, check(ports[n], interval, procs[n].pid)))
+                   for n in ports]
         for t in threads:  # at the same time, so both read the same moment as far as possible
             t.start()
         for t in threads:
             t.join()
+        for n in ports:  # a restart: the old cursor is refused, never mixed with the new process's ids
+            stop(procs[n])
+            procs[n] = start(n, binary, ports[n], interval, logs[n])
+        deadline = time.monotonic() + 15
+        for n, port in ports.items():
+            wait_ready(port, deadline)
+            old = res[n]["replay"]["instance"]
+            code, _, body = fetch(port, f"/api/samples?instance_id={old}&after=1")
+            restarted[n] = {"code": code, "body": json.loads(body)}
     finally:
-        for n, p in procs.items():  # only what this run started
-            p.terminate()
-            try:
-                p.wait(5)
-            except subprocess.TimeoutExpired:
-                p.kill()
-                p.wait()
+        for p in procs.values():  # only what this run started
+            stop(p)
     py, rs = res["python"], res["rust"]
     out = []
     for path in PATHS:
         a, b = py["endpoints"][path], rs["endpoints"][path]
-        if path == "/text":
-            continue
         for k in ("code", "type", "no_store"):
             if a[k] != b[k]:
                 out.append(f"{path}: {k} {a[k]!r} (python) != {b[k]!r} (rust)")
         if path in WEB and a["body"] != b["body"]:
             out.append(f"{path}: the bodies differ ({len(a['body'])} / {len(b['body'])} bytes)")
+    a, b = (heads(r["endpoints"]["/text"]["body"].decode()) for r in (py, rs))
+    if a != b:
+        out.append(f"/text: sections {a} (python) != {b} (rust)")
     for name in RAW:
         if py["raw"][name] != rs["raw"][name]:
             out.append(f"raw {name}: {py['raw'][name]} (python) != {rs['raw'][name]} (rust)")
-    for path in py["bodies"]:
+    for path in ("/api/stats", "/api/status", "/api/observations"):
         diff(py["bodies"][path], rs["bodies"][path], "", (d := []))
         out += [f"{path}{x}" for x in d]
+    h = {n: r["bodies"]["/api/history"] for n, r in res.items()}
+    for k in ("schema_version", "retention_s", "interval_ms", "dropped_series", "series_intervals_ms"):
+        if h["python"][k] != h["rust"][k]:
+            out.append(f"/api/history: {k} {h['python'][k]!r:.200} (python) != {h['rust'][k]!r:.200} (rust)")
+    if list(h["python"]) != list(h["rust"]) or sorted(h["python"]["series"]) != sorted(h["rust"]["series"]):
+        out.append(f"/api/history: keys or series ids differ: {sorted(set(h['python']['series']) ^ set(h['rust']['series']))[:5]}")
+    for n, body in h.items():
+        if not all(type(p[0]) is int and type(p[1]) is float and (p[2] is None or type(p[2]) in (int, float))
+                   for points in body["series"].values() for p in points):
+            out.append(f"{n}: /api/history: a point that is not [int, float, number or null]")
+    sm = {n: r["bodies"]["/api/samples"] for n, r in res.items()}
+    if [kind(v) for v in sm["python"].values()] != [kind(v) for v in sm["rust"].values()] or list(sm["python"]) != list(sm["rust"]):
+        out.append("/api/samples: the envelope differs")
+    for n, body in sm.items():
+        stats_keys = list(res[n]["bodies"]["/api/stats"])
+        if body["records"] and list(body["records"][0]["data"]) != stats_keys:
+            out.append(f"{n}: /api/samples: a record's keys are not /api/stats'")
+        if body["records"] and list(body["records"][0]["data"]["sample"])[-1] != "stale":
+            out.append(f"{n}: /api/samples: no sample.stale")
     for n, r in res.items():
+        out += [f"{n}: replay walk: {p}" for p in r["replay"]["problems"]]
         out += [f"{n}: concurrent: {p}" for p in r["concurrent"]["problems"]]
         lim = r["connection_limit"]
         if lim["closed"] != lim["connections"] - 32 or not lim["refused_while_full"] or lim["after"] != 200:
@@ -369,16 +494,25 @@ def main():
         rt = r["request_timeout"]
         if rt["answered"] or not 9.5 <= rt["closed_after_s"] <= 11.5:
             out.append(f"{n}: request timeout: {rt}")
+        b = r["burst"]
+        if b["threads_peak"] > b["threads_before"] + 34 or b["code"] != 200 or b["threads_after"] > b["threads_before"] + 2:
+            out.append(f"{n}: burst: {b}")
+        rs_ = restarted[n]
+        if rs_["code"] != 409 or rs_["body"].get("code") != "instance_changed" or rs_["body"].get("instance_id") == r["replay"]["instance"]:
+            out.append(f"{n}: after a restart: {rs_}")
     stats = py["bodies"]["/api/stats"]
     report = {"host_platform": stats["platform"], "sensor_meta": len(stats.get("sensor_meta", {})),
               "interfaces": len(stats.get("network", {}).get("interfaces", [])),
+              "groups": {n: {g: o["state"] for g, o in r["bodies"]["/api/observations"]["groups"].items()} for n, r in res.items()},
+              "history_series": {n: len(b["series"]) for n, b in h.items()},
               "codes": {p: [py["endpoints"][p]["code"], rs["endpoints"][p]["code"]] for p in PATHS},
-              "raw": py["raw"],
-              **{n: {k: r[k] for k in ("concurrent", "connection_limit", "request_timeout")} for n, r in res.items()},
+              "raw": py["raw"], "restart": {n: r["code"] for n, r in restarted.items()},
+              **{n: {k: r[k] for k in ("replay", "concurrent", "connection_limit", "request_timeout", "burst")} for n, r in res.items()},
               "differences": out}
     if "--json" in sys.argv:
         with open(sys.argv[sys.argv.index("--json") + 1], "w") as f:
-            json.dump({"report": report, "python": py["bodies"], "rust": rs["bodies"]}, f, indent=1)
+            json.dump({"report": report, "python": py["bodies"], "rust": rs["bodies"],
+                       "text": {n: r["endpoints"]["/text"]["body"].decode() for n, r in res.items()}}, f, indent=1)
     print(json.dumps(report, indent=1))
     for n, log in logs.items():
         log.seek(0)
