@@ -20,12 +20,15 @@ mod accel;
 #[cfg(feature = "cache-alloc")]
 mod alloc;
 mod common;
+mod config;
 mod history;
 mod http;
 mod jetson;
 mod json;
 mod metadata;
+mod observe;
 mod passive;
+mod render;
 mod replay;
 mod runtime;
 mod sha256;
@@ -62,9 +65,16 @@ impl Groups {
                  network: g("network"), disk_io: g("disk_io"), pressure: g("pressure") }
     }
 
-    fn into_vec(self) -> Vec<Group> {
-        vec![self.cpu_frequency, self.gpu, self.npu, self.temperature, self.power, self.fans, self.power_mode, self.board_info,
-             self.network, self.disk_io, self.pressure]
+    /// The groups of a collection, the passive ones only where they are on (Python adds them only then).
+    fn into_vec(self, passive: [bool; 3]) -> Vec<Group> {
+        let mut out = vec![self.cpu_frequency, self.gpu, self.npu, self.temperature, self.power, self.fans, self.power_mode,
+                           self.board_info];
+        for (on, g) in passive.into_iter().zip([self.network, self.disk_io, self.pressure]) {
+            if on {
+                out.push(g);
+            }
+        }
+        out
     }
 }
 
@@ -91,8 +101,9 @@ struct Collector {
     cpu: CpuCounters,
     gpu: accel::Accel,
     npu: accel::Accel,
-    network: passive::Network,
-    disks: passive::Disks,
+    network: Option<passive::Network>,
+    disks: Option<passive::Disks>,
+    pressure: bool,
     logged: Vec<(String, Vec<String>)>,
 }
 
@@ -130,13 +141,13 @@ fn span_value(span: metadata::Span) -> Value {
 }
 
 impl Collector {
-    /// max_gap: seconds, max(3 × interval, 5 s) in the service
-    fn new(max_gap: f64) -> Collector {
+    /// max_gap: seconds, max(3 × interval, 5 s) in the service; passive: network, disk_io, pressure on
+    fn new(max_gap: f64, passive: [bool; 3]) -> Collector {
         let (platform, board) = detect();
         let ns = runtime::seconds_ns(max_gap);
         Collector { platform, board, cpu: CpuCounters::new(Some(max_gap), "interval"), gpu: accel::Accel::gpu(ns),
-                    npu: accel::Accel::npu(ns), network: passive::Network::new(Some(max_gap)),
-                    disks: passive::Disks::new(Some(max_gap)), logged: Vec::new() }
+                    npu: accel::Accel::npu(ns), network: passive[0].then(|| passive::Network::new(Some(max_gap))),
+                    disks: passive[1].then(|| passive::Disks::new(Some(max_gap))), pressure: passive[2], logged: Vec::new() }
     }
 
     /// collect_recorded(cpu, logged, clock, network, disk_io, pressure, gpu, npu), wired as the service does
@@ -166,15 +177,25 @@ impl Collector {
         }
         let v = self.npu.sample(&mut g.npu);
         stats.set("npu", v.into());
-        // after the required data: a failed collection never reaches them
-        let (v, network) = self.network.sample(&mut g.network);
-        stats.set("network", v);
-        let (v, disk_io) = self.disks.sample(&mut g.disk_io);
-        stats.set("disk_io", v);
-        let (v, pressure) = passive::pressure(&mut g.pressure);
-        stats.set("pressure", v);
+        // after the required data: a failed collection never reaches them; each only when it is on
+        let (mut network, mut disk_io, mut pressure) = (None, None, None);
+        if let Some(n) = self.network.as_mut() {
+            let (v, span) = n.sample(&mut g.network);
+            stats.set("network", v);
+            network = span;
+        }
+        if let Some(d) = self.disks.as_mut() {
+            let (v, span) = d.sample(&mut g.disk_io);
+            stats.set("disk_io", v);
+            disk_io = span;
+        }
+        if self.pressure {
+            let (v, span) = passive::pressure(&mut g.pressure);
+            stats.set("pressure", v);
+            pressure = span;
+        }
         let sensors = sensor_entries(&stats, &fans, &g);
-        let groups = g.into_vec();
+        let groups = g.into_vec([self.network.is_some(), self.disks.is_some(), self.pressure]);
         stats.set("collectors", metadata::summarize(&groups, &mut self.logged));
         Ok(Collected { stats, sensors, required, passive: [network, disk_io, pressure] })
     }
@@ -337,9 +358,11 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("serve") => return serve(&args[2..]),
         Some("runtime-script") => return runtime_script(),
+        Some("config-check") => return config_check(&args[2..]),
+        Some("observe-script") => return observe_script(&args[2..]),
         _ => {}
     }
-    let mut c = Collector::new(5.0); // the service's at its default 1 s interval
+    let mut c = Collector::new(5.0, [true; 3]); // the service's at its default 1 s interval
     match args.get(1).map(String::as_str) {
         Some("collect") => {
             let _ = c.collect(); // the CPU baseline, as the service's first collection
@@ -417,61 +440,110 @@ fn main() {
     }
 }
 
-/// platmon.levels with the default [thresholds]: [warning, critical] per name; temperature the board's.
-fn default_levels(platform: &str) -> Value {
-    let temperature = match platform {
-        "Jetson Orin" => [85.0, 95.0],
-        "Raspberry Pi" => [75.0, 80.0],
-        _ => [80.0, 90.0],
-    };
-    let mut v = Value::obj();
-    for (name, pair) in [("cpu", [80.0, 90.0]), ("gpu", [80.0, 90.0]), ("memory", [80.0, 90.0]), ("filesystem", [80.0, 90.0]),
-                         ("temperature", temperature), ("battery", [20.0, 10.0]), ("wifi", [-70.0, -80.0])] {
-        v.set(name, Value::Arr(pair.iter().map(|x| Value::Float(*x)).collect()));
-    }
-    v
-}
-
 extern "C" fn on_term(_: libc::c_int) {
     unsafe { libc::_exit(0) } // as platmon.py: a clean exit on SIGTERM (systemd stop, docker stop)
 }
 
-/// platmon.py with [core] interval and [http] from the options, the rest at its defaults except the slow
-/// groups, which are not ported yet.
+/// observe-script TARGETS TIMEOUT (tools/fixture.py, the slow groups): for each stdin line, one observation
+/// of storage, wifi, battery and probe (with those [probe] targets and timeout), printed as one JSON line
+/// {"observations": {group: {"collector", "data"}}}.
+fn observe_script(args: &[String]) {
+    use std::io::BufRead;
+    let targets = config::parse_targets(args.first().map_or("", String::as_str)).unwrap_or_else(|e| { eprintln!("observe-script: {}", e); std::process::exit(2) });
+    let timeout: f64 = args.get(1).and_then(|t| t.parse().ok()).unwrap_or(2.0);
+    let mut probe = observe::Probe::new(targets, timeout);
+    let mut logged: Vec<Vec<(String, Vec<String>)>> = vec![vec![]; 4];
+    for _ in std::io::stdin().lock().lines() {
+        let mut groups = Value::obj();
+        for (i, name) in observe::GROUPS.iter().enumerate() {
+            let mut g = metadata::Group::new(name, false);
+            let data = match *name {
+                "storage" => observe::storage(&mut g),
+                "wifi" => observe::wifi(&mut g),
+                "battery" => observe::battery(&mut g),
+                _ => probe.observe(&mut g),
+            };
+            let collector = metadata::summarize(std::slice::from_ref(&g), &mut logged[i]).get(name).cloned().unwrap_or_default();
+            let mut entry = Value::obj();
+            entry.set("collector", collector);
+            entry.set("data", data);
+            groups.set(name, entry);
+        }
+        let mut out = Value::obj();
+        out.set("observations", groups);
+        println!("{}", out.to_string(false));
+    }
+}
+
+/// config-check [CONFIG] [PLATFORM]: the configuration as serve would use it, {"error": ...} if refused
+/// (tools/config_fixture.py compares it with platmon.load_config).
+fn config_check(args: &[String]) {
+    let out = match config::load(args.first().map(String::as_str).filter(|p| !p.is_empty())) {
+        Ok(cfg) => {
+            let mut v = cfg.value(args.get(1).map(String::as_str));
+            if args.get(1).is_none() {
+                v.set("levels", cfg.value(None).get("levels").cloned().unwrap_or_default());
+            }
+            v
+        }
+        Err(e) => { let mut v = Value::obj(); v.set("error", e.into()); v }
+    };
+    println!("{}", out.to_string(false));
+}
+
+/// platmon.py: serve [CONFIG] [--web DIR] [--app-version V]. The configuration as platmon.py reads it;
+/// the slow groups are on as configured, with their readers (src/observe.rs).
 fn serve(args: &[String]) {
-    let (mut interval, mut bind, mut port, mut web, mut version) = (1.0f64, "0.0.0.0".to_string(), 9797u16, None, "0.0.0".to_string());
+    let (mut path, mut web_dir, mut version) = (None, None, "0.0.0".to_string());
     let mut it = args.iter();
-    while let Some(flag) = it.next() {
-        let value = it.next().unwrap_or_else(|| { eprintln!("serve: {} needs a value", flag); std::process::exit(2) });
-        let bad = || -> ! { eprintln!("serve: bad value for {}: {}", flag, value); std::process::exit(2) };
-        match flag.as_str() {
-            "--interval" => interval = value.parse().ok().filter(|i| (0.1..=3600.0).contains(i)).unwrap_or_else(|| bad()),
-            "--bind" => bind = value.clone(),
-            "--port" => port = value.parse().ok().filter(|p| *p >= 1).unwrap_or_else(|| bad()),
-            "--web" => web = Some(value.clone()),
-            "--app-version" => version = value.clone(),
-            _ => { eprintln!("serve: unknown option {}", flag); std::process::exit(2) }
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--web" | "--app-version" => {
+                let value = it.next().unwrap_or_else(|| { eprintln!("serve: {} needs a value", arg); std::process::exit(2) }).clone();
+                if arg == "--web" { web_dir = Some(value) } else { version = value }
+            }
+            _ if path.is_none() && !arg.starts_with("--") => path = Some(arg.clone()),
+            _ => { eprintln!("serve: unknown argument {}", arg); std::process::exit(2) }
         }
     }
+    let cfg = config::load(path.as_deref()).unwrap_or_else(|e| { eprintln!("platmon-native serve: error: {}", e); std::process::exit(2) });
     unsafe { libc::signal(libc::SIGTERM, on_term as extern "C" fn(libc::c_int) as libc::sighandler_t) };
-    let mut c = Collector::new((3.0 * interval).max(5.0));
-    println!("platmon-native: platform {}, version {} (step 3A runtime)", c.platform, version);
+    let interval = cfg.float("core", "interval");
+    let mut c = Collector::new((3.0 * interval).max(5.0), [cfg.flag("network", "enabled"), cfg.flag("disk_io", "enabled"),
+                                                            cfg.flag("pressure", "enabled")]);
+    println!("platmon-native: platform {}, version {} (step 3 runtime)", c.platform, version);
     let source = metadata::clock_source();
     let mut sampler = runtime::Sampler::new(interval, None, runtime::uuid4(), source);
-    // [history] and [replay] at their defaults (on, 600 s, 16 MiB of replay payload)
-    sampler.history = Some(std::sync::Arc::new(history::History::new(600.0, interval)));
-    sampler.replay = Some(std::sync::Arc::new(replay::Replay::new(sampler.instance_id.clone(), source, &[], 600.0, 16 << 20)));
+    let slow_names: Vec<&str> = observe::GROUPS.iter().copied()
+        .filter(|g| cfg.flag(g, "enabled") && (*g != "probe" || !cfg.targets.is_empty())).collect();
+    let replay = cfg.flag("replay", "enabled").then(|| std::sync::Arc::new(replay::Replay::new(
+        sampler.instance_id.clone(), source, &slow_names, cfg.float("replay", "retention"), cfg.int("replay", "max_bytes") as usize)));
+    // recent numbers of the published snapshots, in memory only (docs/reference/history.md)
+    let history = cfg.flag("history", "enabled").then(|| std::sync::Arc::new(history::History::new(cfg.float("history", "retention"), interval)));
+    sampler.replay = replay.clone();
+    sampler.history = history.clone();
     let sampler = std::sync::Arc::new(sampler);
-    let observations = std::sync::Arc::new(slow::Observations { groups: vec![], instance_id: sampler.instance_id.clone(),
+    let groups: Vec<std::sync::Arc<slow::Slow>> = slow_names.iter().map(|name| {
+        let mut g = slow::Slow::new(name, cfg.float(name, "interval"));
+        g.replay = replay.clone();
+        g.history = history.clone();
+        std::sync::Arc::new(g)
+    }).collect();
+    let observations = std::sync::Arc::new(slow::Observations { groups: groups.clone(), instance_id: sampler.instance_id.clone(),
                                                                 clock_source: source });
-    let levels = default_levels(c.platform);
+    let levels = config::levels_for(&cfg, c.platform);
+    let (bind, port) = (cfg.text("http", "bind"), cfg.int("http", "port") as u16);
     let listener = http::bind(&bind, port).unwrap_or_else(|e| { eprintln!("platmon-native: cannot listen on {}:{}: {}", bind, port, e); std::process::exit(1) });
     let s = sampler.clone();
     std::thread::Builder::new().name("sampler".into()).spawn(move || {
         static STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         s.run(|| c.collect().map(Collected::to_value), &STOP)
     }).expect("cannot start the sampler");
+    for g in &groups {
+        g.start(observe::reader(&g.name, &cfg));
+    }
     println!("platmon http on {}:{}", bind, port);
+    let web = cfg.flag("http", "web").then_some(web_dir).flatten();
     std::sync::Arc::new(http::Server::new(sampler, observations, web, version, levels)).serve(listener);
 }
 

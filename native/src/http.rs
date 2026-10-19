@@ -4,10 +4,11 @@
 //! headers (per read, as Python's socket timeout), 10 s without progress per response write.
 //! Contract: docs/reference/api.md.
 //!
-//! /api/stats, /api/status, /api/observations, /api/history, /api/samples, /api/observation-samples and
-//! the web page. /text (the platmon command's screen) is not ported yet and is a 404.
+//! /api/stats, /api/status, /api/observations, /api/history, /api/samples, /api/observation-samples,
+//! /text and the web page.
 use crate::json::Value;
 use crate::metadata;
+use crate::config::{py_float, py_repr};
 use crate::replay::Refused;
 use crate::runtime::Sampler;
 use crate::slow::Observations;
@@ -325,6 +326,18 @@ impl Server {
                     }
                 }
             }
+            "/text" => { // the platmon command's screen, for curl and watch
+                self.sampler.wait_ready(self.first_wait);
+                let Some(stats) = self.sampler.view(self.clock).0 else {
+                    return x.reply(full, 503, b"no current data (not collected yet, or collection keeps failing)\n", "text/plain; charset=utf-8");
+                };
+                let stats = crate::json::parse(&stats).map_err(std::io::Error::other)?;
+                let obs = self.observations.view(self.clock);
+                match crate::render::render(&stats, Some(&obs)) {
+                    Ok(text) => x.reply(full, 200, (text + "\n").as_bytes(), "text/plain; charset=utf-8"),
+                    Err(()) => Ok(()), // as Python's handler when render raises: no answer
+                }
+            }
             "/" | "/index.html" if self.web.is_some() => {
                 let page = std::fs::read_to_string(format!("{}/index.html", self.web.as_ref().unwrap()))?;
                 let page = page.replace("@VERSION@", &self.version).replace("@LEVELS@", &self.levels.to_py());
@@ -400,20 +413,6 @@ fn one<'a>(q: &'a [(String, Vec<String>)], key: &str) -> Option<&'a str> {
     q.iter().find(|(k, _)| k == key).map(|(_, v)| v[0].as_str())
 }
 
-const PY_SPACE: fn(char) -> bool = crate::sysfs::py_space;
-
-/// Python's float(text) for the forms a query gives: surrounding whitespace, a sign, digits with single
-/// underscores between them, inf and nan.
-fn py_float(text: &str) -> Option<f64> {
-    let t = text.trim_matches(PY_SPACE);
-    let b = t.as_bytes();
-    let between_digits = |i: usize| i > 0 && b[i - 1].is_ascii_digit() && b.get(i + 1).is_some_and(u8::is_ascii_digit);
-    if (0..b.len()).any(|i| b[i] == b'_' && !between_digits(i)) {
-        return None;
-    }
-    t.replace('_', "").parse().ok()
-}
-
 /// server.history_query: (prefix, seconds, points), bounded.
 fn history_query(retention: f64, query: &str) -> Result<(String, f64, usize), ()> {
     let q = parse_qs(query, 3).map_err(|_| ())?;
@@ -462,24 +461,6 @@ fn replay_query(query: &str, observation: bool) -> Result<(String, Option<String
     Ok((stream, instance_id, after as i64, limit))
 }
 
-/// repr() of a str: in single quotes unless it holds one and no double quote.
-fn py_repr(s: &str) -> String {
-    let q = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
-    let mut out = String::from(q);
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c == q => { out.push('\\'); out.push(c); }
-            c if (c as u32) < 0x20 || (0x7f..0xa1).contains(&(c as u32)) || c == '\u{ad}' => out.push_str(&format!("\\x{:02x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push(q);
-    out
-}
 
 #[cfg(test)]
 mod tests {

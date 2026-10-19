@@ -400,6 +400,98 @@ def replay_steps():
     return out
 
 
+def stats_screen(n):
+    """Stats with every key the /text screen reads, in a few variants."""
+    st = {"model": "NVIDIA Jetson Orin Nano Super", "platform": "Jetson Orin", "power_mode": "MAXN_SUPER" if n % 2 else None,
+          "uptime": 93784.9 + n, "system": {"os": "Ubuntu 22.04", "kernel": "5.15", "arch": "aarch64", "hostname": "h",
+                                           "l4t": "36.5", "extra": 3, "empty": ""},
+          "cpu": [{"id": i, "usage": [0.0, 12.25, 99.95, 100.0, 0.05][i], "freq": [None, 0, 729600000, 1510400000, 2500][i]}
+                  for i in range(5)] if n != 2 else [],
+          "cpu_sampling": {"mode": "interval", "window_ms": 1000.0,
+                           "unavailable": [{"id": 5, "reason": "warmup"}, {"id": 6, "reason": "gap"}, {"id": 7, "reason": "odd"},
+                                           {"id": 8, "reason": "warmup"}] if n else []},
+          "gpu": {"usage": 37.5, "freq": 306000000, "max_freq": 1020000000} if n != 1 else {"usage": None, "freq": None},
+          "npu": {"usage": 0.0, "freq": None} if n == 1 else None,
+          "memory": {"total": 8 << 30, "used": 3 * (1 << 30) + 123456789, "swap_total": (4 << 30) if n % 2 else 0, "swap_used": 1 << 28},
+          "disk": {"total": 100 << 30, "used": 0 if n == 3 else 55 << 30},
+          "temperature": {"cpu": 51.25, "gpu": 49.95, "tj": 52.0} if n != 3 else {},
+          "power": {"VDD_IN": 4.755, "VDD_CPU_GPU_CV": 0.005} if n != 3 else {},
+          "fans": [{"name": "pwmfan", "rpm": 2100, "percent": 35}, {"name": "x", "rpm": None, "percent": None}],
+          "network": {"scope": {"id": "netns1:x"}, "interfaces": [
+              {"name": "eth0", "rates": {"rx_bytes_per_s": 1023.5, "tx_bytes_per_s": 1048576.0, "rx_packets_per_s": 10.25,
+                                         "tx_packets_per_s": 0.0}, "window_ms": 1000.5, "rx": {"errors": 0, "dropped": 2},
+               "tx": {"errors": 1, "dropped": 0}},
+              {"name": "a-very-long-interface-name", "rates": None, "reason": "warmup"},
+              {"name": "wlan0", "rates": {}, "reason": "something_new"}] + [
+              {"name": f"veth{i}", "rates": None, "reason": None} for i in range(12 if n == 1 else 0)]},
+          "disk_io": {"disks": [{"name": "nvme0n1", "rates": {"read_bytes_per_s": 5e9, "reads_per_s": 1.0, "write_bytes_per_s": 0.0,
+                                                               "writes_per_s": 0.0, "io_time_ratio": 0.0125}, "window_ms": 999,
+                                 "in_flight": 3},
+                                {"name": "sda", "rates": None, "reason": "gap", "in_flight": None}]},
+          "pressure": {"resources": {"cpu": {"some": {"avg10": 1.25}}, "io": {"some": {"avg10": 0.0}, "full": {"avg10": 0.05}}}},
+          "collectors": {"fans": {"state": "partial"}, "gpu": {"state": "error"}, "npu": {"state": "unavailable"}}}
+    return st
+
+
+def text_steps():
+    """The /text screen from each side's real server: snapshots and slow observations of every kind."""
+    out, t = [setup(slow=[("storage", 30.0), ("wifi", 5.0), ("battery", 60.0), ("probe", 10.0)])], T0
+    out.append(http("no snapshot yet: 503", t, "/text"))
+    obs = [("storage", {"partitions": [{"disk": "nvme0n1", "mount_points": ["/"]}, {"disk": "nvme0n1", "mount_points": []},
+                                       {"disk": "sda", "mount_points": []}],
+                        "filesystems": [{"device": "nvme0n1p1", "major": 259, "minor": 1, "fstype": "ext4",
+                                         "mount_points": [{"path": "/", "read_only": False}, {"path": "/b", "read_only": True}],
+                                         "total_bytes": 982806532096, "used_bytes": 113806532096, "available_bytes": 819000000000},
+                                        {"device": None, "major": 0, "minor": 30, "fstype": "btrfs",
+                                         "mount_points": [{"path": "/data", "read_only": True}], "total_bytes": 0,
+                                         "used_bytes": 0, "available_bytes": 0},
+                                        {"device": "sda1", "major": 8, "minor": 1, "fstype": "vfat",
+                                         "mount_points": [{"path": "/boot", "read_only": False}], "total_bytes": None,
+                                         "used_bytes": None, "available_bytes": None}]}),
+           ("wifi", {"interfaces": [{"name": "wlan0", "connected": True, "signal_dbm": -61, "signal_raw": None, "link_quality": 49,
+                                     "noise_dbm": -90},
+                                    {"name": "wlan1", "connected": True, "signal_dbm": None, "signal_raw": 45, "link_quality": None,
+                                     "noise_dbm": None},
+                                    {"name": "wlan2", "connected": True, "signal_dbm": None, "signal_raw": None,
+                                     "link_quality": None, "noise_dbm": None},
+                                    {"name": "wlan3", "connected": False}, {"name": "wlan4", "connected": None,
+                                                                            "connection_state": "permission_denied"},
+                                    {"name": "wlan5", "connected": None}]}),
+           ("battery", {"batteries": [{"name": "BAT0", "present": True, "percent": 80, "status": "Discharging", "voltage_uv": 12000000,
+                                       "current_ua": -1500000, "power_uw": None, "cycle_count": 42, "charge_full_uah": 4000000,
+                                       "charge_full_design_uah": 4400000},
+                                      {"name": "BAT1", "present": False},
+                                      {"name": "BAT2", "present": None, "percent": None, "capacity_level": "Low", "current_ua": 0,
+                                       "energy_full_uwh": 5, "energy_full_design_uwh": 0, "power_uw": 7000000},
+                                      {"name": "BAT3", "percent": None, "status": None}],
+                         "external": [{"name": "AC", "online": True}, {"name": "USB", "online": False},
+                                      {"name": "W", "online": None}]}),
+           ("probe", {"targets": [{"address": "192.0.2.1", "port": 22, "connect_ms": 1.25, "reason": None, "failures": 0, "attempts": 3},
+                                  {"address": "2001:db8::1", "port": 443, "connect_ms": None, "reason": "timeout", "failures": 3,
+                                   "attempts": 10}]})]
+    for g, data in obs:
+        out += observation(g, g, t, MS, data)
+    for n in range(4):
+        stats = stats_screen(n)
+        out += collection(f"variant {n}", t + (n + 1) * S, MS, result(stats, {}, required(t + (n + 1) * S, t + (n + 1) * S + 5)))
+        out.append(http(f"variant {n}: the screen", t + (n + 1) * S + 2 * MS, "/text"))
+    out.append(http("200 s later: the snapshot stale", t + 200 * S, "/text"))
+    out += collection("a fresh snapshot", t + 200 * S, MS, result(stats_screen(0), {}, required(t + 200 * S, t + 200 * S + 5)))
+    out.append(http("observations not current", t + 200 * S + 2 * MS, "/text"))
+    bad = stats_screen(0)
+    bad["temperature"]["cpu"] = None  # Python cannot format it: no answer
+    out += collection("a temperature without a value", t + 201 * S, MS, result(bad, {}, required(t + 201 * S, t + 201 * S + 5)))
+    out.append(http("no answer on both", t + 201 * S + 2 * MS, "/text"))
+    nomodel = stats_screen(0)
+    del nomodel["model"]
+    out += collection("no model", t + 202 * S, MS, result(nomodel, {}, required(t + 202 * S, t + 202 * S + 5)))
+    out.append(http("no answer on both", t + 202 * S + 2 * MS, "/text"))
+    out += observation("storage of another shape", "storage", t + 203 * S, MS, {"filesystems": [{"mount_points": []}]})
+    out += collection("a good snapshot", t + 203 * S, MS, result(stats_screen(1), {}, required(t + 203 * S, t + 203 * S + 5)))
+    out.append(http("storage that cannot be shown: no answer", t + 203 * S + 2 * MS, "/text"))
+    return out
+
+
 def replay_off_steps():
     return [setup(), *collection("one", T0, MS, good(T0)),
             http("replay off", T0 + S, "/api/samples"), http("history off", T0 + S, "/api/history"),
@@ -409,7 +501,7 @@ def replay_off_steps():
 
 
 SCENARIOS = {"core": core_steps, "provenance": provenance_steps, "observations": observation_steps,
-             "history": history_steps, "replay": replay_steps, "features_off": replay_off_steps}
+             "history": history_steps, "replay": replay_steps, "features_off": replay_off_steps, "text": text_steps}
 
 
 # --- comparing -----------------------------------------------------------------------------------------

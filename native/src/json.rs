@@ -144,6 +144,14 @@ impl Value {
 }
 
 impl Default for Value { fn default() -> Value { Value::Null } }
+/// v["key"]: the member, or null when there is none.
+impl std::ops::Index<&str> for Value {
+    type Output = Value;
+    fn index(&self, key: &str) -> &Value {
+        static NULL: Value = Value::Null;
+        self.get(key).unwrap_or(&NULL)
+    }
+}
 impl From<&str> for Value { fn from(s: &str) -> Value { Value::Str(s.to_string()) } }
 impl From<String> for Value { fn from(s: String) -> Value { Value::Str(s) } }
 impl From<i64> for Value { fn from(i: i64) -> Value { Value::Int(i) } }

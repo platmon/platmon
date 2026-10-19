@@ -539,6 +539,154 @@ def passive_failure_steps():
             ("empty files", empty, 15 * S, OK), ("recovered", recovered, 16 * S, OK)]
 
 
+# The slow groups: storage, Wi-Fi, battery and the TCP probe. Mount points are real directories of the
+# container's own tmpfs mounts (/fx, /fxhost), so the fake mountinfo can give their real device numbers.
+PROBE = {}
+DEVICES = "devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block"
+
+
+def dev_of(path):
+    st = os.stat(path)
+    return os.major(st.st_dev), os.minor(st.st_dev)
+
+
+def partition(name, disk, virtual=False):
+    """/sys/class/block/<name> as the kernel links a partition of disk."""
+    base = f"devices/virtual/block/{disk}" if virtual else f"{DEVICES}/{disk}"
+    put(sys_(f"{base}/{name}/partition"), "1\n")
+    link(sys_(f"class/block/{name}"), f"../../{base}/{name}")
+
+
+def mountinfo(rows):
+    """/proc/self/mountinfo in place of the real one (the other /proc/self entries stay links)."""
+    path = proc("self/mountinfo")
+    if os.path.islink(path):
+        os.remove(path)
+    put(path, "".join(r + "\n" for r in rows))
+
+
+def wireless(rows):
+    put(proc("net/wireless"), "Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n"
+                              " face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n"
+                              + "".join(r + "\n" for r in rows))
+
+
+def net_class(name, ifindex, carrier, flags="0x1003"):
+    for f, v in (("ifindex", ifindex), ("carrier", carrier), ("flags", flags)):
+        if v is not None:
+            put(sys_(f"class/net/{name}/{f}"), f"{v}\n")
+
+
+def supply(name, **attrs):
+    for k, v in attrs.items():
+        put(sys_(f"class/power_supply/{name}/{k}"), v if isinstance(v, bytes) else f"{v}\n")
+
+
+def slow_tree():
+    base_proc({0: CPUS[0]})
+    for d in ("/fx/mnt/root", "/fx/mnt/with space", "/fx/mnt/x", "/fxhost/data", "/fx/mnt/locked/in", "/fx/mnt/sda3"):
+        os.makedirs(d, exist_ok=True)
+    os.chmod("/fx/mnt/locked", 0o700)  # nobody cannot reach /fx/mnt/locked/in
+    with open("/fxhost/file", "w") as f:
+        f.write("x")
+    (a1, a2), (b1, b2) = dev_of("/fx"), dev_of("/fxhost")
+    PROBE.update(a=(a1, a2), b=(b1, b2))
+    put(proc("partitions"), "major minor  #blocks  name\n\n"
+        f"   8        0  1000000 sda\n   8        1   500000 sda1\n   8        2   400000 sda2\n"
+        f" {a1} {a2} 300000 sdz1\n {b1} {b2} 200000 nvme0n1p1\n 259 0 900000 nvme0n1\n   7  0 1000 loop0\n"
+        f"   7  1 900 loop0p1\n 179 1 5000 mmcblk0p1\n   8 1 999999 sda1\nnot a row\n")
+    link(sys_("block/sdz"), f"../{DEVICES}/sdz")  # sda: base_proc links it
+    link(sys_("block/nvme0n1"), BLOCK["nvme0n1"])
+    link(sys_("block/loop0"), BLOCK["loop0"])
+    for name, disk in (("sda1", "sda"), ("sda2", "sda"), ("sdz1", "sdz"), ("nvme0n1p1", "nvme0n1")):
+        partition(name, disk)
+    partition("loop0p1", "loop0", virtual=True)
+    os.makedirs(sys_("class/block/mmcblk0p1"))  # listed, but not a partition (no partition file)
+    mountinfo([f"21 1 {a1}:{a2} / /fx/mnt/root rw,relatime - ext4 /dev/sdz1 rw",
+               f"22 21 {a1}:{a2} /x /fx/mnt/with\\040space rw - ext4 /dev/sdz1 rw,errors=remount-ro",
+               f"23 1 {b1}:{b2} /f /fxhost/file rw - xfs /dev/nvme0n1p1 ro,noatime",
+               f"24 1 {b1}:{b2} / /fxhost/data rw - xfs /dev/nvme0n1p1 ro,noatime",
+               "25 1 0:99 / /run rw - tmpfs tmpfs rw",
+               "26 1 8:2 / /fx/mnt/gone rw - ext4 /dev/sda2 rw",
+               "27 1 8:3 / /fx/mnt/sda3 rw - ext4 /dev/sda3 rw",
+               "28 1 8:5 / /fx/mnt/locked/in rw - ext4 /dev/sda5 rw",
+               f"29 1 {a1}:{a2} / /fx/mnt/x rw - ext4 none rw",
+               "30 1 8:6 / /fx/mnt/bad shared:1 - ext4",
+               "garbage without separator",
+               "31 1 x:y / /m rw - ext4 /dev/sdq rw",
+               "32 1 x:y / /m rw - nfs host:/ rw"])
+    for n in ("wlan0", "wlan1", "wlan2", "wlan3"):
+        iface(n)
+    idx = {name: i for i, name in socket.if_nameindex()}
+    net_class("wlan0", idx["wlan0"], 1)
+    net_class("wlan1", idx["wlan1"], 0)
+    net_class("wlan2", idx["wlan2"] + 100, 1)  # moved meanwhile: not trusted
+    net_class("wlan3", idx["wlan3"], 1)
+    os.chmod(sys_("class/net/wlan3/carrier"), 0)
+    wireless(["wlan0: 0000   70.  -40.  -256        0      0      0      0      0        0",
+              " wlan1: 0000   60.  -50.  -90.        0      0      0      0      0        0",
+              "wlan2: 0000   50.  -55.  -95.        0      0      0      0      0        0",
+              "wlan3: 0000   50.  -55.  -95        0      0      0      0      0        0",
+              "wlan9: 0000   40   -60   -256        0      0      0      0      0        0",
+              "raw0: 0000   30.   45.   -256        0      0      0      0      0        0",
+              "big0: 0000   300.  -40.  -256        0      0      0      0      0        0",
+              "this is not a row"])
+    supply("BAT0", type="Battery", present=1, capacity=80, charge_now=2000000, charge_full=4000000,
+           charge_full_design=4400000, current_now=-1500000, voltage_now=12000000, cycle_count=42, status="Discharging",
+           capacity_level="Normal", technology="Li-ion", health="Good", serial_number="SECRET")
+    supply("BAT1", type="Battery", present=0, capacity=50)
+    supply("BAT2", type="Battery", capacity=101, energy_now=5000000, power_now=-7000000, status="", technology="x" * 33,
+           voltage_now=-1, cycle_count="many")
+    supply("BAT3", type="Battery", capacity=55)
+    os.chmod(sys_("class/power_supply/BAT3/capacity"), 0)
+    supply("UPS0", type="UPS", capacity=99, status="Charging")
+    supply("AC", type="Mains", online=1)
+    supply("USB0", type="USB", online="x")
+    supply("NOTYPE", online=1)
+    listen = socket.socket()
+    listen.bind(("127.0.0.1", 0))
+    listen.listen(64)
+    closed = socket.socket()
+    closed.bind(("127.0.0.1", 0))
+    PROBE.update(listen=listen, closed=closed, targets=f"127.0.0.1:{listen.getsockname()[1]}, "
+                 f"127.0.0.1:{closed.getsockname()[1]}, 192.0.2.1:80, [::1]:{closed.getsockname()[1]}")
+
+
+def slow_steps():
+    def changed():
+        supply("BAT0", capacity=79, status="Charging")
+        shutil.rmtree(sys_("class/power_supply/AC"))
+        net_class("wlan1", None, 1)
+        partition("sda3", "sda")
+        with open(proc("partitions"), "a") as f:
+            f.write("   8        3   100000 sda3\n")
+        os.chmod(proc("self/mountinfo"), 0)
+
+    def gone():
+        os.remove(proc("partitions"))
+        os.remove(proc("net/wireless"))
+        shutil.rmtree(sys_("class/power_supply"))
+        os.makedirs(sys_("class/power_supply"))
+        os.chmod(proc("self/mountinfo"), 0o644)
+        mountinfo([])
+
+    def broken():
+        put(proc("partitions"), b"major minor\n\n 8 1 10 sd\xff1\n")
+        put(proc("net/wireless"), "not the header\n")
+        supply("BAT9", type="Battery", capacity=b"\xff\n")
+
+    def nothing():
+        os.remove(proc("partitions"))
+        put(proc("partitions"), "major minor  #blocks  name\n\n")
+        wireless([])
+        shutil.rmtree(sys_("class/power_supply"))
+        os.remove(sys_("class/net/wlan0/carrier"))  # not exposed, but wlan0 is not listed now anyway
+        PROBE["listen"].close()  # the open port is closed now: refused
+
+    return [("first", None, 10 * S, OK), ("changed", changed, 11 * S, OK), ("files gone", gone, 12 * S, OK),
+            ("broken files", broken, 13 * S, OK), ("nothing there", nothing, 14 * S, OK)]
+
+
 SCENARIOS = {
     "pc": (pc_tree, pc_steps),
     "failures": (failure_tree, failure_steps),
@@ -547,6 +695,7 @@ SCENARIOS = {
     "pi": (pi_tree, two_steps),
     "passive": (passive_tree, passive_steps),
     "passive_failures": (passive_tree, passive_failure_steps),
+    "slow": (slow_tree, slow_steps),
 }
 
 
@@ -596,7 +745,7 @@ def exited(p):
 def step(p, base, wall, timeout):
     """One collection: {"stats", "sensors", "required", "passive"} or {"error"}, else Broken."""
     out = ask(p, f"{base} {wall}", timeout)
-    if not isinstance(out, dict) or set(out) not in ({"stats", "sensors", "required", "passive"}, {"error"}):
+    if not isinstance(out, dict) or set(out) not in ({"stats", "sensors", "required", "passive"}, {"observations"}, {"error"}):
         raise Broken(f"neither a collection nor an error: {json.dumps(out)[:80]!r}")
     return out
 
@@ -630,8 +779,14 @@ def kind(v):
     return "null" if v is None else type(v).__name__
 
 
+LOOSE = ("/connect_ms",)  # a TCP connect's time differs from one connection to the next: only both >= 0
+
+
 def diff(a, b, ptr, out):
-    """Every difference, exactly: types (int is not float), keys and their order, values."""
+    """Every difference, exactly: types (int is not float), keys and their order, values; at a LOOSE
+    pointer, two numbers that are both >= 0."""
+    if ptr.endswith(LOOSE) and all(isinstance(x, (int, float)) and not isinstance(x, bool) and x >= 0 for x in (a, b)):
+        return
     if kind(a) != kind(b):
         out.append(f"{ptr}: {kind(a)} {a!r} (python) != {kind(b)} {b!r} (rust)")
     elif isinstance(a, dict):
@@ -652,6 +807,9 @@ def diff(a, b, ptr, out):
 def states(a):
     if "error" in a:
         return "failed"
+    if "observations" in a:
+        return " ".join(f"{g}={o['collector']['state']}" + (f"({o['collector']['reason']})" if o["collector"]["reason"] else "")
+                        for g, o in a["observations"].items())
     c = a["stats"]["collectors"]
     out = " ".join(f"{g}={s['state']}" + (f"({s['reason']})" if s["reason"] else "")
                    for g, s in c.items() if s["state"] != "ok") or "all ok"
@@ -719,7 +877,11 @@ def run(name, binary):
     steps = steps()
     clear()
     tree()
-    problems, report = compare(steps, ["python3", f"{HERE}/fixture_py.py"], [binary, "script"])
+    if name == "slow":  # the slow groups' readers, with the probe's targets the tree opened
+        args = [PROBE["targets"], "0.5"]
+        problems, report = compare(steps, ["python3", f"{HERE}/observe_py.py", *args], [binary, "observe-script", *args])
+    else:
+        problems, report = compare(steps, ["python3", f"{HERE}/fixture_py.py"], [binary, "script"])
     print(f"{name}: {'OK' if not problems else 'FAILED'}")
     print("\n".join(report))
     return problems

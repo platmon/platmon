@@ -48,7 +48,7 @@ const TX: [&str; 8] = ["bytes", "packets", "errs", "drop", "fifo", "colls", "car
 const COUNTERS: [&str; 4] = ["bytes", "packets", "errors", "dropped"];
 
 /// network.valid_name: 1-15 bytes, not . or .., printable, no /, : or whitespace.
-fn valid_ifname(name: &str) -> bool {
+pub fn valid_ifname(name: &str) -> bool {
     !name.is_empty() && name.len() < IFNAMSIZ && name != "." && name != ".."
         && name.chars().all(|c| py_printable(c) && c != '/' && c != ':' && !py_space(c))
 }
@@ -96,13 +96,13 @@ fn parse_net_dev(text: &str) -> Option<(Vec<(String, NetRow)>, Vec<(String, &'st
 }
 
 /// network.namespace_id from the device and inode /proc/self/ns/net resolves to.
-fn namespace_id(dev: u64, ino: u64) -> String {
+pub fn namespace_id(dev: u64, ino: u64) -> String {
     let text = format!(r#"{{"dev":{},"ino":{},"v":1}}"#, dev, ino);
     format!("netns1:{}", crate::sha256::hex(text.as_bytes()))
 }
 
 /// socket.if_nameindex(): (index, name) of every interface.
-fn if_indexes() -> io::Result<Vec<(u32, String)>> {
+pub fn if_indexes() -> io::Result<Vec<(u32, String)>> {
     let mut out = Vec::new();
     unsafe {
         let list = libc::if_nameindex();
@@ -119,7 +119,7 @@ fn if_indexes() -> io::Result<Vec<(u32, String)>> {
     Ok(out)
 }
 
-fn strerror(e: &io::Error) -> String {
+pub fn strerror(e: &io::Error) -> String {
     let s = e.to_string(); // "No such file or directory (os error 2)"
     s.rsplit_once(" (os error").map_or(s.clone(), |(m, _)| m.to_string())
 }
@@ -273,7 +273,7 @@ fn valid_disk_name(name: &str) -> bool {
 }
 
 /// disk_io.is_physical: Some(false) under devices/virtual, Some(true) otherwise, None without a link.
-fn is_physical(name: &str) -> io::Result<Option<bool>> {
+pub fn is_physical(name: &str) -> io::Result<Option<bool>> {
     match std::fs::read_link(format!("{}/{}", SYS_BLOCK, name)) {
         Ok(target) => Ok(Some(!format!("/{}", target.to_string_lossy()).contains("/devices/virtual/"))),
         Err(e) if e.raw_os_error() == Some(libc::ENOENT) => Ok(None),
