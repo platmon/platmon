@@ -2,8 +2,10 @@
 
 A Rust port of the core of `collector.collect_recorded`, to measure what a native collector would cost
 and to check whether it can produce the same output. It is next step 1 of
-[rust-feasibility.md](../docs/performance/rust-feasibility.md). **Not part of the product:** the service,
-the packages and the source archive do not include it, and nothing here changes the release.
+[rust-feasibility.md](../docs/performance/rust-feasibility.md). Step 3 (below) builds a Rust service
+candidate on it that keeps the service's contracts, to compare the whole process. **Not part of the
+product:** the service, the packages and the source archive do not include it, and nothing here changes
+the release.
 
 ## Scope
 
@@ -21,10 +23,10 @@ Ported, with the same output as the Python collector:
   (`/proc/self/net/dev`, the namespace id, ifindex from `if_nameindex`), Disk I/O (`/proc/diskstats`, physical
   disks by their `/sys/block` link) and Pressure (`/proc/pressure`), with their read spans
 
-Not ported: the slow groups (storage, Wi-Fi, battery, probe), the nvidia-smi fallback, and everything in
-`runtime/` (Sampler, history, replay, HTTP). So this is the 1 s core collection used on the three hosts
-checked, extended with Network, Disk I/O and Pressure, with the same output on the fixtures defined here;
-not the whole default collection of the product.
+Not ported: the slow groups (storage, Wi-Fi, battery, probe), the nvidia-smi fallback, and (until step 3)
+everything in `runtime/` (Sampler, history, replay, HTTP). So this is the 1 s core collection used on the
+three hosts checked, extended with Network, Disk I/O and Pressure, with the same output on the fixtures
+defined here; not the whole default collection of the product.
 
 Behaviour kept from Python where bypassing std made it explicit:
 
@@ -52,6 +54,61 @@ Python's float repr and key order exactly, and both are tested against Python. B
 The allocator cache measured on 2026-10-18 (`src/alloc.rs`) is behind the `cache-alloc` feature. The default
 build uses the system allocator; see [Results](#results).
 
+## Step 3: the runtime
+
+The goal is a Rust service candidate that keeps the existing contracts, so that the whole process can be
+compared with the Python service, not a switch to Rust. The Python service and its packages stay as they
+are; nothing changes in the product until the comparison is in and decided. Default system allocator, the
+same dependency policy (only `libc`); the `cache-alloc` build is not part of step 3.
+
+| Stage | Scope | Done when |
+| --- | --- | --- |
+| 3A, publication and live API | Sampler (one writer, immutable publications, states and freshness, data age from the read records), live HTTP (`/api/stats`, `/api/status`, `/api/observations`, the web page), the slow groups' execution structure (one thread each, a blocked read stalls only its group) | the publication, failure, recovery and concurrent request contracts hold with set collections and clocks; slow readers may be fakes |
+| 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
+| 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
+
+A result without the slow groups is a runtime experiment, not the service: until 3B is done, a comparison
+turns the same features off on both sides.
+
+**Contracts 3B must keep** (from the Python service and docs/reference): requests never collect; a slow
+group has its own id and times, and a blocked read neither blocks the core nor queues more work for its
+group. History keeps failures, gaps and counter resets as null and broken segments, never 0; a changed
+device identity starts a new series; series that went away are dropped after the retention. Replay keeps
+`instance_id`, a cursor per stream, `gap_before`, `missing_ranges` and `next_after`, answers 409 after a
+restart, and moves the cursor on also when everything asked for has expired. Published data can be reused,
+but never a finished answer: ages and `stale` are computed per answer, also for replayed samples.
+
+**3C measurements** (planned, A B B A with the default allocator only):
+- the release budget as it stands (docs/performance/budget.md): default features, 1 s collection, one
+  client reading `/api/stats` every second, whole-process CPU ≤ 2.5 %, plus response times;
+- everyday Hub polling: the same endpoints, period and page size as the Hub uses;
+- a Hub reconnect: the same accumulated data fetched with consecutive replay requests, for CPU, memory and
+  the collection cadence while it runs.
+The load comes from a test client; the production Hub is not pointed at the candidate. Memory is not
+judged from 120 s CPU windows: history and replay keep 600 s by default (and replay's `max_bytes` is its
+JSON payload budget, not an RSS limit), so memory runs cover at least two retention periods, with VmRSS
+throughout and `smaps_rollup` RSS/PSS at the main points (buffers full, during and after a backlog fetch).
+The collector-only RSS above (0.7–0.9 MiB) is not an estimate of the service's.
+
+**What 3A has** (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`, `platmon-native serve`):
+- One writer thread collects every interval. A publication is immutable: its stats (with the passive
+  groups' `read` set from the records), `collectors` and `sensor_meta` are serialized once, when it is
+  published. Each answer writes only what depends on its moment around them: `sample` with the ages,
+  `state`, `ready`. The lock is held to swap the publication and to read it, never to collect or serialize.
+- States, freshness, `collection_failed`, `collection_too_slow`, consecutive failures and the data age with
+  its basis follow `runtime/sampler.py`, including every reason to fall back to the collection start.
+- JSON as `json.dumps` writes it (`", "`, `": "`, non-ASCII escaped), so the answers are byte for byte the
+  Python service's for the same state.
+- HTTP/1.0 on std sockets, one thread per connection, at most 32 (excess ones closed before a thread
+  starts), backlog 5, 10 s per request read, 10 s per response write without progress, 64 KiB writes;
+  request line and header limits, errors and their status lines as `http.server` gives them.
+- Slow groups: one thread each, the next observation an interval after the last one started; their entries
+  as `runtime/slow.py` writes them. No reader is ported, so `serve` starts none and `/api/observations`
+  has `groups: {}`, as the Python service with them off.
+- Not in 3A: history, replay (`/api/history` is a 404, `/api/samples` the `replay_unavailable` 404, as with
+  them off), `/text` (a 404), `platmon.ini` (options: `--interval`, `--bind`, `--port`, `--web`,
+  `--app-version`; `[thresholds]` at their defaults), the slow readers.
+
 ## Use
 
 ```sh
@@ -60,6 +117,8 @@ native/tools/fixture.sh             # deterministic equivalence on fake trees, i
 PYTHONPATH=. python3 native/tools/compare.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 PYTHONPATH=. native/tools/bench.sh native/target/x86_64-unknown-linux-musl/release/platmon-native out.jsonl \
     native/target/cache-alloc/x86_64-unknown-linux-musl/release/platmon-native
+python3 native/tools/runtime_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon-native
+PYTHONPATH=. python3 native/tools/live_http.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 ```
 
 On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share/platmon`.
@@ -75,9 +134,9 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
   and a line over 4 MiB is not read further. Before the scenarios, the harness checks itself against fake
   sides (`fixture.py --self-test`, no container needed): both failing where a collection is expected, a
   nonzero exit, a hang (also after part of an answer, or an answer completed in pieces past the deadline),
-  output that is not JSON and an oversized line must each be reported. Interfaces are real ones in the container's own network namespace (empty
-  bridges, created and removed by ioctl, so the kernel gives them their ifindex); the container has
-  `NET_ADMIN` there and no network.
+  output that is not JSON and an oversized line must each be reported. Interfaces are real ones in the
+  container's own network namespace (empty bridges, created and removed by ioctl, so the kernel gives them
+  their ifindex); the container has `NET_ADMIN` there and no network.
 - `compare.py`: **a live smoke test** on a real host, both collectors at the same moment. Structure, types,
   identities, `collectors`, source ids, which values have a span, the clock source, and spans within 5 s of
   each other are exact. Readings that move between two reads are only checked to be plausible (a GPU clock
@@ -89,6 +148,15 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
   collection, and its read scope: the SHA-256 of the sorted source ids and the interfaces, disks and
   pressure resources it read, with how many different scopes came up in the window. stderr goes to
   `OUT.jsonl.log`.
+- `runtime_fixture.py`: **the runtime equivalence test** (step 3A). The service's Sampler and slow groups
+  (`runtime_py.py`) and `platmon-native runtime-script` get the same operations: a collection begins, a
+  view is taken while it runs, it ends with a given collection or error; the same for observations. Every
+  answer must be the same text: the `/api/stats` body or none, the `/api/status` body (without `levels`),
+  the `/api/observations` body. Runs on the host, reads no tree; the same self-test and deadlines as
+  `fixture.py`.
+- `live_http.py`: **a live check of the HTTP runtime.** Starts the Python service (slow groups, history and
+  replay off) and `platmon-native serve` on two local ports, checks both the same way and compares them
+  (see its docstring). It stops only the two processes it started, by their handles.
 
 ## Results
 
@@ -209,6 +277,41 @@ Collection time (p50 / p95, ms) and memory (VmRSS at the end of the window):
 - These figures cover collection without network, disk_io or pressure, and not the service: no HTTP, no
   JSON for responses, no history or replay.
 
+### Runtime equivalence (step 3A)
+
+`runtime_fixture.py`, 2026-10-19, on the x86_64 build and on the aarch64 build on the Orin and the
+Raspberry Pi: 3 of 3 scenarios, 147 answers the same text. Harness self-test: 6 of 6 controls.
+
+| Scenario | What it covers |
+| --- | --- |
+| `core` | starting, a running first collection at and past `stale_after`, one dropped as too slow and one taking exactly `stale_after` (kept), ready, the data age at `stale_after` and 1 ns past it (stats withheld), failures (degraded, counted, stale) and recovery, a snapshot degraded by its own optional group, `core` in the collection's `collectors` replaced, `collectors` not a dict or missing, odd wall times, empty stats; non-ASCII keys and text, `1e-05`, `1e+16`, `-0.0`, integers beyond 64 bits |
+| `provenance` | records that check out, and each reason to count the data age from the collection start: another clock, a required read missing or extra, spans before or after the collection, reversed, of floats, booleans or three values, required reads not a dict, a record for a value that is not there or not a dict, a number without its record or with a read outside, a record without a span, records not a dict, passive values without a read (and none without values), a passive read outside, a passive read without values; reads exactly at the collection's start and end (valid) |
+| `observations` | groups starting, running at and past `stale_after`, ok, partial, error, unavailable, an exception (`internal_error`, data null), 40 issues (32 kept, targets cut to 64 characters), stale with its data kept, an observation inside a core collection, a second observation's id |
+
+Eighteen deliberate defects in copies of the runtime code (state boundaries, failure counting, the
+degraded rule, span limits, the clock check, the passive rule, the fallback, `core` handling, the place of
+`read`, observation staleness and errors, ages, ASCII escaping) were each caught; three were first missed
+and added the boundary cases (exactly `stale_after`, a read at the collection's start, `read` not last).
+
+Rust unit tests also run the threads: a slow reader that blocks keeps its group at one read in flight
+(stale, `collecting_for_ms` growing) while another group publishes; 16 clients × 25 requests never
+collect and never see a sequence go back; excess connections are closed, a silent client is dropped after
+the request timeout; request-line errors as `http.server` gives them.
+
+### Live HTTP check (step 3A)
+
+`live_http.py`, 2026-10-19, 3 runs each on the x86 PC, the Orin and the Raspberry Pi: no difference.
+Every path gave the same status code, Content-Type and Cache-Control except `/text` (not ported); the web
+page and its files were the same bytes; `/api/stats`, `/api/status` and `/api/observations` had the same
+keys, order and types. On both servers: 320 concurrent requests all 200 with one instance and no
+sequence going back, at most 2 snapshots published while they ran; of 40 idle connections 8 closed, a
+request refused while 32 were held and answered after; a cut-off request line closed after 10.0–10.2 s.
+
+Not covered: the write timeout against a reader that stops (needs a response larger than the socket
+buffers), a burst of connections against the backlog of 5 (with 40 opened at once the Python server
+answered a request while the client held 40; the check opens them 20 ms apart), HTTP/0.9 bodies beyond
+the unit test, Python versions' error page markup (only status codes are compared there).
+
 ### Earlier run (2026-10-18)
 
 The first prototype run, A B B A with the `cache-alloc` build only: Orin 1.273, 1.230 → 0.432, 0.431 %
@@ -226,7 +329,8 @@ cache removed the second; the 2026-10-19 run above shows what each part is worth
 compare vetted allocators instead of this cache (mimalloc: MIT; jemalloc: BSD-2-Clause; their Rust wrappers
 and bundled sources to be checked separately).
 
-Raw records are kept outside the repository. SHA-256, first 16 hex digits:
+Raw records are kept outside the repository (step 3A: the live check reports and the runtime mutants'
+outputs). SHA-256, first 16 hex digits:
 - 2026-10-19, with the passive groups: results Orin `bc7f4bfc203ca6a1`, Raspberry Pi `3840f075d3d1bc54`, x86
   `924f307d60ae6ac6`
 - 2026-10-19, core groups only: results Orin `ecad202e537830f8`, Raspberry Pi `94a036d9804393e1`, x86 `d4128078aeb6597d`

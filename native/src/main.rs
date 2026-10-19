@@ -11,15 +11,23 @@
 //!                                     ({"error": ...} for a failed collection)
 //!   platmon-native loop SECONDS [WARMUP]  collect every 1 s (after WARMUP s, default 3), print own CPU
 //!                                     (user/sys %), RSS, collection times and group states as JSON
+//!   platmon-native serve [--interval S] [--bind ADDR] [--port N] [--web DIR] [--app-version V]
+//!                                     step 3A: the service's core (Sampler) and live HTTP API, no slow
+//!                                     groups, history or replay (src/runtime.rs, src/http.rs)
+//!   platmon-native runtime-script     tools/runtime_fixture.py: Sampler and slow-group operations with
+//!                                     given times and collections, one JSON line per stdin line
 mod accel;
 #[cfg(feature = "cache-alloc")]
 mod alloc;
 mod common;
+mod http;
 mod jetson;
 mod json;
 mod metadata;
 mod passive;
+mod runtime;
 mod sha256;
+mod slow;
 mod sysfs;
 
 use common::{CpuCounters, Fan};
@@ -120,15 +128,17 @@ fn span_value(span: metadata::Span) -> Value {
 }
 
 impl Collector {
-    fn new() -> Collector {
+    /// max_gap: seconds, max(3 × interval, 5 s) in the service
+    fn new(max_gap: f64) -> Collector {
         let (platform, board) = detect();
-        Collector { platform, board, cpu: CpuCounters::new(Some(5.0), "interval"), gpu: accel::Accel::gpu(),
-                    npu: accel::Accel::npu(), network: passive::Network::new(Some(5.0)), disks: passive::Disks::new(Some(5.0)),
-                    logged: Vec::new() }
+        let ns = runtime::seconds_ns(max_gap);
+        Collector { platform, board, cpu: CpuCounters::new(Some(max_gap), "interval"), gpu: accel::Accel::gpu(ns),
+                    npu: accel::Accel::npu(ns), network: passive::Network::new(Some(max_gap)),
+                    disks: passive::Disks::new(Some(max_gap)), logged: Vec::new() }
     }
 
     /// collect_recorded(cpu, logged, clock, network, disk_io, pressure, gpu, npu), wired as the service does
-    /// at its default 1 s interval (max_gap 5 s).
+    /// by default.
     fn collect(&mut self) -> Result<Collected, String> {
         let mut g = Groups::new(true);
         let mut required = Vec::new();
@@ -322,7 +332,12 @@ impl Stats {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let mut c = Collector::new();
+    match args.get(1).map(String::as_str) {
+        Some("serve") => return serve(&args[2..]),
+        Some("runtime-script") => return runtime_script(),
+        _ => {}
+    }
+    let mut c = Collector::new(5.0); // the service's at its default 1 s interval
     match args.get(1).map(String::as_str) {
         Some("collect") => {
             let _ = c.collect(); // the CPU baseline, as the service's first collection
@@ -394,8 +409,183 @@ fn main() {
             println!("{}", v.to_string(false));
         }
         _ => {
-            eprintln!("usage: platmon-native collect | script | loop SECONDS [WARMUP]");
+            eprintln!("usage: platmon-native collect | script | loop SECONDS [WARMUP] | serve [OPTIONS] | runtime-script");
             std::process::exit(2);
         }
+    }
+}
+
+/// platmon.levels with the default [thresholds]: [warning, critical] per name; temperature the board's.
+fn default_levels(platform: &str) -> Value {
+    let temperature = match platform {
+        "Jetson Orin" => [85.0, 95.0],
+        "Raspberry Pi" => [75.0, 80.0],
+        _ => [80.0, 90.0],
+    };
+    let mut v = Value::obj();
+    for (name, pair) in [("cpu", [80.0, 90.0]), ("gpu", [80.0, 90.0]), ("memory", [80.0, 90.0]), ("filesystem", [80.0, 90.0]),
+                         ("temperature", temperature), ("battery", [20.0, 10.0]), ("wifi", [-70.0, -80.0])] {
+        v.set(name, Value::Arr(pair.iter().map(|x| Value::Float(*x)).collect()));
+    }
+    v
+}
+
+extern "C" fn on_term(_: libc::c_int) {
+    unsafe { libc::_exit(0) } // as platmon.py: a clean exit on SIGTERM (systemd stop, docker stop)
+}
+
+/// platmon.py with [core] interval and [http] from the options, the rest at its defaults except the slow
+/// groups, history and replay, which step 3A does not have.
+fn serve(args: &[String]) {
+    let (mut interval, mut bind, mut port, mut web, mut version) = (1.0f64, "0.0.0.0".to_string(), 9797u16, None, "0.0.0".to_string());
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        let value = it.next().unwrap_or_else(|| { eprintln!("serve: {} needs a value", flag); std::process::exit(2) });
+        let bad = || -> ! { eprintln!("serve: bad value for {}: {}", flag, value); std::process::exit(2) };
+        match flag.as_str() {
+            "--interval" => interval = value.parse().ok().filter(|i| (0.1..=3600.0).contains(i)).unwrap_or_else(|| bad()),
+            "--bind" => bind = value.clone(),
+            "--port" => port = value.parse().ok().filter(|p| *p >= 1).unwrap_or_else(|| bad()),
+            "--web" => web = Some(value.clone()),
+            "--app-version" => version = value.clone(),
+            _ => { eprintln!("serve: unknown option {}", flag); std::process::exit(2) }
+        }
+    }
+    unsafe { libc::signal(libc::SIGTERM, on_term as extern "C" fn(libc::c_int) as libc::sighandler_t) };
+    let mut c = Collector::new((3.0 * interval).max(5.0));
+    println!("platmon-native: platform {}, version {} (step 3A runtime)", c.platform, version);
+    let source = metadata::clock_source();
+    let sampler = std::sync::Arc::new(runtime::Sampler::new(interval, None, runtime::uuid4(), source));
+    let observations = std::sync::Arc::new(slow::Observations { groups: vec![], instance_id: sampler.instance_id.clone(),
+                                                                clock_source: source });
+    let levels = default_levels(c.platform);
+    let listener = http::bind(&bind, port).unwrap_or_else(|e| { eprintln!("platmon-native: cannot listen on {}:{}: {}", bind, port, e); std::process::exit(1) });
+    let s = sampler.clone();
+    std::thread::Builder::new().name("sampler".into()).spawn(move || {
+        static STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        s.run(|| c.collect().map(Collected::to_value), &STOP)
+    }).expect("cannot start the sampler");
+    println!("platmon http on {}:{}", bind, port);
+    std::sync::Arc::new(http::Server::new(sampler, observations, web, version, levels)).serve(listener);
+}
+
+fn number(op: &Value, key: &str) -> f64 {
+    match op.get(key) {
+        Some(Value::Int(i)) => *i as f64,
+        Some(Value::Float(f)) => *f,
+        _ => { eprintln!("runtime-script: {} must be a number", key); std::process::exit(2) }
+    }
+}
+
+fn integer(op: &Value, key: &str) -> i64 {
+    match op.get(key) {
+        Some(Value::Int(i)) => *i,
+        _ => { eprintln!("runtime-script: {} must be an integer", key); std::process::exit(2) }
+    }
+}
+
+fn text<'a>(op: &'a Value, key: &str) -> &'a str {
+    match op.get(key) {
+        Some(Value::Str(s)) => s,
+        _ => { eprintln!("runtime-script: {} must be a string", key); std::process::exit(2) }
+    }
+}
+
+/// The runtime script (tools/runtime_fixture.py; tools/runtime_py.py is the Python side). One JSON
+/// operation per line, one JSON line out for each:
+///   {"op": "setup", "interval", "instance_id", "clock", "slow": [[name, interval], ...]}
+///   {"op": "begin", "wall", "now"}            a collection starts
+///   {"op": "finish", "wall", "now", "result", "clock"}  it ends: result is Collected.to_value()'s shape or
+///                                             {"error": ...}; clock "other": its spans are on another clock
+///   {"op": "view", "now"}                     -> {"stats": the /api/stats JSON or null, "status": /api/status's}
+///   {"op": "slow_begin", "group", "wall", "now"}
+///   {"op": "slow_finish", "group", "now", "wall", "data", "notes": [[target, reason]], "values", "raise"}
+///   {"op": "observations", "now"}             -> {"observations": the /api/observations JSON}
+fn runtime_script() {
+    use std::io::BufRead;
+    let mut sampler: Option<runtime::Sampler> = None;
+    let mut groups: Vec<std::sync::Arc<slow::Slow>> = vec![];
+    let mut obs: Option<slow::Observations> = None;
+    let (mut begun, mut slow_begun) = ((0.0, 0), vec![]);
+    for line in std::io::stdin().lock().lines() {
+        let line = line.unwrap_or_default();
+        let op = json::parse(&line).unwrap_or_else(|e| { eprintln!("runtime-script: {}: {:?}", e, line); std::process::exit(2) });
+        let group = |op: &Value| groups.iter().position(|g| g.name == text(op, "group"))
+            .unwrap_or_else(|| { eprintln!("runtime-script: no group {:?}", op.get("group")); std::process::exit(2) });
+        let mut out = Value::obj();
+        match text(&op, "op") {
+            "setup" => {
+                let source: &'static str = if text(&op, "clock") == "boottime" { "boottime" } else { "monotonic" };
+                sampler = Some(runtime::Sampler::new(number(&op, "interval"), None, text(&op, "instance_id").into(), source));
+                groups = match op.get("slow") {
+                    Some(Value::Arr(items)) => items.iter().map(|g| match (g.get_index(0), g.get_index(1)) {
+                        (Some(Value::Str(name)), Some(Value::Int(_) | Value::Float(_))) => {
+                            let interval = match g.get_index(1) { Some(Value::Int(i)) => *i as f64, Some(Value::Float(f)) => *f, _ => unreachable!() };
+                            std::sync::Arc::new(slow::Slow::new(name, interval))
+                        }
+                        _ => { eprintln!("runtime-script: slow is [[name, interval], ...]"); std::process::exit(2) }
+                    }).collect(),
+                    _ => vec![],
+                };
+                slow_begun = vec![(0.0, 0); groups.len()];
+                obs = Some(slow::Observations { groups: groups.clone(), instance_id: text(&op, "instance_id").into(), clock_source: source });
+            }
+            name => {
+                let Some(s) = sampler.as_ref() else { eprintln!("runtime-script: setup first"); std::process::exit(2) };
+                match name {
+                    "begin" => {
+                        begun = (number(&op, "wall"), integer(&op, "now"));
+                        s.begin(begun.1);
+                    }
+                    "finish" => {
+                        let result = op.get("result").cloned().unwrap_or_default();
+                        let result = match result.get("error") {
+                            Some(e) => Err(e.to_string(false)),
+                            None => Ok(result),
+                        };
+                        let same = op.get("clock").map_or(true, |c| *c != Value::from("other"));
+                        s.finish(result, same, begun.0, begun.1, number(&op, "wall"), integer(&op, "now"));
+                    }
+                    "view" => {
+                        let now = integer(&op, "now");
+                        let (stats, status) = s.view(|| now);
+                        out.set("stats", stats.into());
+                        out.set("status", status.to_py().into());
+                    }
+                    "slow_begin" => {
+                        let i = group(&op);
+                        slow_begun[i] = (number(&op, "wall"), integer(&op, "now"));
+                        groups[i].begin(slow_begun[i].1);
+                    }
+                    "slow_finish" => {
+                        let i = group(&op);
+                        let mut g = metadata::Group::new(&groups[i].name, false);
+                        if let Some(Value::Arr(notes)) = op.get("notes") {
+                            for n in notes {
+                                let (Some(Value::Str(target)), Some(Value::Str(reason))) = (n.get_index(0), n.get_index(1)) else { continue };
+                                let reason: &'static str = metadata::PROBLEMS.iter().chain(metadata::ABSENT.iter())
+                                    .find(|r| **r == reason.as_str()).copied().unwrap_or_else(|| Box::leak(reason.clone().into_boxed_str()));
+                                g.note(target, reason, None);
+                            }
+                        }
+                        for _ in 0..integer(&op, "values") {
+                            g.got(());
+                        }
+                        let data = match op.get("raise") {
+                            Some(Value::Str(e)) => Err(e.clone()),
+                            _ => Ok(op.get("data").cloned().unwrap_or_default()),
+                        };
+                        let wall = number(&op, "wall");
+                        groups[i].finish(g, data, slow_begun[i].0, slow_begun[i].1, integer(&op, "now"), || wall);
+                    }
+                    "observations" => {
+                        let now = integer(&op, "now");
+                        out.set("observations", obs.as_ref().unwrap().view(|| now).into());
+                    }
+                    other => { eprintln!("runtime-script: unknown op {:?}", other); std::process::exit(2) }
+                }
+            }
+        }
+        println!("{}", out.to_string(false));
     }
 }

@@ -595,8 +595,16 @@ def exited(p):
 
 def step(p, base, wall, timeout):
     """One collection: {"stats", "sensors", "required", "passive"} or {"error"}, else Broken."""
+    out = ask(p, f"{base} {wall}", timeout)
+    if not isinstance(out, dict) or set(out) not in ({"stats", "sensors", "required", "passive"}, {"error"}):
+        raise Broken(f"neither a collection nor an error: {json.dumps(out)[:80]!r}")
+    return out
+
+
+def ask(p, request, timeout):
+    """Writes one request line, returns the JSON of the one answer line; Broken if there is none in time."""
     try:
-        p.stdin.write(f"{base} {wall}\n")
+        p.stdin.write(request + "\n")
         p.stdin.flush()
     except BrokenPipeError:
         raise Broken(exited(p)) from None
@@ -613,12 +621,9 @@ def step(p, base, wall, timeout):
     if len(line) > MAX_ANSWER:
         raise Broken(f"an answer longer than {MAX_ANSWER} bytes")
     try:
-        out = json.loads(line)
+        return json.loads(line)
     except ValueError:
         raise Broken(f"not JSON: {line[:80]!r}") from None  # also not UTF-8
-    if not isinstance(out, dict) or set(out) not in ({"stats", "sensors", "required", "passive"}, {"error"}):
-        raise Broken(f"neither a collection nor an error: {line[:80]!r}")
-    return out
 
 
 def kind(v):

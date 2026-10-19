@@ -40,8 +40,9 @@ pub struct Accel {
 }
 
 impl Accel {
-    pub fn gpu() -> Accel { Accel { kind: "gpu", max_gap: 5_000_000_000, last: Vec::new() } }
-    pub fn npu() -> Accel { Accel { kind: "npu", max_gap: 5_000_000_000, last: Vec::new() } }
+    /// max_gap: nanoseconds, round(max_gap * 1e9) of the Python Gpu/Npu
+    pub fn gpu(max_gap: i64) -> Accel { Accel { kind: "gpu", max_gap, last: Vec::new() } }
+    pub fn npu(max_gap: i64) -> Accel { Accel { kind: "npu", max_gap, last: Vec::new() } }
 
     fn share(&mut self, path: &str, counter: i64, ns_per_unit: i64, busy: bool) -> Option<f64> {
         let now = clock();
