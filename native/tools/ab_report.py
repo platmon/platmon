@@ -7,7 +7,12 @@ Each run is first checked for completeness (complete()): a run that did not do i
 is invalid. The self-test runs first: synthetic runs the judgement must pass, refuse as invalid, or find
 in violation.
 
-  python3 ab_report.py OUT.jsonl [OUT.jsonl ...]     # no file: the self-test only"""
+With --pss-budget (the final comparison, README "Support scope"), the candidate's runs are judged against
+an absolute PSS budget, each run on its own, instead of the 25 % rule against the baseline; a run that did
+not hold or fetch the same data as the baseline's, or lacks the peak's readings, is invalid for it.
+
+  python3 ab_report.py OUT.jsonl [OUT.jsonl ...]     # no file: the self-test only
+  python3 ab_report.py --pss-budget FULL,PEAK,SETTLED OUT.jsonl     # MiB, for the host of OUT.jsonl"""
 import copy
 import json
 import sys
@@ -157,9 +162,21 @@ def complete(r):
     return invalid, unverified
 
 
-def rules(r, a_runs):
+def slower(r, a_runs):
+    """The windows whose response p95 is more than 1 ms above the baseline's mean."""
+    out, base = [], a_runs[0]["variant"]
+    for name, get in P95:
+        a = mean([read(get, x) for x in a_runs])
+        if a is not None and (read(get, r) is None or read(get, r) > a + 1):
+            out.append(f"{name} {read(get, r)} ms, {base} {a:.3f} ms")
+    return out
+
+
+def rules(r, a_runs, final=False):
     """README's 3C rules for B; also applied to A, so a broken run of either shows. A rule can only pass on a
-    complete run (complete())."""
+    complete run (complete()). final (the final comparison, judge()): the absolute PSS budget instead of the
+    25 % memory rule, the release CPU target, and response p95 above the baseline's reported as performance
+    exceptions, not broken rules."""
     out = []
     for w in ("w1", "w2", "w3"):
         if r[w]["errors"]:
@@ -188,12 +205,14 @@ def rules(r, a_runs):
             if k in before and settled[k] > before[k]:
                 out.append(f"settled: {settled[k]} {k}, {before[k]} before the reconnect")
     base = a_runs[0]["variant"] if a_runs else None
-    if a_runs and r["variant"] != base:  # the same window's p95, at most 1 ms above the baseline's mean
-        for name, get in P95:
-            a = mean([read(get, x) for x in a_runs])
-            if a is not None and (read(get, r) is None or read(get, r) > a + 1):
-                out.append(f"{name} {read(get, r)} ms, {base} {a:.3f} ms")
-        if cc is not None:  # memory: at most 25 % above the baseline's
+    if a_runs and r["variant"] != base and not final:  # the same window's p95, at most 1 ms above the baseline's mean
+        out += slower(r, a_runs)
+    if a_runs and r["variant"] != base and final:  # the release target: at most 2.5 % of one core in w1 and w2
+        for w in ("w1", "w2"):
+            if r[w]["cpu_pct"] > 2.5:
+                out.append(f"{w}: {r[w]['cpu_pct']} % CPU, the release target 2.5 %")
+    if a_runs and r["variant"] != base:
+        if cc is not None and not final:  # memory: at most 25 % above the baseline's
             for name, get in MEMORY:
                 a = mean([read(get, x) for x in a_runs])
                 if a is not None and (read(get, r) is None or read(get, r) > 1.25 * a):
@@ -211,16 +230,65 @@ MEMORY = [("full buffers PSS", lambda r: r["points"]["filled"]["rollup_kib"]["Ps
           ("settled PSS", lambda r: r["points"]["settled"]["rollup_kib"]["Pss"])]
 
 
-def judge(r, a_runs):
-    """"ok", or what makes the run invalid (it cannot be judged), or the rules it broke; and what is unverified."""
+def same_data(r, a_runs):
+    """Why the run did not hold or fetch what the baseline's runs did (empty if it did): a budget is judged only
+    on the same data. Replay records per stream and history points at most one reading's worth fewer (a stream
+    can be one record short at the moment of reading, history one point per series); the same series; the
+    concurrent backlog per stream at most one fewer."""
+    out = []
+    held = lambda x: {s: v[1] - v[0] + 1 for s, v in x["points"]["filled"].get("replay", {}).items()}
+    least = {s: min(held(a).get(s, 0) for a in a_runs) for s in held(a_runs[0])}
+    for s, n in least.items():
+        if held(r).get(s, 0) < n - 1:
+            out.append(f"full buffers: {held(r).get(s, 0)} {s} records, {n} in the baseline's runs")
+    hist = [a["points"]["filled"].get("history") for a in a_runs]
+    mine = r["points"]["filled"].get("history")
+    if None in hist or mine is None:
+        out.append("full buffers: no history count")
+    elif mine["series"] != hist[0]["series"] or mine["points"] < min(h["points"] for h in hist) - mine["series"]:
+        out.append(f"full buffers: history {mine}, the baseline's {hist[0]}")
+    for s, n in a_runs[0]["concurrent"]["backlog"].items():
+        if r["concurrent"]["backlog"].get(s, 0) < min(a["concurrent"]["backlog"].get(s, 0) for a in a_runs) - 1:
+            out.append(f"concurrent: backlog {r['concurrent']['backlog']}, the baseline's {a_runs[0]['concurrent']['backlog']}")
+            break
+    return out
+
+
+def budget_check(r, a_runs, budget):
+    """(invalid, violations) of the candidate's absolute PSS budget (KiB: full buffers, concurrent peak,
+    settled), each run on its own. Judged only with the same data as the baseline's runs and with the peak's
+    readings there (the one before round 1, at least 5 samples a second on average, one after each round)."""
+    invalid = same_data(r, a_runs)
+    cc = r["concurrent"]
+    if "start_pss_kib" not in cc:
+        invalid.append("concurrent: no reading before round 1")
+    if cc["samples"] < 5 * cc["span_s"] or any("pss_kib" not in x for x in cc["rounds"]):
+        invalid.append(f"concurrent: {cc['samples']} PSS samples over {cc['span_s']} s and the rounds' readings")
+    if invalid:
+        return invalid, []
+    out = []
+    for (name, get), limit in zip(MEMORY, budget):
+        if read(get, r) > limit:
+            out.append(f"{name} {read(get, r)} KiB, budget {limit} KiB")
+    return [], out
+
+
+def judge(r, a_runs, budget=None):
+    """"ok", or what makes the run invalid (it cannot be judged), or the rules it broke; and what is unverified.
+    budget (KiB, as MEMORY): the final comparison (rules(final=True)) with the candidate's absolute PSS budget."""
     invalid, unverified = complete(r)
     if invalid:
         return "invalid", invalid, unverified
-    broken = rules(r, a_runs)
+    broken = rules(r, a_runs, final=budget is not None)
+    if budget is not None and a_runs and r["variant"] != a_runs[0]["variant"] and r.get("concurrent"):
+        invalid, over = budget_check(r, a_runs, budget)
+        if invalid:
+            return "invalid", invalid, unverified
+        broken += over
     return ("violations", broken, unverified) if broken else ("ok", [], unverified)
 
 
-def report(path):
+def report(path, budget=None):
     lines = [json.loads(line) for line in open(path)]
     setup = next(x["setup"] for x in lines if "setup" in x)
     runs = [x for x in lines if "variant" in x]
@@ -242,17 +310,22 @@ def report(path):
     r0 = (a or b)[0]
     rc = r0["reconnect"]
     print(f"  backlog {rc['backlog']}, {rc['records']} records and {rc['bytes']} bytes over {len(rc['rounds'])} rounds")
+    if budget:
+        print(f"  PSS budget (KiB): full buffers {budget[0]}, concurrent peak {budget[1]}, settled {budget[2]}, each run")
     if "concurrent" in r0:
         cc = r0["concurrent"]
         print(f"  concurrent backlog {cc['backlog']}, {cc['records']} records and {cc['bytes']} bytes over "
               f"{len(cc['rounds'])} rounds of {r0['phases']['concurrent_pollers']} pollers")
     verdicts = []
     for r in every:
-        verdict, why, unverified = judge(r, a)
+        verdict, why, unverified = judge(r, a, budget)
         verdicts.append(verdict)
         print(f"  {r['variant']} {verdict}{': ' + '; '.join(why) if why else ''}")
         for u in unverified:
             print(f"    unverified: {u}")
+        if budget and a and r["variant"] != a[0]["variant"] and verdict != "invalid":
+            for x in slower(r, a):
+                print(f"    performance exception: {x}")
     return runs, verdicts
 
 
@@ -281,13 +354,15 @@ def with_concurrent(r):
     r["phases"].update(concurrent_rounds=3, concurrent_pollers=4, settle=120)
     sp = {"n": 300, "p50": 3.0, "p95": 6.0, "max": 9.0}
     state = {"error": None, "ended": True, "alive": False}
-    r["concurrent"] = {"backlog": {"core": 600}, "rounds": [{"seconds": 1.0, "cpu_s": 0.5, "done": True,
-                                                             "workers": [state] * 4}] * 3,
+    r["concurrent"] = {"backlog": {"core": 600}, "rounds": [{"seconds": 1.0, "cpu_s": 0.5, "done": True, "pss_kib": 10000,
+                                                             "workers": [state] * 4}] * 3, "start_pss_kib": 9000,
                        "done": True, "span_s": 9.0, "records": 7300, "errors": 0, "losses": [], "problems": [],
                        "response_ms": {"stats": sp, "replay": sp}, "peak_rss_kib": 12000, "peak_pss_kib": 11000, "samples": 180,
                        "cadence": {"collections": 5, "missing_ids": 0, "gap_before": 0, "max_step_s": 1.01},
                        "collected": {"collections": 10, "missing_ids": 0, "gap_before": 0, "max_step_s": 1.01}}
     r["points"]["reconnected"] = {"rollup_kib": {"Rss": 10000, "Pss": 8000}, "replay": {"core": [1450, 2050]}}
+    r["points"]["filled"] = {"rollup_kib": {"Rss": 10000, "Pss": 8000}, "replay": {"core": [601, 1200], "wifi": [1, 120]},
+                             "history": {"series": 20, "points": 4700}}
     r["points"]["disconnected"] = {"rollup_kib": {"Rss": 10000, "Pss": 8000}, "threads": 5, "fds": 7}
     r["points"]["concurrent"] = {"rollup_kib": {"Rss": 11000, "Pss": 9000}, "threads": 5, "fds": 7,
                                  "replay": {"core": [1460, 2060]}}
@@ -362,6 +437,33 @@ BEFORE_COLLECTED = [  # runs of 2026-10-20, without "collected": judged by the s
 ]
 
 
+BUDGET = [11000, 12000, 9000]  # KiB: full buffers, concurrent peak, settled
+SELF_TEST_BUDGET = [  # against A, with the budget instead of the 25 % rule
+    ("B within the budget, 30 % above A with full buffers", case("B", ("points.filled.rollup_kib", {"Rss": 13000, "Pss": 10400}),
+                                                               concurrent=True), "ok"),
+    ("B over the budget with full buffers", case("B", ("points.filled.rollup_kib", {"Rss": 13000, "Pss": 11500}), concurrent=True),
+     "violations"),
+    ("B's concurrent peak over the budget", case("B", ("concurrent.peak_pss_kib", 12500), concurrent=True), "violations"),
+    ("B settled over the budget in this run", case("B", ("points.settled.rollup_kib", {"Rss": 11000, "Pss": 9100}), concurrent=True),
+     "violations"),
+    ("B holding 100 core records fewer", case("B", ("points.filled.replay", {"core": [701, 1200], "wifi": [1, 120]}), concurrent=True),
+     "invalid"),
+    ("B one Wi-Fi record short at the moment of reading", case("B", ("points.filled.replay", {"core": [601, 1200], "wifi": [2, 120]}),
+                                                             concurrent=True), "ok"),
+    ("B with a history series fewer", case("B", ("points.filled.history", {"series": 19, "points": 4465}), concurrent=True), "invalid"),
+    ("B fetching a smaller concurrent backlog", case("B", ("concurrent.backlog", {"core": 300}), concurrent=True), "invalid"),
+    ("B without the reading before round 1", {**case("B", concurrent=True),
+                                              "concurrent": {k: v for k, v in case("B", concurrent=True)["concurrent"].items()
+                                                             if k != "start_pss_kib"}}, "invalid"),
+    ("B with 10 PSS samples over 9 s", case("B", ("concurrent.samples", 10), concurrent=True), "invalid"),
+    ("A over the budget: the budget is the candidate's", case("A", ("concurrent.peak_pss_kib", 30000), concurrent=True), "ok"),
+    ("B's concurrent page p95 5 ms above A: an exception, not a broken rule",
+     case("B", ("concurrent.response_ms.replay", {"n": 300, "p50": 3, "p95": 11.0, "max": 20}), concurrent=True), "ok"),
+    ("B over the release target in w2", case("B", ("w2.cpu_pct", 2.6), concurrent=True), "violations"),
+    ("B with an HTTP error, under the budget", case("B", ("w1.errors", 1), concurrent=True), "violations"),
+]
+
+
 def self_test():
     a = [synthetic("A")]
     passed = 0
@@ -384,7 +486,13 @@ def self_test():
         good = got == want and unverified != []
         passed += good
         print(f"ab_report {'ok  ' if good else 'FAIL'} {name}: {got} {why[:2]} {unverified}", file=sys.stderr)
-    total = len(SELF_TEST) + len(SELF_TEST_M) + len(BEFORE_COLLECTED)
+    a_c = [synthetic("A", True)]
+    for name, r, want in SELF_TEST_BUDGET:
+        got, why, unverified = judge(copy.deepcopy(r), a_c, BUDGET)
+        good = got == want and not unverified
+        passed += good
+        print(f"ab_report {'ok  ' if good else 'FAIL'} {name}: {got} {why[:2]}", file=sys.stderr)
+    total = len(SELF_TEST) + len(SELF_TEST_M) + len(BEFORE_COLLECTED) + len(SELF_TEST_BUDGET)
     print(f"ab_report self-test: {passed}/{total} cases as expected", file=sys.stderr)
     return passed == total
 
@@ -392,5 +500,8 @@ def self_test():
 if __name__ == "__main__":
     if not self_test():
         sys.exit("the self-test failed")
-    for p in sys.argv[1:]:
-        report(p)
+    args, budget = sys.argv[1:], None
+    if args[:1] == ["--pss-budget"]:  # MiB: full buffers, concurrent peak, settled
+        budget, args = [int(x) * 1024 for x in args[1].split(",")], args[2:]
+    for p in args:
+        report(p, budget)

@@ -343,6 +343,7 @@ def concurrent(port, clock, proc, rss, hub, cursor, ph):
         if s != "core" and o.get("id") is not None:
             target[s] = o["id"]
     rounds, hubs, first = [], [], clock.now()
+    start = {"rss_kib": proc.status()["VmRSS"], "pss_kib": proc.rollup()["Pss"]}  # a reading before round 1
     rss.speed(0.05, pss=True)
     for _ in range(ph["concurrent_rounds"]):
         group = []
@@ -385,8 +386,10 @@ def concurrent(port, clock, proc, rss, hub, cursor, ph):
            "done": all(r["done"] for r in rounds), "from": first, "to": last, "span_s": round(last - first, 2),
            "seconds": spread([r["seconds"] for r in rounds]),
            "cpu_s_each": round(sum(r["cpu_s"] for r in rounds) / len(rounds), 4),
-           "peak_rss_kib": max([v for t, v in rss.trace if first <= t <= last] + [r["rss_kib"] for r in rounds]),
-           "peak_pss_kib": max([v for t, v in rss.pss_trace if first <= t <= last] + [r["pss_kib"] for r in rounds]),
+           # the peak is the highest reading: the one before round 1, the samples every 50 ms, the one after each round
+           "start_rss_kib": start["rss_kib"], "start_pss_kib": start["pss_kib"],
+           "peak_rss_kib": max([v for t, v in rss.trace if first <= t <= last] + [r["rss_kib"] for r in rounds] + [start["rss_kib"]]),
+           "peak_pss_kib": max([v for t, v in rss.pss_trace if first <= t <= last] + [r["pss_kib"] for r in rounds] + [start["pss_kib"]]),
            "samples": sum(1 for t, _ in rss.pss_trace if first <= t <= last),
            "losses": [x for h in hubs for x in h.losses], "problems": [x for h in hubs for x in h.problems]}
     out.update(merged.window(first, last))
