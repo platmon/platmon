@@ -57,3 +57,8 @@ Two builds of the commit gave the same two hashes.
 | load | `service_ab.py` `PHASES`: warmup 30 s, windows of 120 s (w1 at 30 s, w2 at 1290 s with full buffers, w3 the Hub-like poller), 480 s disconnected, the reconnect backlog fetched 5 times, 3 rounds of 4 pollers fetching one backlog at once, 120 s settle, 120 s after; order A B B A per host |
 | hosts | the PC (x86_64), the Jetson Orin Nano, the Raspberry Pi 4, at once |
 | judgement | README, "Final comparison, set before it was run": `ab_report.py --pss-budget` with each host's budget |
+
+## Results
+
+The final comparison (2026-10-21): passed on the PC, the Orin and the Pi, every run
+([README](README.md#final-comparison-candidate-1)). The deployed form: not run (needs root on a host).

@@ -71,7 +71,7 @@ same dependency policy (only `libc`); the `cache-alloc` build is not part of ste
 | 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
 | 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
 
-Status (2026-10-20, #93; the candidate under verification: [CANDIDATE.md](CANDIDATE.md)): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)); the nvidia-smi fallback and `--frontends` ported, the support scope written down ([Support scope](#support-scope)). No switch decided.
+Status (2026-10-20, #93; the candidate under verification: [CANDIDATE.md](CANDIDATE.md)): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)); the nvidia-smi fallback and `--frontends` ported, the support scope written down ([Support scope](#support-scope)); candidate 1 passes the final comparison on every host ([results](#final-comparison-candidate-1)); the deployed form not run (needs root). No switch decided.
 With 3B the candidate has every feature of
 the default configuration on the three hosts compared (x86 PC, Orin, Raspberry Pi), checked against the
 Python service below. Missing then, ported since: the nvidia-smi fallback of the GPU and the `--frontends`
@@ -815,6 +815,69 @@ Raw: `~/.local/state/platmon-measure/native-20261020-mimalloc/`, `cost-{x86,orin
 
 Raw: `~/.local/state/platmon-measure/native-20261020-scope/` (`live-orin.json` `ca5c7cccc48d00fc`,
 `live-pi.json` `8c8f289f71991e21`). The board copies were removed.
+
+### Final comparison (candidate 1)
+
+2026-10-20 23:29 to 2026-10-21 02:50 KST: candidate 1 ([CANDIDATE.md](CANDIDATE.md)) against the Python service
+1.3.0, A B B A on each host, the three at once, judged as set before ("Final comparison, set before it was
+run", above) with `ab_report.py --pss-budget` (self-test 45 of 45). Every run is complete and none was
+run again; nothing in the candidate or the tools changed. **Candidate 1 passes on every host and in every
+run**: no contract broken, the release target and the PSS budget kept.
+
+The candidate's runs, one value per run (MiB, % of one core):
+
+| host | full buffers PSS | concurrent peak PSS | settled PSS | budget | w1 / w2 CPU | `collected` in the concurrent rounds |
+| --- | --- | --- | --- | --- | --- | --- |
+| PC | 17.4, 17.3 | 65.0, 65.6 | 18.8, 18.6 | 22 / 87 / 24 | 0.67 / 0.72, 0.63 / 0.73 | 11 over 8.6 s, 11 over 8.7 s |
+| Orin | 11.8, 9.8 | 41.5, 40.0 | 12.7, 10.6 | 13 / 46 / 14 | 0.67 / 0.66, 0.66 / 0.68 | 15 over 13.0 s, 14 over 12.7 s |
+| Pi | 5.5, 5.5 | 21.5, 21.0 | 6.0, 6.0 | 7 / 27 / 8 | 0.73 / 0.82, 0.78 / 0.80 | 12 over 9.9 s, 13 over 10.2 s |
+
+- `collected`: no missing id, no `gap_before`, the longest step 1.0 s in every candidate run; Python's
+  longest 1.02 to 1.09 s. The step left unverified in the allocator runs is closed.
+- The peak: 165 to 226 PSS readings per run (one before round 1, every 50 ms, one after each round).
+- Same data in every run: the replay records, history series and points, and the concurrent backlog of
+  the Python runs (PC 7501, Orin 7520, Pi 7532 records over 3 rounds of 4 pollers).
+- Threads 5 and open descriptors 4 after settling, as before the reconnect (Python 6 and 4).
+- The closest margin is the Orin with full buffers: 11.8 MiB of 13 in the first run, 9.8 in the second.
+
+Reported, not pass or fail (the candidate against Python, the means of its two runs):
+
+| | PC | Orin | Pi |
+| --- | --- | --- | --- |
+| CPU w1 / w2 / w3 / idle | −35 / −33 / −32 / −26 % | −66 / −69 / −68 / −65 % | −63 / −63 / −64 / −63 % |
+| PSS full buffers / concurrent peak / settled | −47 / −13 / −74 % | −58 / −32 / −77 % | −77 / −46 / −85 % |
+| reconnect, per round: seconds / CPU seconds | +5.5 / +19.7 % | −16 / −37 % | −19 / −35 % |
+| concurrent rounds: seconds / CPU seconds | +18 / +240 % | −4.5 / +179 % | −31 / +33 % |
+| concurrent page p95 | 196 against 146 ms (+35 %) | 455 against 438 ms (+3.8 %) | 231 against 327 ms (−29 %) |
+
+- Against the proposed gates: CPU −30 % is met in every window but the PC's idle (−26 %); PSS −50 % with
+  full buffers on the boards, not on the PC (−47 %); settled PSS is −74 to −85 % everywhere.
+- Performance exceptions (p95 more than 1 ms above Python's): the concurrent page on the PC (both runs)
+  and the Orin (both runs). The other response p95 are lower than Python's on every host.
+- The cost of serving one large backlog to several clients at once is the candidate's weak side: 2.3 to 5.1
+  CPU seconds a round against 0.7 to 1.8 for Python, and on the PC the reconnect +20 % CPU (+21 % in 3C).
+  Not optimized here (the allocator and JSON work is closed); it is the input for a later decision.
+
+Raw: `~/.local/state/platmon-measure/native-20261020-final/` (SHA-256, first 16 hex digits: `ab-x86.jsonl`
+`e0c4a83ba5c6cdd9`, `ab-orin.jsonl` `4b36f42d655d2d94`, `ab-pi.jsonl` `1d2fa6e601d5c096`; the `.err` logs
+beside them). Each record names the binary's SHA-256 and the tools'. The board copies were removed; the
+production `platmon` service on both boards stayed active (200).
+
+**The deployed form: not run.** It needs root on a host (a second unit, its user, `/etc` and
+`/usr/lib/systemd`), and `sudo` asks for a password on the PC, the Orin and the Pi. Planned, for this same
+candidate:
+- A unit `platmon-native-candidate.service` beside the product one, never in its place: the product unit's
+  hardening (`DynamicUser=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `NoNewPrivileges=yes`,
+  `Restart=on-failure`), its own INI under `/etc/platmon-native-candidate/`, port 19797, the binary and web
+  assets under `/usr/lib/platmon-native-candidate/`.
+- 24 h with the Hub-like poller and a reconnect and concurrent load every hour: RSS, PSS, threads and
+  descriptors back to the same values each time the same load returns; collection and replay keep going
+  (cadence, losses); replay retention expiring; the load generator's and the measurer's own end states.
+- Install and upgrade: the Python unit's INI used as it is; swapping Python → candidate → Python on the
+  same port (restart, rebind, a new `instance_id`, 409 for a cursor of the previous instance).
+- Recovery and stopping: `systemctl stop` and `restart` during a collection, during a replay answer, and
+  during a fake nvidia-smi run (a slow one); no child, thread or socket left; a crash restarted by
+  `Restart=on-failure`.
 
 ### Earlier run (2026-10-18)
 
