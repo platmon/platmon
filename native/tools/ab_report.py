@@ -133,8 +133,16 @@ def complete(r):
             need = len(crounds) * ph["concurrent_pollers"] * sum(cc["backlog"].values())
             if cc["records"] < need:
                 invalid.append(f"concurrent: {cc['records']} records, at least {need}")
-            if cc["cadence"]["collections"] < cc["span_s"] - 4:
-                invalid.append(f"concurrent: {cc['cadence']['collections']} replayed collections over {cc['span_s']} s")
+            if "collected" in cc:
+                if cc["collected"]["collections"] < cc["span_s"] - 4:
+                    invalid.append(f"concurrent: {cc['collected']['collections']} collections over {cc['span_s']} s")
+            else:  # runs of 2026-10-20: only the pollers' view, which stops at the ids they started for
+                unverified.append("the collections during the rounds not recorded; the core sequence's advance over "
+                                  "them and the after walk's losses stand for them")
+                advance = read(lambda r: r["points"]["concurrent"]["replay"]["core"][1] -
+                               r["points"]["reconnected"]["replay"]["core"][1], r)
+                if advance is None or advance < cc["span_s"] - 4:
+                    invalid.append(f"concurrent: the core sequence advanced {advance} over {cc['span_s']} s")
             if not cc.get("samples"):
                 invalid.append("concurrent: no memory sample during the rounds")
     for pt in POINTS + (LATER if ph.get("concurrent_rounds") else ()):
@@ -172,7 +180,7 @@ def rules(r, a_runs):
         out.append(f"the service exited by itself: {r['exited_by_itself']}")
     cc = r.get("concurrent")
     if cc is not None:
-        c = cc["cadence"]
+        c = cc.get("collected", cc["cadence"])
         if cc["errors"] or cc["losses"] or cc["problems"] or c["missing_ids"] or c["gap_before"] or c["max_step_s"] > 1.5:
             out.append(f"concurrent: errors {cc['errors']} losses {cc['losses'][:3]} problems {cc['problems'][:3]} cadence {c}")
         before, settled = r["points"]["disconnected"], r["points"]["settled"]
@@ -277,9 +285,12 @@ def with_concurrent(r):
                                                              "workers": [state] * 4}] * 3,
                        "done": True, "span_s": 9.0, "records": 7300, "errors": 0, "losses": [], "problems": [],
                        "response_ms": {"stats": sp, "replay": sp}, "peak_rss_kib": 12000, "peak_pss_kib": 11000, "samples": 180,
-                       "cadence": {"collections": 9, "missing_ids": 0, "gap_before": 0, "max_step_s": 1.01}}
+                       "cadence": {"collections": 5, "missing_ids": 0, "gap_before": 0, "max_step_s": 1.01},
+                       "collected": {"collections": 10, "missing_ids": 0, "gap_before": 0, "max_step_s": 1.01}}
+    r["points"]["reconnected"] = {"rollup_kib": {"Rss": 10000, "Pss": 8000}, "replay": {"core": [1450, 2050]}}
     r["points"]["disconnected"] = {"rollup_kib": {"Rss": 10000, "Pss": 8000}, "threads": 5, "fds": 7}
-    r["points"]["concurrent"] = {"rollup_kib": {"Rss": 11000, "Pss": 9000}, "threads": 5, "fds": 7}
+    r["points"]["concurrent"] = {"rollup_kib": {"Rss": 11000, "Pss": 9000}, "threads": 5, "fds": 7,
+                                 "replay": {"core": [1460, 2060]}}
     r["points"]["settled"] = {"rollup_kib": {"Rss": 10000, "Pss": 8200}, "threads": 5, "fds": 7}
     return r
 
@@ -339,6 +350,15 @@ SELF_TEST_M = [  # against S, with the concurrent and settle phases
     ("M, settled PSS 30 % above S", case("M", ("points.settled.rollup_kib", {"Rss": 11000, "Pss": 10700}), concurrent=True),
      "violations"),
     ("no concurrent phase although set", {**case("M", concurrent=True), "concurrent": None}, "invalid"),
+    ("M, collection stopped during the rounds", case("M", ("concurrent.collected.collections", 2), concurrent=True), "invalid"),
+    ("M, a 3 s collection step during the rounds", case("M", ("concurrent.collected.max_step_s", 3.0), concurrent=True),
+     "violations"),
+    ("M, slow rounds: the pollers saw 5 collections over 13 s", case("M", ("concurrent.span_s", 13.0),
+                                                                    ("concurrent.collected.collections", 13), concurrent=True), "ok"),
+]
+BEFORE_COLLECTED = [  # runs of 2026-10-20, without "collected": judged by the sequence's advance, unverified
+    ("M, before collected, the sequence advanced", "ok", ()),
+    ("M, before collected, the sequence stood still", "invalid", (("points.concurrent.replay", {"core": [1450, 2050]}),)),
 ]
 
 
@@ -357,7 +377,14 @@ def self_test():
         good = got == want and not unverified
         passed += good
         print(f"ab_report {'ok  ' if good else 'FAIL'} {name}: {got} {why[:2]}", file=sys.stderr)
-    total = len(SELF_TEST) + len(SELF_TEST_M)
+    for name, want, changes in BEFORE_COLLECTED:
+        r = case("M", *changes, concurrent=True)
+        del r["concurrent"]["collected"]
+        got, why, unverified = judge(r, s)
+        good = got == want and unverified != []
+        passed += good
+        print(f"ab_report {'ok  ' if good else 'FAIL'} {name}: {got} {why[:2]} {unverified}", file=sys.stderr)
+    total = len(SELF_TEST) + len(SELF_TEST_M) + len(BEFORE_COLLECTED)
     print(f"ab_report self-test: {passed}/{total} cases as expected", file=sys.stderr)
     return passed == total
 

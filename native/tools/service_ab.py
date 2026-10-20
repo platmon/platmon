@@ -332,8 +332,9 @@ def command(variant, args, ini):
 def concurrent(port, clock, proc, rss, hub, cursor, ph):
     """concurrent_pollers pollers fetch the same backlog at once, from the same cursors to the latest ids,
     concurrent_rounds times, 2 s apart: the seconds until all are done, the CPU seconds, the pages' times,
-    the peak VmRSS and PSS, the collections meanwhile. Every missing range is a loss (the cursors are within
-    the retention)."""
+    the peak VmRSS and PSS. Every missing range is a loss (the cursors are within the retention). The pollers
+    stop at the ids they started for, so the collections meanwhile come from the main poller's after walk
+    (run(): "collected")."""
     status = json.loads(get(port, "/api/status")[1])
     obs = json.loads(get(port, "/api/observations")[1])
     target = {"core": status["sample"]["sequence"]}
@@ -381,7 +382,7 @@ def concurrent(port, clock, proc, rss, hub, cursor, ph):
         merged.requests += h.requests
         merged.core.update(h.core)
     out = {"target": target, "backlog": {s: t - cursor[s] for s, t in target.items()}, "rounds": rounds,
-           "done": all(r["done"] for r in rounds), "span_s": round(last - first, 2),
+           "done": all(r["done"] for r in rounds), "from": first, "to": last, "span_s": round(last - first, 2),
            "seconds": spread([r["seconds"] for r in rounds]),
            "cpu_s_each": round(sum(r["cpu_s"] for r in rounds) / len(rounds), 4),
            "peak_rss_kib": max([v for t, v in rss.trace if first <= t <= last] + [r["rss_kib"] for r in rounds]),
@@ -389,7 +390,7 @@ def concurrent(port, clock, proc, rss, hub, cursor, ph):
            "samples": sum(1 for t, _ in rss.pss_trace if first <= t <= last),
            "losses": [x for h in hubs for x in h.losses], "problems": [x for h in hubs for x in h.problems]}
     out.update(merged.window(first, last))
-    out["cadence"] = merged.cadence(first - 1, last + 1)
+    out["cadence"] = merged.cadence(first - 1, last + 1)  # the pollers' own: they stop at the ids they started for
     return out
 
 
@@ -498,6 +499,8 @@ def run(variant, args, ini, ph):
         stop.set()
         res["workers"]["hub after"] = th.finish()
         res["after"] = {"cadence": hub.cadence(r1, r1 + ph["after"])}
+        if "concurrent" in res:  # the collections during the rounds, which the after walk replayed
+            res["concurrent"]["collected"] = hub.cadence(res["concurrent"]["from"] - 1, res["concurrent"]["to"] + 1)
         res["points"]["after"] = retained(args.port, proc)
         res["hub"] = {"losses": hub.losses, "problems": hub.problems, "supported": hub.supported,
                       "pages": {s: hub.walks[s].pages for s in STREAMS}}
