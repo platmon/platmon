@@ -54,6 +54,11 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 /// The global allocator this binary was built with, for the results.
 pub const ALLOCATOR: &str = if cfg!(feature = "cache-alloc") { "cache-alloc" } else if cfg!(feature = "mimalloc") { "mimalloc" } else { "system" };
 
+/// `build-info`: the allocator, also in the binary's own bytes, so that build.sh can check a binary of
+/// either target without running it.
+pub const ALLOCATOR_MARK: &str = if cfg!(feature = "cache-alloc") { "platmon-native-allocator=cache-alloc;" }
+    else if cfg!(feature = "mimalloc") { "platmon-native-allocator=mimalloc;" } else { "platmon-native-allocator=system;" };
+
 pub struct Groups {
     pub cpu_frequency: Group,
     pub gpu: Group,
@@ -429,6 +434,7 @@ fn main() {
         Some("config-check") => return config_check(&args[2..]),
         Some("observe-script") => return observe_script(&args[2..]),
         Some("replay-cost") => return replay_cost(&args[2..]),
+        Some("build-info") => return println!("{}", ALLOCATOR_MARK),
         _ => {}
     }
     let mut c = Collector::new(5.0, [true; 3]); // the service's at its default 1 s interval
