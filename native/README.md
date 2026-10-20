@@ -71,7 +71,7 @@ same dependency policy (only `libc`); the `cache-alloc` build is not part of ste
 | 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
 | 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
 
-Status (2026-10-20, #93): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)); the nvidia-smi fallback and `--frontends` ported, the support scope written down ([Support scope](#support-scope)). No switch decided.
+Status (2026-10-20, #93; the candidate under verification: [CANDIDATE.md](CANDIDATE.md)): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)); the nvidia-smi fallback and `--frontends` ported, the support scope written down ([Support scope](#support-scope)). No switch decided.
 With 3B the candidate has every feature of
 the default configuration on the three hosts compared (x86 PC, Orin, Raspberry Pi), checked against the
 Python service below. Missing then, ported since: the nvidia-smi fallback of the GPU and the `--frontends`
@@ -193,6 +193,37 @@ long run, install, upgrade and recovery. This step is the first two.
   targets, SHA-256, and a check of the allocator each binary carries); `cache-alloc` and `mimalloc` are
   built only by their own scripts, as records.
 
+**Final comparison, set before it was run (2026-10-20, after the ninth review).** Candidate 1
+([CANDIDATE.md](CANDIDATE.md): commit `7f066f0`, x86_64 `027e35b1c9251b9d`, aarch64 `ff97aa9ad4e9dd28`)
+against the Python service 1.3.0, `service_ab.py` as there, A B B A on each host, the three at once (about
+3 h). Nothing in the candidate or the tools changes during the runs; what comes out is the result. Each
+run is judged on its own, each host on its own; no averaging hides one run.
+- Complete, else invalid (no verdict): `complete()` as before, now also the collections during the
+  concurrent rounds from the after walk (`collected`: as many as the seconds less 4).
+- Contracts (a breach fails the run): no error answer, loss, walk problem, missing id, `gap_before` or
+  cadence step over 1.5 s in any window, the concurrent rounds included (`collected`, which closes the
+  step that stayed unverified in the allocator runs); every reconnect round done; threads and open
+  descriptors back to their count before the reconnect 120 s after the rounds.
+- Budgets of the candidate (a breach fails the run): the release target, w1 and w2 at most 2.5 % of one
+  core; PSS at most the budget of [Support scope](#support-scope) with full buffers, at the four pollers'
+  peak and 120 s after (PC 22 / 87 / 24, Orin 13 / 46 / 14, Pi 7 / 27 / 8 MiB). Judged only with the
+  same data: replay records per stream and history points as the Python runs held them (one record per
+  stream and one point per series fewer at most, for the moment of reading), the same history series,
+  the same concurrent backlog; otherwise the run is invalid for the budget. The peak is the highest
+  reading: one before round 1, samples every 50 ms (at least 5 a second on average, else invalid), one
+  after each round; a sampled peak, not a bound in continuous time. Python's runs are not held to it.
+  The 25 % rule against a baseline is not used here (it chose the allocator).
+- Reported, not pass or fail: CPU and PSS against Python (the proposed −30 % / −50 % gates), response p95
+  more than 1 ms above Python's (as performance exceptions), the reconnect cost.
+- Changed from 3C, and seen before it was set: in 3C, a p95 more than 1 ms above Python's broke a rule.
+  Here it is reported as a performance exception, following the review's classification (contracts,
+  completeness and budgets are pass or fail; relative performance is reported). A short `--quick` run on
+  the PC (A B, to try the budget judgement) had already shown the candidate's concurrent page p95 above
+  Python's (108 against 65 ms, smaller backlog).
+- Budget: one round per host. A run that is invalid because of the tools: fix the tool, record it, run
+  that host again once. Then the deployed form (a service unit, 24 h, install, upgrade, recovery), only
+  for this same candidate.
+
 **What the candidate has** (`platmon-native serve [platmon.ini] [--frontends LIST] --web DIR --app-version V`):
 
 3A (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
@@ -242,7 +273,7 @@ Python service on fixtures), **verified on hardware** (also run live on a host b
 | --- | --- | --- | --- |
 | targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM and other architectures unsupported |
 | core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`) | the fixtures' "not covered" lists below |
-| GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first | amdgpu and nvidia-smi on an NVIDIA GPU with its driver: **fixture verified, not verified on NVIDIA hardware** (NVIDIA does not promise a stable nvidia-smi output); NVML unsupported |
+| GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first | the nvidia-smi fallback with a PC or server NVIDIA GPU that answers normally (`GPU-` UUIDs and numbers): **fixture verified, not verified on such hardware** (NVIDIA does not promise a stable nvidia-smi output); amdgpu fixture only; NVML unsupported; clocks of 2^128 Hz and more refused (below) |
 | slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
 | configuration | `platmon.ini` as `load_config` reads and checks it, `--frontends` after it (67 cases, also the two servers' refusals) | on the three hosts (Python 3.14, 3.10, 3.13) | Unicode digits and whitespace in numbers, non-UTF-8 file names and files; argparse's abbreviations (`--front`) and a value that starts with `-` are unsupported |
 | HTTP API, web page, `/text`, history, replay | as `live_http.py` and `runtime_fixture.py` check them | the three hosts, no difference | which connections of a burst are refused (timing); Python versions' error page markup |
@@ -270,11 +301,16 @@ not measured.
 (Pi). Where Python itself differs, the candidate follows 3.11 and later: a NUL inside nvidia-smi's CSV is a
 character (3.10's `csv` refuses the whole answer, 3.11 and later refuse only that field's number).
 
-**Build.** `build.sh` is the candidate's build: the system allocator only (no features; `--all-features`
+**A deliberate difference.** A clock nvidia-smi gives as 2^128 Hz or more (over 3.4 × 10^32 MHz) is null
+with `invalid_data`; Python publishes the integer. No GPU reports such a clock; the candidate refuses it
+rather than publish a number it cannot hold (a float to integer cast saturates).
+
+**Build.** `build.sh` is the candidate's build: the system allocator only (`--no-default-features`; `--all-features`
 is never a build of it, and the two allocator features cannot be built together), `Cargo.lock` as
 committed (`--locked`), both musl targets, each binary checked to carry the system allocator's mark
 (`platmon-native build-info` prints it), then the SHA-256. `build-cache-alloc.sh` and
-`build-mimalloc.sh` build the two records, never the candidate.
+`build-mimalloc.sh` build the two records, never the candidate. The candidate under verification, with
+its source, build, binaries, running conditions and comparison, is fixed in [CANDIDATE.md](CANDIDATE.md).
 
 ## Use
 
@@ -764,8 +800,8 @@ Raw: `~/.local/state/platmon-measure/native-20261020-mimalloc/`, `cost-{x86,orin
 - nvidia-smi: `fixture.sh` 11 of 11 scenarios, of them `nvidia`, `nvidia_alone` and `nvidia_drm_first`
   with 32 collections equal; no process left after the timeout and the signal; every run with the
   query's arguments. Ten mutants, all caught (two only after two steps were added; see
-  [Equivalence on fake trees](#equivalence-on-fake-trees)). **Fixture verified, not verified on NVIDIA
-  hardware.** The Orin has nvidia-smi (`nvidia-l4t-nvml`): its answer, read by hand once (30 ms, exit 0),
+  [Equivalence on fake trees](#equivalence-on-fake-trees)). **The fallback with a PC or server NVIDIA GPU
+  that answers normally: fixture verified, not verified on such hardware.** The Orin has nvidia-smi (`nvidia-l4t-nvml`): its answer, read by hand once (30 ms, exit 0),
   is replayed in `nvidia`; the Jetson reader answers there first, so the fallback is not reached.
 - `--frontends`: `config_fixture.py` 67 of 67 (49 configurations as before, 12 with `--frontends`, 6
   refusals of the two servers as processes) on the PC, the Orin and the Pi. Seven mutants: six caught
