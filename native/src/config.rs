@@ -94,6 +94,15 @@ impl Ini {
             .map(|(_, v)| v.as_str())
     }
 
+    /// cfg[section][key] = value, in a section the defaults made.
+    fn set(&mut self, section: &str, key: &str, value: &str) {
+        let s = &mut self.sections.iter_mut().find(|(n, _)| n == section).expect("a default section").1;
+        match s.iter_mut().find(|(k, _)| k == key) {
+            Some(kv) => kv.1 = value.to_string(),
+            None => s.push((key.to_string(), value.to_string())),
+        }
+    }
+
     /// The keys of a section as configparser lists them: its own, then DEFAULT's.
     fn keys(&self, section: &str) -> Vec<&str> {
         let mut out: Vec<&str> = self.section(section).map_or(vec![], |s| s.iter().map(|(k, _)| k.as_str()).collect());
@@ -371,8 +380,14 @@ pub fn parse_targets(text: &str) -> Result<Vec<(String, u16)>, String> {
     Ok(out)
 }
 
-/// platmon.load_config(path): defaults < the file. Err with the message platmon.py gives.
-pub fn load(path: Option<&str>) -> Result<Config, String> {
+/// platmon.py's --frontends value as it passes it on: None when not given or empty, else split at commas.
+pub fn frontends(value: Option<&str>) -> Option<Vec<&str>> {
+    value.filter(|v| !v.is_empty()).map(|v| v.split(',').collect())
+}
+
+/// platmon.load_config(path, frontends): defaults < the file < frontends (enables exactly those). Err with
+/// the message platmon.py gives.
+pub fn load(path: Option<&str>, frontends: Option<&[&str]>) -> Result<Config, String> {
     let mut ini = Ini::with_defaults();
     if let Some(path) = path {
         let text = std::fs::read(path).map_err(|_| format!("cannot read config {}", path))?;
@@ -385,6 +400,18 @@ pub fn load(path: Option<&str>) -> Result<Config, String> {
     let cfg = Config { ini, targets };
     if !cfg.targets.is_empty() && cfg.targets.len() as f64 * cfg.float("probe", "timeout") >= cfg.float("probe", "interval") {
         return Err("[probe] interval must be longer than timeout × number of targets (they are probed one after another)".into());
+    }
+    let mut cfg = cfg;
+    if let Some(names) = frontends {
+        let mut unknown: Vec<&str> = names.iter().copied().filter(|n| !FRONTENDS.contains(n)).collect();
+        unknown.sort();
+        unknown.dedup();
+        if !unknown.is_empty() {
+            return Err(format!("unknown frontend(s): {}; choose from {}", unknown.join(", "), FRONTENDS.join(", ")));
+        }
+        for f in FRONTENDS {
+            cfg.ini.set(f, "enabled", if names.contains(f) { "yes" } else { "no" });
+        }
     }
     if !FRONTENDS.iter().any(|f| cfg.flag(f, "enabled")) {
         return Err("nothing to run: every output is disabled; set enabled = yes in [http] (or pass --frontends)".into());

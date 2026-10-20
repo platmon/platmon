@@ -11,9 +11,9 @@
 //!                                     ({"error": ...} for a failed collection)
 //!   platmon-native loop SECONDS [WARMUP]  collect every 1 s (after WARMUP s, default 3), print own CPU
 //!                                     (user/sys %), RSS, collection times and group states as JSON
-//!   platmon-native serve [--interval S] [--bind ADDR] [--port N] [--web DIR] [--app-version V]
-//!                                     step 3A: the service's core (Sampler) and live HTTP API, no slow
-//!                                     groups, history or replay (src/runtime.rs, src/http.rs)
+//!   platmon-native serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]
+//!                                     the service as platmon.py runs it: platmon.ini, the Sampler, slow
+//!                                     groups, history, replay and the HTTP API (src/runtime.rs, src/http.rs)
 //!   platmon-native runtime-script     tools/runtime_fixture.py: Sampler and slow-group operations with
 //!                                     given times and collections, one JSON line per stdin line
 mod accel;
@@ -544,13 +544,16 @@ fn observe_script(args: &[String]) {
     }
 }
 
-/// config-check [CONFIG] [PLATFORM]: the configuration as serve would use it, {"error": ...} if refused
-/// (tools/config_fixture.py compares it with platmon.load_config).
+/// config-check [CONFIG [PLATFORM [FRONTENDS]]]: the configuration as serve would use it, {"error": ...} if
+/// refused (tools/config_fixture.py compares it with platmon.load_config); empty CONFIG or PLATFORM: none,
+/// FRONTENDS: the --frontends value.
 fn config_check(args: &[String]) {
-    let out = match config::load(args.first().map(String::as_str).filter(|p| !p.is_empty())) {
+    let platform = args.get(1).map(String::as_str).filter(|p| !p.is_empty());
+    let frontends = config::frontends(args.get(2).map(String::as_str));
+    let out = match config::load(args.first().map(String::as_str).filter(|p| !p.is_empty()), frontends.as_deref()) {
         Ok(cfg) => {
-            let mut v = cfg.value(args.get(1).map(String::as_str));
-            if args.get(1).is_none() {
+            let mut v = cfg.value(platform);
+            if platform.is_none() {
                 v.set("levels", cfg.value(None).get("levels").cloned().unwrap_or_default());
             }
             v
@@ -560,22 +563,28 @@ fn config_check(args: &[String]) {
     println!("{}", out.to_string(false));
 }
 
-/// platmon.py: serve [CONFIG] [--web DIR] [--app-version V]. The configuration as platmon.py reads it;
-/// the slow groups are on as configured, with their readers (src/observe.rs).
+/// platmon.py: serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]. The configuration as
+/// platmon.py reads it; the slow groups are on as configured, with their readers (src/observe.rs).
 fn serve(args: &[String]) {
-    let (mut path, mut web_dir, mut version) = (None, None, "0.0.0".to_string());
+    let (mut path, mut web_dir, mut version, mut frontends) = (None, None, "0.0.0".to_string(), None);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--web" | "--app-version" => {
+            "--web" | "--app-version" | "--frontends" => {
                 let value = it.next().unwrap_or_else(|| { eprintln!("serve: {} needs a value", arg); std::process::exit(2) }).clone();
-                if arg == "--web" { web_dir = Some(value) } else { version = value }
+                match arg.as_str() {
+                    "--web" => web_dir = Some(value),
+                    "--app-version" => version = value,
+                    _ => frontends = Some(value),
+                }
             }
+            a if a.starts_with("--frontends=") => frontends = Some(a["--frontends=".len()..].to_string()),
             _ if path.is_none() && !arg.starts_with("--") => path = Some(arg.clone()),
             _ => { eprintln!("serve: unknown argument {}", arg); std::process::exit(2) }
         }
     }
-    let cfg = config::load(path.as_deref()).unwrap_or_else(|e| { eprintln!("platmon-native serve: error: {}", e); std::process::exit(2) });
+    let names = config::frontends(frontends.as_deref());
+    let cfg = config::load(path.as_deref(), names.as_deref()).unwrap_or_else(|e| { eprintln!("platmon-native serve: error: {}", e); std::process::exit(2) });
     unsafe { libc::signal(libc::SIGTERM, on_term as extern "C" fn(libc::c_int) as libc::sighandler_t) };
     let interval = cfg.float("core", "interval");
     let mut c = Collector::new((3.0 * interval).max(5.0), [cfg.flag("network", "enabled"), cfg.flag("disk_io", "enabled"),
