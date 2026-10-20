@@ -689,6 +689,138 @@ def slow_steps():
             ("broken files", broken, 13 * S, OK), ("nothing there", nothing, 14 * S, OK)]
 
 
+# nvidia-smi: a fake on the collectors' PATH, found when they start. Each query runs the shell text a step
+# left in NV_DO (cat an answer, sleep past the 0.5 s limit, exit nonzero, die by a signal); the fake logs
+# its arguments and refuses any but the collectors' query.
+NV_BIN, NV_DO, NV_OUT, NV_CALLS = "/usr/bin/nvidia-smi", f"{HOST}/nvidia/do", f"{HOST}/nvidia/out", "/tmp/nvidia-calls"
+NV_ARGS = "--query-gpu=uuid,utilization.gpu,clocks.current.graphics,clocks.max.graphics --format=csv,noheader,nounits"
+NV_FAKE = f"""#!/bin/sh
+echo "$*" >> {NV_CALLS}
+[ "$*" = "{NV_ARGS}" ] || exit 9
+. {NV_DO}
+"""
+
+
+def nv(answer=None, do=None):
+    """The next queries' answer (bytes or str, given by cat) or shell text in its place."""
+    if answer is not None:
+        put(NV_OUT, answer, 0o644)
+    put(NV_DO, do or f"exec cat {NV_OUT}\n", 0o644)
+
+
+def nv_fake(answer):
+    put(NV_BIN, NV_FAKE, 0o755)
+    nv(answer)
+
+
+def leftovers():
+    """Problems if a query's process outlived its collection: a fake or its sleep still running, a zombie."""
+    out = []
+    for pid in filter(str.isdigit, os.listdir("/realproc")):
+        try:
+            with open(f"/realproc/{pid}/stat") as f:
+                stat = f.read()
+        except OSError:
+            continue
+        comm, state = stat[stat.index("(") + 1:stat.rindex(")")], stat[stat.rindex(")") + 2]
+        if comm in ("sleep", "nvidia-smi") or state == "Z":
+            out.append(f"left over: pid {pid} ({comm}) state {state}")
+    return out
+
+
+def calls(n):
+    """Problems unless the fake was run n times, each with the query's arguments."""
+    lines = open(NV_CALLS).read().splitlines() if os.path.exists(NV_CALLS) else []
+    wrong = [x for x in lines if x != NV_ARGS]
+    return ([f"nvidia-smi run {len(lines)} times, {n} expected"] if len(lines) != n else []) + \
+        [f"nvidia-smi run with {x!r}" for x in wrong[:2]]
+
+
+TWO_GPUS = "GPU-bbbb-2, 37, 1410, 1980\nGPU-aaaa-1, 12.25, 210.5, 1980\n"
+
+
+def nvidia_tree():
+    """A card whose driver no DRM reader knows (the proprietary driver), and nvidia-smi."""
+    bare_tree()
+    card("drm", "card0", "0000:01:00.0", "nvidia", {})
+    nv_fake(TWO_GPUS)
+
+
+def nvidia_steps():
+    def chmod(mode):
+        return lambda: os.chmod(NV_BIN, mode)
+
+    def removed():
+        os.remove(NV_BIN)
+
+    def restored():
+        nv_fake("GPU-aaaa-1, 50, 900, 1980\n")
+
+    def killed():  # also: the query past the limit was killed and reaped
+        problems = leftovers()
+        nv(do="kill -9 $$\n")
+        return problems
+
+    def checked():  # 23 steps before this one, 21 of them ran the fake on both sides
+        nv("GPU-aaaa-1, 51, 901, 1980\n")
+        return leftovers() + calls(2 * 21)
+
+    answers = [  # label, answer; each its own step, 1 s apart
+        ("N/A and not supported", "GPU-aaaa-1, [N/A], [Not Supported], N/A \n"),
+        ("out of range and not numbers", "GPU-aaaa-1, 100.5, -1, nan\nGPU-bbbb-2, 1, 2, 3\n"),
+        ("Python numbers: underscores, exponents, inf", "GPU-aaaa-1, 1_0.05, 1e3, inf\n"),
+        ("quoted fields, CRLF, a space after a number", '"GPU-aaaa-1", "0.0", 300 ,1980\r\nGPU-cccc, 1, 2, 3\r\n'),
+        ("a quoted field over two lines", 'GPU-aaaa-1, "4\n2", 5, 6\n'),
+        ("a NUL in a value", b"GPU-aaaa-1, 1\0, 2, 3\n"),
+        ("no rows: nothing detected", ""),
+        ("an empty line", "\n"),
+        ("three fields", "GPU-aaaa-1, 1, 2\n"),
+        ("not a GPU UUID", "gpu-aaaa, 1, 2, 3\n"),
+        ("a quote not closed", 'GPU-aaaa-1, "1, 2, 3\n'),
+        ("not UTF-8", b"GPU-aaaa-1, \xff, 2, 3\n"),
+        ("rows ended by a lone CR", "GPU-bbbb-2, 1, 2, 3\rGPU-aaaa-1, 4, 5, 6\r"),
+        # the Orin's own (JetPack 6, nvidia-l4t-nvml), as it answered on 2026-10-20: no "GPU-", nothing known
+        ("the Orin's nvidia-smi answer", "369b91ab-dfa2-57e2-8bc2-d57b21876a2d, [N/A], [N/A], [N/A]\n"),
+    ]
+    steps = [("two GPUs: the smallest UUID", None, 10 * S, OK)]
+    for i, (label, answer) in enumerate(answers):
+        steps.append((label, lambda a=answer: nv(a), (11 + i) * S, OK))
+    rest = [
+        ("past the 0.5 s limit", lambda: nv(do="exec sleep 5\n")),
+        ("not UTF-8 on stderr", lambda: nv(TWO_GPUS, f"cat {NV_OUT}; printf '\\377' >&2\n")),
+        ("exit 3 after an answer", lambda: nv(TWO_GPUS, f"cat {NV_OUT}; exit 3\n")),
+        ("killed by a signal", killed),
+        ("answers again: nothing kept from before", lambda: nv("GPU-aaaa-1, 3, 4, 5\n")),
+        ("not executable", chmod(0o644)),
+        ("removed", removed),
+        ("back", restored),
+        ("no process left, every run with the query's arguments", checked)]
+    return steps + [(label, change, (len(steps) + 10 + i) * S, OK) for i, (label, change) in enumerate(rest)]
+
+
+def nvidia_alone_tree():
+    """No DRM card at all (WSL2, a headless host): nvidia-smi answers for the GPU."""
+    bare_tree()
+    nv_fake(TWO_GPUS)
+
+
+def nvidia_alone_steps():
+    return [("two GPUs", None, 10 * S, OK), ("exit 3: no GPU entry", lambda: nv(do="exit 3\n"), 11 * S, OK),
+            ("nothing detected", lambda: nv("", None), 12 * S, OK), ("back", lambda: nv(TWO_GPUS), 13 * S, OK),
+            ("checked", lambda: leftovers() + calls(2 * 4), 14 * S, OK)]
+
+
+def nvidia_drm_first_tree():
+    """An i915 card the DRM reader knows: nvidia-smi, though present, is never run."""
+    pc_tree()
+    nv_fake(TWO_GPUS)
+
+
+def nvidia_drm_first_steps():
+    steps = pc_steps()[:2]
+    return steps + [("never run", lambda: calls(0), 12 * S, OK)]
+
+
 SCENARIOS = {
     "pc": (pc_tree, pc_steps),
     "failures": (failure_tree, failure_steps),
@@ -698,6 +830,9 @@ SCENARIOS = {
     "passive": (passive_tree, passive_steps),
     "passive_failures": (passive_tree, passive_failure_steps),
     "slow": (slow_tree, slow_steps),
+    "nvidia": (nvidia_tree, nvidia_steps),
+    "nvidia_alone": (nvidia_alone_tree, nvidia_alone_steps),
+    "nvidia_drm_first": (nvidia_drm_first_tree, nvidia_drm_first_steps),
 }
 
 
@@ -721,6 +856,9 @@ def clear():
             shutil.rmtree(p)
     for p in ETC_EXTRA:
         shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) else (os.path.exists(p) and os.remove(p))
+    for p in (NV_BIN, NV_CALLS):
+        if os.path.exists(p):
+            os.remove(p)
 
 
 class Broken(Exception):
@@ -831,10 +969,9 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
     procs = {"python": start(py_cmd, logs["python"]), "rust": start(rs_cmd, logs["rust"])}
     report, problems, got = [], 0, {OK: 0, FAILS: 0}
     for i, (label, change, base, expect) in enumerate(steps):
-        if change:
-            change()
+        found = (change() if change else None) or []  # a change may return problems it found
         wall = 1_700_000_000_000_000 + base // 1000
-        out, res = [], {}
+        out, res = list(found), {}
         for n, p in procs.items():
             try:
                 res[n] = step(p, base, wall, timeout)

@@ -1,4 +1,4 @@
-//! collector/gpu.py (DRM class, without the nvidia-smi fallback) and collector/npu.py (accel class).
+//! collector/gpu.py (DRM class, then nvidia-smi: src/nvidia.rs) and collector/npu.py (accel class).
 use crate::json::{round_to, Value};
 use crate::metadata::{clock, source, Group, Slot};
 use crate::sysfs::{self, driver_of, entries};
@@ -37,12 +37,13 @@ pub struct Accel {
     kind: &'static str, // "gpu" or "npu"
     max_gap: i64,
     last: Vec<(String, i64, i64)>, // path -> (elapsed ns, counter)
+    nvidia_smi: Option<String>, // gpu: found once, as Gpu() does
 }
 
 impl Accel {
     /// max_gap: nanoseconds, round(max_gap * 1e9) of the Python Gpu/Npu
-    pub fn gpu(max_gap: i64) -> Accel { Accel { kind: "gpu", max_gap, last: Vec::new() } }
-    pub fn npu(max_gap: i64) -> Accel { Accel { kind: "npu", max_gap, last: Vec::new() } }
+    pub fn gpu(max_gap: i64) -> Accel { Accel { kind: "gpu", max_gap, last: Vec::new(), nvidia_smi: crate::nvidia::find() } }
+    pub fn npu(max_gap: i64) -> Accel { Accel { kind: "npu", max_gap, last: Vec::new(), nvidia_smi: None } }
 
     fn share(&mut self, path: &str, counter: i64, ns_per_unit: i64, busy: bool) -> Option<f64> {
         let now = clock();
@@ -67,7 +68,10 @@ impl Accel {
         };
         let names: Vec<String> = entries(class, &mut [g], false).into_iter().filter(|n| numbered_name(n, prefix)).collect();
         if names.is_empty() {
-            g.note(self.kind, "not_detected", None); // (gpu: nvidia-smi fallback not ported)
+            if let Some(path) = &self.nvidia_smi {
+                return crate::nvidia::sample(path, g);
+            }
+            g.note(self.kind, "not_detected", None);
             return None;
         }
         let drivers: Vec<(String, Option<String>)> = names.iter().map(|n| (n.clone(), driver_of(&format!("{}/{}", class, n), g))).collect();
@@ -105,6 +109,9 @@ impl Accel {
                 Some(entry(usage, f, m, driver, Some("npu_busy_time")))
             }
             _ => {
+                if let Some(v) = self.nvidia_smi.as_ref().and_then(|path| crate::nvidia::sample(path, g)) {
+                    return Some(v);
+                }
                 let target = driver.clone().unwrap_or_else(|| name.clone());
                 g.note(&target, "not_exposed", None);
                 Some(entry(None, None, None, driver, None))

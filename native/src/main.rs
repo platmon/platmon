@@ -1,8 +1,8 @@
 //! Experimental Rust port of collector.collect_recorded (docs/performance/rust-feasibility.md, next step 1).
 //! Not part of the product. Covers the core groups: CPU, clocks, thermal zones, hwmon, memory, disk,
 //! identity, the Jetson extension, DRM GPU and accel NPU, collectors and sensor source ids, and the
-//! passive groups Network, Disk I/O and Pressure as the service enables them by default. The slow groups
-//! and nvidia-smi are not ported.
+//! passive groups Network, Disk I/O and Pressure as the service enables them by default, and the nvidia-smi
+//! fallback.
 //!
 //!   platmon-native collect            one recorded collection 1 s after a first one, as JSON
 //!                                     {"stats", "sensors" (with spans), "required", "passive", "clock"}
@@ -26,6 +26,7 @@ mod http;
 mod jetson;
 mod json;
 mod metadata;
+mod nvidia;
 mod observe;
 mod passive;
 mod render;
