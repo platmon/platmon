@@ -68,7 +68,7 @@ same dependency policy (only `libc`); the `cache-alloc` build is not part of ste
 | 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
 | 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
 
-Status (2026-10-20, #93): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)); no decision taken.
+Status (2026-10-20, #93): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); no decision taken.
 With 3B the candidate has every feature of
 the default configuration on the three hosts compared (x86 PC, Orin, Raspberry Pi), checked against the
 Python service below. Still missing: the nvidia-smi fallback of the GPU (none of the three hosts has
@@ -111,6 +111,32 @@ but never a finished answer: ages and `stale` are computed per answer, also for 
   only when it is invalid (the tool failed, the host was disturbed); the candidate is not changed during
   3C. If B breaks a rule above, 3C stops there and is reported, not fixed inside 3C.
 - Not in 3C: the 24 h stability gate, other hosts (a PC with nvidia-smi), the `cache-alloc` build.
+
+**After 3C, set before it was run (2026-10-20, after the sixth review).** The 3C judgement first, then the
+PC's replay cost.
+- The judgement: `ab_report.py` passed a run whose poller thread had died (`join()` never re-raises), a
+  window with one answer, a reconnect with no collection seen, and never compared w3's `/api/stats` p95.
+  Now a run is first checked for completeness: the threads' end (`tools/worker.py`, shared with
+  `live_http.py`), the requests, answers, collections and records each phase implies, every reconnect
+  round done, every memory point; an incomplete run is invalid, not passed. The stored 3C runs are judged
+  again with it; what they did not record (the threads' end) is named, not assumed.
+- The PC's replay: `platmon-native replay-cost FILE` against `tools/replay_cost_py.py FILE TREE`, on the
+  same core publications: one page from each host's service (Orin and Pi: the 1.3.0 packages, default
+  settings; PC: its local service), 80 records each, kept outside the repository with their hashes. Per
+  record, the median of 7 rounds of 20 pages: decoding, decoding and writing back, a whole page (B:
+  `Replay.view`; A: `Replay.view` and the server's `json.dumps`). Every input on every host.
+- Hypothesis: on the PC's 20 KB records B decodes or writes slower than A; the split says which. If
+  neither is slower, stop: the cost is elsewhere and is not guessed at.
+- Candidates, at most three, in this order and only where the split points: an object written without a
+  temporary list of its members when the keys are not sorted; a float written without a temporary
+  string; the parser's search for a repeated key. Each must keep every answer byte for byte (the same
+  key order, numbers, ages and `stale` per answer, the 2 MiB limit), checked on the three inputs, with
+  `cargo test` and `live_http.py`. No other JSON library, no allocator change, no cached answers.
+- Target: B's page at most A's per record on the PC's input, without a slower page on the boards' inputs;
+  then one PC A B B A run of `service_ab.py` with the changed candidate, judged as 3C was (its reconnect
+  CPU per round against A's). The boards' A/B and the 24 h run wait for the final candidate.
+- Budget: the three candidates and that one PC run (about 2.5 h). If B is still above A after them, stop
+  and report what is left.
 
 **What the candidate has** (`platmon-native serve [platmon.ini] --web DIR --app-version V`):
 
@@ -161,6 +187,9 @@ PYTHONPATH=. native/tools/bench.sh native/target/x86_64-unknown-linux-musl/relea
 python3 native/tools/runtime_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 PYTHONPATH=. python3 native/tools/config_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 PYTHONPATH=. python3 native/tools/live_http.py native/target/x86_64-unknown-linux-musl/release/platmon-native
+python3 native/tools/service_ab.py --tree PYTHON_TREE --binary BINARY --out ab.jsonl   # about 2.5 h; --quick to try it
+python3 native/tools/ab_report.py ab.jsonl
+BINARY replay-cost core.jsonl 20; python3 native/tools/replay_cost_py.py core.jsonl PYTHON_TREE 20
 ```
 
 On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share/platmon`.
@@ -203,6 +232,11 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
 - `live_http.py`: **a live check of the service.** Starts the Python service and `platmon-native serve`
   with the same platmon.ini (the defaults, each on its own local port), checks both the same way and
   compares them (see its docstring). It stops only the two processes it started, by their handles.
+- `service_ab.py` / `ab_report.py`: **the whole-service A/B of 3C** (see their docstrings). Each run is
+  judged complete first (its threads' end through `worker.py`, the counts its phases imply), then by
+  the rules; an incomplete run is invalid. Both, `walk.py` and `worker.py` run their self-tests first.
+- `replay-cost` / `replay_cost_py.py`: what a replay page costs per record, by stage, on fixed core
+  publications, Rust and Python; both can write the page, to compare it byte for byte.
 
 ## Results
 
@@ -432,8 +466,10 @@ first B run was about 0.2 pp higher in w2, w3 and idle (0.883 / 0.683, 0.875 / 0
 - Release target (≤ 2.5 % in w1 and w2): both pass on every host; with full buffers the Pi's Python
   service is at 2.30 %, the candidate at 0.81 %. Hub polling (w3) is not the release condition: the Pi's
   Python service is at 2.78 % there.
-- Rules for B: none broken on any host (no error answer, loss, walk problem, missing collection id,
-  `gap_before` or cadence step over 1.5 s; no response p95 more than 1 ms above A's). A broke none either.
+- Rules for B: the report as run found none broken on any host (no error answer, loss, walk problem,
+  missing collection id, `gap_before` or cadence step over 1.5 s; no response p95 more than 1 ms above
+  A's), nor for A. That report could miss a run that did not do its load; judged again below, all twelve
+  runs are complete.
 - The same data on both: 600 core, 20 storage, 120 Wi-Fi and 10 battery records held with full buffers,
   the same history points (11 300 Orin, 4 700 Pi, 16 760 PC); the backlog was 483–485 core records and
   3 065–3 068 records in all over the five rounds (Orin 25.9 MB, Pi 13.8 MB, PC 49.1 MB of answers).
@@ -446,15 +482,68 @@ first B run was about 0.2 pp higher in w2, w3 and idle (0.883 / 0.683, 0.875 / 0
   cadence step over 1.02 s anywhere.
 - Proposed gates (docs/performance/rust-feasibility.md): CPU at least 30 % lower and RSS/PSS at least
   50 % lower hold on the Orin and the Pi in every window. On the PC they do not quite: w2 −29 %, PSS with
-  full buffers −47 % (RSS −61 %), and fetching the backlog takes the candidate 21 % more CPU than Python.
-  The PC's core records are the largest (about 20 KB; 64 history series, at the limit). Likely, but not
-  measured: most of the candidate's PSS there is the data it holds, and decoding and re-encoding each
-  replayed record (as both services do) costs the candidate more than CPython's C `json` at that size.
+  full buffers −47 % (RSS −61 %), and fetching the backlog takes the candidate 21 % more CPU than Python
+  (the first round +22 %, rounds 2–5 +21 %: not a first-round effect). The PC's core records are the
+  largest (about 20 KB; 64 history series, at the limit); the replay cost below shows the host decides,
+  not the record size.
 - Not measured here: 24 h, other hosts, the `cache-alloc` build, a candidate changed after these runs.
 
 Raw (outside the repository, `~/.local/state/platmon-measure/native-20261020-3c/`), SHA-256 first 16 hex
 digits: Orin `5aec9a9779e7f0ba`, Pi `60999a7d8e28e89d`, PC `0f6671002b378032`; tool `service_ab.py`
 `2ce211c8700b22c8` as run.
+
+**Judged again (after the sixth review).** `ab_report.py` as run passed synthetic runs it must not: a
+poller thread that died after one page, a window with one answer, a reconnect with no collection seen,
+and a w3 `/api/stats` p95 of 52 ms against A's 2 ms (w3's `/api/stats` p95 was not compared). With the
+completeness check and the w3 `/api/stats` rule (`python3 ab_report.py`: 14 synthetic runs, all judged as
+expected; of the ten that must not pass and that the old report could judge, it passed seven: the dead
+poller with and without thread states, the one-answer window, no collection seen, the w3 p95, too few
+reconnect records, a memory sampler that stopped), the twelve stored runs: all complete, no rule broken, w3 `/api/stats` p95 lower on B on every host (Orin 2.59 → 1.28, Pi
+4.78 → 2.56, PC 1.90 → 1.19 ms). What they cannot show: the threads' end was not recorded then; the
+counts stand for it (w3: 24 stats, 12 observations, 62 replay requests and 115–117 replayed collections
+in every run; the reconnect: 3 064–3 071 records for five rounds of a 604–608 record backlog, every round
+done). A short run of the new tool on the PC records the threads' end (`workers`).
+
+### Replay cost (after 3C)
+
+2026-10-20, as set before it was run (above). µs per record, decoding / writing back / a whole page, the
+mean of two medians of 7 × 20 pages; every page of every binary byte for byte equal to Python's. Inputs:
+80 core records from each host's service (PC 19.7 KB, Orin 10.3 KB, Pi 5.4 KB a record). base = 3C's
+candidate with only `replay-cost` added; c2 = candidates 1 and 2 (now in the source).
+
+| host | input | A (Python) | base | c2 | c2, page vs A |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PC (Python 3.14) | PC | 124 / 116 / 262 | 189 / 168 / 393 | 192 / 145 / 352 | +34 % |
+| | Orin | 72 / 69 / 153 | 110 / 93 / 217 | 112 / 78 / 201 | +32 % |
+| | Pi | 43 / 38 / 87 | 56 / 50 / 130 | 57 / 44 / 113 | +30 % |
+| Orin (Python 3.10) | PC | 333 / 307 / 813 | 280 / 219 / 552 | 283 / 179 / 505 | −38 % |
+| | Orin | 184 / 192 / 468 | 164 / 108 / 300 | 164 / 88 / 273 | −42 % |
+| | Pi | 105 / 112 / 266 | 83 / 58 / 161 | 83 / 45 / 146 | −45 % |
+| Pi (Python 3.13) | PC | 760 / 515 / 1548 | 689 / 493 / 1367 | 703 / 398 / 1259 | −19 % |
+| | Orin | 442 / 333 / 906 | 421 / 253 / 767 | 429 / 198 / 705 | −22 % |
+| | Pi | 265 / 187 / 537 | 205 / 135 / 427 | 210 / 102 / 391 | −27 % |
+
+- The host decides, not the record size: on the PC the candidate's page is slower than Python's for
+  every input, the Pi's 5 KB records too (c2: decoding 1.3–1.6 ×, writing 1.1–1.3 ×); on the boards it is
+  faster for every input, the PC's 20 KB records too. The 3C note that the PC's record size explained it
+  was wrong.
+- Candidate 1 (objects in order without a member list): about 4 % off the PC's writing, within the
+  runs' spread. Candidate 2 (floats written in place): with 1, writing 12–24 % less than base on every host and input.
+  Candidate 3 (repeated keys found by a key hash first): no change in decoding (199–200 µs both), so
+  taken out again; its test of nested repeated keys stays.
+- Target not met: c2's page is still 30–34 % above Python's on the PC, so, as set, no PC A/B run.
+  c2 keeps every answer: `cargo test` 23 passed, `live_http.py` no difference, the pages above equal.
+- Added after the three candidates, a diagnosis, not a candidate: the same c2 source built with
+  `cache-alloc` decodes the PC's input in 109 µs instead of 192 (page 254 µs, −3 % against Python;
+  −3 to −8 % on the PC for every input, −54 to −62 % on the Orin, −32 to −41 % on the Pi). What is left
+  on the PC is the system allocator under decoding (musl's), one allocation per key, string, object and
+  array; not the parser's work. Nothing here turns `cache-alloc` on: that, or decoding with fewer
+  allocations, is the next decision.
+
+Raw (outside the repository, `~/.local/state/platmon-measure/native-20261020-replay/`): the inputs
+(`core-*.jsonl`, SHA-256 first 16 hex digits PC `30561610b9ca81e2`, Orin `f4a990e77926add0`, Pi
+`bc48e15822041bde`), `cost-{x86,orin,pi}.txt`. Binaries x86_64 / aarch64: base `334e5440ee866210` /
+`260de2a0d5c7082f`, c2 `93bc8944f1f4ccf4` / `f10dc3f46ec4f92e` (the source as committed rebuilds to these).
 
 ### Earlier run (2026-10-18)
 
