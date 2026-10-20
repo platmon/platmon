@@ -1,0 +1,13 @@
+#!/bin/sh
+# platmon candidate check, run as root through sudo, no arguments: memory, threads, descriptors and the
+# processes of each running candidate unit. Reads only.
+set -eu
+for u in platmon-native-candidate platmon-native-candidate-fakesmi platmon-python-candidate; do
+  pid=$(systemctl show -p MainPID --value "$u.service")
+  [ "$pid" -gt 0 ] || continue
+  echo "unit $u pid $pid"
+  grep -E '^(Rss|Pss):' "/proc/$pid/smaps_rollup"
+  grep -E '^(VmRSS|Threads):' "/proc/$pid/status"
+  echo "fds $(ls "/proc/$pid/fd" | wc -l) sockets $(ls -l "/proc/$pid/fd" | grep -c 'socket:' || true)"
+  echo "processes $(wc -l < "/sys/fs/cgroup/system.slice/$u.service/cgroup.procs")"
+done

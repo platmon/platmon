@@ -1,0 +1,16 @@
+# platmon candidate check: the installed Python service (/usr/share/platmon) on the candidate's INI and port.
+# Beside platmon.service, never in its place; not enabled. Hardening as the product unit.
+[Unit]
+Description=platmon candidate check: Python service
+After=network.target
+Conflicts=platmon-native-candidate.service platmon-native-candidate-fakesmi.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/share/platmon/platmon.py /etc/platmon-candidate/platmon.ini
+Environment=PYTHONDONTWRITEBYTECODE=1
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+Restart=on-failure
+RestartSec=5

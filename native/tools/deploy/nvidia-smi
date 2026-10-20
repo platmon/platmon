@@ -1,0 +1,4 @@
+#!/bin/sh
+# platmon candidate check: a fake nvidia-smi, slow (0.3 s of the 0.5 s timeout) and well formed.
+sleep 0.3
+echo "GPU-candidate-check, 10, 1410, 1980"
