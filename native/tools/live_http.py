@@ -42,6 +42,7 @@ import urllib.error
 import urllib.request
 
 import walk
+import worker
 from compare import kind, plausible
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -400,7 +401,7 @@ def heads(text):
 
 
 def main():
-    tested = self_test() & walk.self_test()
+    tested = self_test() & walk.self_test() & worker.self_test()
     if sys.argv[1:] == ["--self-test"] or not tested:
         sys.exit(0 if tested else 1)
     binary, interval = os.path.abspath(sys.argv[1]), 1.0
@@ -415,13 +416,10 @@ def main():
             if not wait_ready(port, deadline):
                 sys.exit(f"{n} is not ready after 15 s")
         time.sleep(6)  # past the first collections' warmup and the first slow observations on both
-        res = {}
-        threads = [threading.Thread(target=lambda n=n: res.__setitem__(n, check(ports[n], interval, procs[n].pid)))
-                   for n in ports]
-        for t in threads:  # at the same time, so both read the same moment as far as possible
+        threads = {n: worker.Worker(f"{n} check", check, ports[n], interval, procs[n].pid) for n in ports}
+        for t in threads.values():  # at the same time, so both read the same moment as far as possible
             t.start()
-        for t in threads:
-            t.join()
+        res = {n: t.result(300) for n, t in threads.items()}  # what a check raised ends the run here, by name
         for n in ports:  # a restart: the old cursor is refused, never mixed with the new process's ids
             stop(procs[n])
             procs[n] = start(n, binary, ports[n], interval, logs[n])

@@ -47,6 +47,7 @@ import threading
 import time
 
 import walk
+import worker
 
 TICK = os.sysconf("SC_CLK_TCK")
 STREAMS = ("core", "storage", "wifi", "battery", "probe")
@@ -108,23 +109,23 @@ class Clock:
         return time.monotonic() - self.t0
 
 
-class Rss(threading.Thread):
+class Rss:
     def __init__(self, proc, clock):
-        super().__init__(daemon=True)
         self.proc, self.clock, self.every, self.trace, self.stop = proc, clock, 5.0, [], threading.Event()
+        self.gone = None
 
     def run(self):
         while not self.stop.wait(self.every):
             try:
                 self.trace.append((round(self.clock.now(), 2), self.proc.status()["VmRSS"]))
-            except (OSError, KeyError):  # gone, or a zombie without VmRSS
+            except (OSError, KeyError) as e:  # gone, or a zombie without VmRSS: the trace ends here
+                self.gone = (round(self.clock.now(), 2), type(e).__name__)
                 return
 
 
-class Budget(threading.Thread):
+class Budget:
     """GET /api/stats every 1 s on a fixed grid: response times, codes, the published sample."""
     def __init__(self, port, clock):
-        super().__init__(daemon=True)
         self.port, self.clock, self.answers, self.stop = port, clock, [], threading.Event()
 
     def run(self):
@@ -307,8 +308,9 @@ def run(variant, args, ini, ph):
     p = subprocess.Popen(command(variant, args, ini), cwd=args.tree, stdout=log, stderr=log, env=env)
     clock, proc = Clock(), Proc(p.pid)
     res = {"variant": variant, "pid": p.pid, "started": time.time(), "phases": ph}
-    budget = Budget(args.port, clock)
-    rss = Rss(proc, clock)
+    budget, rss = Budget(args.port, clock), Rss(proc, clock)
+    workers = {"budget": worker.Worker("budget", budget.run), "rss": worker.Worker("rss", rss.run)}
+    res["workers"] = {}
     try:
         deadline = time.monotonic() + 15
         while True:
@@ -321,8 +323,8 @@ def run(variant, args, ini, ph):
                 raise RuntimeError(f"{variant} not ready")
             time.sleep(0.1)
         res["ready_s"] = round(clock.now(), 2)
-        budget.start()
-        rss.start()
+        workers["budget"].start()
+        workers["rss"].start()
         w, ww = ph["warmup"], ph["window"]
         res["w1"] = cpu_window(proc, clock, w, w + ww)
         res["w1"].update(budget.window(w, w + ww))
@@ -330,17 +332,17 @@ def run(variant, args, ini, ph):
         res["w2"] = cpu_window(proc, clock, ph["w2_at"], ph["w2_at"] + ww)
         res["w2"].update(budget.window(ph["w2_at"], ph["w2_at"] + ww))
         budget.stop.set()
-        budget.join()
+        res["workers"]["budget"] = workers["budget"].finish()
         res["points"]["filled"] = retained(args.port, proc)
         hub, stop = Hub(args.port, clock), threading.Event()
         hub.mono0, hub.wall0 = clock.now(), time.time()
-        th = threading.Thread(target=hub.run, args=(stop,), daemon=True)
+        th = worker.Worker("hub w3", hub.run, stop)
         h0 = ph["w2_at"] + ww
         th.start()
         w3 = h0 + ph["hub_warmup"]
         res["w3"] = cpu_window(proc, clock, w3, w3 + ww)
         stop.set()
-        th.join()
+        res["workers"]["hub w3"] = th.finish()
         res["w3"].update(hub.window(w3, w3 + ww))
         res["w3"]["cadence"] = hub.cadence(w3, w3 + ww)
         res["hub_catch_up"] = {s: hub.walks[s].pages for s in STREAMS}
@@ -385,6 +387,7 @@ def run(variant, args, ini, ph):
                             "cpu_s_each": round(sum(r["cpu_s"] for r in rounds) / len(rounds), 4),
                             "peak_rss_kib": peak, "vmhwm_kib": [hwm0, proc.status()["VmHWM"]],
                             "losses": hub.losses[losses0:], "problems": hub.problems[problems0:]}
+        res["reconnect"]["span_s"] = round(last - first, 2)
         res["reconnect"].update(hub.window(first, last))
         res["reconnect"]["cadence"] = hub.cadence(first - 1, last + 1)
         r1 = last
@@ -392,11 +395,11 @@ def run(variant, args, ini, ph):
         for s in target:
             hub.walks[s].target = None
         stop = threading.Event()
-        th = threading.Thread(target=hub.run, args=(stop,), daemon=True)
+        th = worker.Worker("hub after", hub.run, stop)
         th.start()
         clock.at(r1 + ph["after"])
         stop.set()
-        th.join()
+        res["workers"]["hub after"] = th.finish()
         res["after"] = {"cadence": hub.cadence(r1, r1 + ph["after"])}
         res["points"]["after"] = retained(args.port, proc)
         res["hub"] = {"losses": hub.losses, "problems": hub.problems, "supported": hub.supported,
@@ -406,6 +409,10 @@ def run(variant, args, ini, ph):
     finally:
         budget.stop.set()
         rss.stop.set()
+        for name, w in workers.items():
+            if w.ident is not None and name not in res["workers"]:
+                res["workers"][name] = w.finish()
+        res["rss_gone"] = rss.gone
         res["exited_by_itself"] = p.poll()
         p.terminate()
         try:
@@ -417,6 +424,47 @@ def run(variant, args, ini, ph):
     log.seek(0)
     res["log"] = log.read().splitlines()[-20:]
     return res
+
+
+def self_test():
+    """The poller in its Worker against a synthetic node: answering well it ends when stopped, with no
+    problem; answering a page it cannot decode, the thread's end is in the result instead of a quiet window."""
+    global get
+    real, passed = get, True
+
+    def node(broken):
+        n = [0]
+
+        def fake(port, path, timeout=10):
+            if path == "/api/status":
+                return 200, b'{"instance_id": "i", "sample": {"sequence": 3}}', 0.001
+            if not path.startswith("/api/samples"):
+                return (404, b"{}", 0.001) if "observation-samples" in path else (200, b'{"groups": {}}', 0.001)
+            n[0] += 1
+            if broken and n[0] > 1:
+                return 200, b'{"records": [', 0.001
+            first = n[0] == 1
+            recs = [{"id": i, "gap_before": False,
+                     "data": {"sample": {"started_at": time.time(), "duration_ms": 1.0, "completed_at": time.time()}}}
+                    for i in ((1, 2) if first else (3,) if n[0] == 2 else ())]
+            body = {"instance_id": "i", "stream": "core", "records": recs, "missing_ranges": [],
+                    "next_after": 2 if first else 3, "has_more": first, "latest_id": 3}
+            return 200, json.dumps(body).encode(), 0.001
+        return fake
+
+    for name, broken, want in (("answers well", False, []), ("an undecodable page", True, ["raised JSONDecodeError"])):
+        get = node(broken)
+        hub, stop = Hub(0, Clock()), threading.Event()
+        w = worker.Worker("hub", hub.run, stop)
+        w.start()
+        time.sleep(0.5)
+        stop.set()
+        got = worker.problems("hub", w.finish(5)) + hub.problems
+        good = len(got) == len(want) and all(x in g for x, g in zip(want, got)) and hub.walks["core"].pages >= 1
+        print(f"service_ab {'ok  ' if good else 'FAIL'} {name}: {got}", file=sys.stderr)
+        passed &= good
+    get = real
+    return passed
 
 
 def sha256(path):
@@ -451,6 +499,10 @@ def host(args, ini):
 
 def main():
     ap = argparse.ArgumentParser()
+    if sys.argv[1:] == ["--self-test"]:
+        sys.exit(0 if self_test() & worker.self_test() & walk.self_test() else 1)
+    if not (self_test() and worker.self_test() and walk.self_test()):
+        sys.exit("the self-test failed")
     ap.add_argument("--tree", required=True)
     ap.add_argument("--tree-ref", default=None)
     ap.add_argument("--binary", required=True)
