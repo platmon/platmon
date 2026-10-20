@@ -84,16 +84,19 @@ impl Value {
                 out.push(']');
             }
             Value::Obj(items) => {
-                let mut refs: Vec<&(String, Value)> = items.iter().collect();
-                if sort_keys {
-                    refs.sort_by(|a, b| a.0.cmp(&b.0)); // UTF-8 byte order is code point order
-                }
-                out.push('{');
-                for (i, (k, v)) in refs.into_iter().enumerate() {
+                let member = |out: &mut String, i: usize, (k, v): &(String, Value)| {
                     if i > 0 { out.push_str(item_sep); }
                     write_str(out, k, ascii);
                     out.push_str(key_sep);
                     v.write_styled(out, sort_keys, spaced, ascii);
+                };
+                out.push('{');
+                if sort_keys {
+                    let mut refs: Vec<&(String, Value)> = items.iter().collect();
+                    refs.sort_by(|a, b| a.0.cmp(&b.0)); // UTF-8 byte order is code point order
+                    refs.into_iter().enumerate().for_each(|(i, m)| member(out, i, m));
+                } else { // in order: no list of the members to build
+                    items.iter().enumerate().for_each(|(i, m)| member(out, i, m));
                 }
                 out.push('}');
             }
@@ -176,9 +179,9 @@ fn write_float(out: &mut String, f: f64) {
         let e: i32 = e.parse().unwrap();
         let _ = write!(out, "{}e{}{:02}", m, if e < 0 { '-' } else { '+' }, e.abs());
     } else {
-        let s = format!("{}", f);
-        out.push_str(&s);
-        if !s.contains('.') { out.push_str(".0"); }
+        let start = out.len(); // written in place, without a string of its own
+        let _ = write!(out, "{}", f);
+        if !out[start..].contains('.') { out.push_str(".0"); }
     }
 }
 
@@ -401,6 +404,10 @@ mod tests {
     fn python_style_and_parse() {
         let v = parse(r#"{"b": [1, -2.5, 1e-05, 18446744073709551616], "a\u00e9\ud83d\ude00": null, "b": true}"#).unwrap();
         assert_eq!(v.to_py(), r#"{"b": true, "a\u00e9\ud83d\ude00": null}"#); // repeated key: last value
+        let v = parse(r#"{"a": {"a": 1, "b": {"a": 2, "a": 3}, "a": 4}, "b": 5, "a": {"c": 6}, "b": 7}"#).unwrap();
+        assert_eq!(v.to_string(false), r#"{"a":{"c":6},"b":7}"#); // nested objects keep their own keys
+        let v = parse(r#"{"x": {"a": 1, "b": {"a": 2, "a": 3}, "a": 4}}"#).unwrap();
+        assert_eq!(v.to_string(false), r#"{"x":{"a":4,"b":{"a":3}}}"#);
         let v = parse(r#"[1, -2.5, 1e-05, 18446744073709551616, "x\u007f\n"]"#).unwrap();
         assert_eq!(v.to_py(), r#"[1, -2.5, 1e-05, 18446744073709551616, "x\u007f\n"]"#);
         assert_eq!(v.to_string(false), "[1,-2.5,1e-05,18446744073709551616,\"x\u{7f}\\n\"]");

@@ -353,6 +353,59 @@ impl Stats {
     }
 }
 
+/// replay-cost FILE [PAGES [OUT]]: what a replay answer costs, by stage, for the core publications in FILE (one
+/// JSON publication per line, at most one page of them). Per record, in µs, the median of 7 rounds of PAGES
+/// pages: decoding the stored payloads; decoding and writing them back; a whole Replay.view (decoding,
+/// ages and stale, the records and the envelope, writing). One JSON line; OUT gets the page itself.
+fn replay_cost(args: &[String]) {
+    let Some(path) = args.first() else { eprintln!("replay-cost FILE [PAGES [OUT]]"); std::process::exit(2) };
+    let pages: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(20);
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| { eprintln!("{}: {}", path, e); std::process::exit(1) });
+    let data: Vec<Value> = text.lines().filter(|l| !l.is_empty())
+        .map(|l| json::parse(l).unwrap_or_else(|e| { eprintln!("{}: {}", path, e); std::process::exit(1) })).collect();
+    let n = data.len();
+    let r = replay::Replay::new("cost".into(), "monotonic", &[], 1e6, 1 << 30);
+    for (i, d) in data.iter().enumerate() {
+        let t = (i as i64 + 1) * 1_000_000_000;
+        r.append("core", i as i64 + 1, t, t, d, false, || t).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1) });
+    }
+    let now = (n as i64 + 1) * 1_000_000_000;
+    let page = || r.view("core", None, 0, n as i64, || now).unwrap_or_else(|e| { eprintln!("{:?}", e); std::process::exit(1) });
+    let got = json::parse(&page()).map(|p| match p.get("records") { Some(Value::Arr(a)) => a.len(), _ => 0 });
+    if got != Ok(n) {
+        eprintln!("one page holds {:?} of the {} records", got, n);
+        std::process::exit(1);
+    }
+    if let Some(out) = args.get(2) {
+        std::fs::write(out, page()).unwrap_or_else(|e| { eprintln!("{}: {}", out, e); std::process::exit(1) });
+    }
+    let payloads: Vec<String> = data.iter().map(Value::to_py_compact).collect();
+    let median = |work: &dyn Fn() -> usize| {
+        let mut rounds: Vec<f64> = (0..7).map(|_| {
+            let t = std::time::Instant::now();
+            let mut sink = 0;
+            for _ in 0..pages {
+                sink += work();
+            }
+            std::hint::black_box(sink);
+            t.elapsed().as_secs_f64() * 1e6 / (pages * n) as f64
+        }).collect();
+        rounds.sort_by(f64::total_cmp);
+        rounds[3]
+    };
+    let decode = median(&|| payloads.iter().map(|p| json::parse(p).is_ok() as usize).sum());
+    let both = median(&|| payloads.iter().map(|p| json::parse(p).map_or(0, |v| v.to_py_compact().len())).sum());
+    let whole = median(&|| page().len());
+    let mut out = Value::obj();
+    out.set("records", (n as i64).into());
+    out.set("payload_bytes", ((payloads.iter().map(String::len).sum::<usize>() / n.max(1)) as i64).into());
+    out.set("pages", (pages as i64).into());
+    out.set("decode_us", json::round_to(decode, 3).into());
+    out.set("write_us", json::round_to(both - decode, 3).into());
+    out.set("page_us", json::round_to(whole, 3).into());
+    println!("{}", out.to_string(false));
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -360,6 +413,7 @@ fn main() {
         Some("runtime-script") => return runtime_script(),
         Some("config-check") => return config_check(&args[2..]),
         Some("observe-script") => return observe_script(&args[2..]),
+        Some("replay-cost") => return replay_cost(&args[2..]),
         _ => {}
     }
     let mut c = Collector::new(5.0, [true; 3]); // the service's at its default 1 s interval
