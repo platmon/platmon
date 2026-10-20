@@ -15,7 +15,8 @@ Ported, with the same output as the Python collector:
 - CPU clocks, thermal zones, hwmon temperatures, power (including INA3221 rails) and fans
 - memory, disk, `system`, `model`
 - the Jetson extension: GPU load and clocks, nvpmodel power mode, pwm_tach, L4T release
-- the DRM GPU (i915, amdgpu, other drivers by name) and the accel NPU (intel_vpu)
+- the DRM GPU (i915, amdgpu, other drivers by name), then the nvidia-smi fallback, and the accel NPU
+  (intel_vpu)
 - `collectors` states, reasons and issues
 - sensor source ids (SHA-256 descriptors), the JSON Pointers of `sensor_meta`, every value's read span and
   the required reads' spans
@@ -27,7 +28,8 @@ Not ported in steps 1 and 2: the slow groups (storage, Wi-Fi, battery, probe), t
 and everything in `runtime/` (Sampler, history, replay, HTTP). So the collector of steps 1 and 2 is the 1 s
 core collection used on the three hosts checked, extended with Network, Disk I/O and Pressure, with the
 same output on the fixtures defined here; not the whole default collection of the product. Step 3 (below)
-adds the slow groups and `runtime/`; the nvidia-smi fallback is still not ported.
+adds the slow groups and `runtime/`, and the support scope step the nvidia-smi fallback and `--frontends`
+([Support scope](#support-scope)).
 
 Behaviour kept from Python where bypassing std made it explicit:
 
@@ -69,11 +71,11 @@ same dependency policy (only `libc`); the `cache-alloc` build is not part of ste
 | 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
 | 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
 
-Status (2026-10-20, #93): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)). No switch decided.
+Status (2026-10-20, #93): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)); the nvidia-smi fallback and `--frontends` ported, the support scope written down ([Support scope](#support-scope)). No switch decided.
 With 3B the candidate has every feature of
 the default configuration on the three hosts compared (x86 PC, Orin, Raspberry Pi), checked against the
-Python service below. Still missing: the nvidia-smi fallback of the GPU (none of the three hosts has
-nvidia-smi; a PC with an NVIDIA card would differ), the `--frontends` option.
+Python service below. Missing then, ported since: the nvidia-smi fallback of the GPU and the `--frontends`
+option.
 
 **Contracts 3B must keep** (from the Python service and docs/reference): requests never collect; a slow
 group has its own id and times, and a blocked read neither blocks the core nor queues more work for its
@@ -170,7 +172,28 @@ stays a diagnosis, never a candidate. Nothing else changes: no JSON or replay ch
 - Budget: one allocator, one configuration, stage 2 once, stage 3 one round per host (about 2.8 h).
   If a stage fails its condition, stop and report; no tuning, no JSON redesign, no `cache-alloc`.
 
-**What the candidate has** (`platmon-native serve [platmon.ini] --web DIR --app-version V`):
+**Support scope and the features not ported, set before the work (2026-10-20, after the eighth review).**
+The system allocator is the candidate's; allocator and JSON experiments end here. In order: the support
+scope written down (below, [Support scope](#support-scope)), the two features not ported, then the
+candidate fixed (features, build configuration), then the integrated comparison and the deployed form's
+long run, install, upgrade and recovery. This step is the first two.
+- nvidia-smi: the Python behaviour, nothing new (no NVML). Done when, on fake trees with a fake command
+  against `collector/gpu.py`, equal for: discovery (absent, on PATH, a DRM reader first), several GPUs
+  (the smallest UUID), numbers and their rounding, units, `N/A` and not supported, source ids and read
+  spans; a timeout, a nonzero exit, a signal, output that is not UTF-8 or not the CSV expected, a command
+  no longer executable or gone; the next collection after a failure recovers without the old values; no
+  child process left behind. Mutants of each of these must be caught. Without an NVIDIA GPU here: "fixture
+  verified, not verified on NVIDIA hardware".
+- `--frontends`: the order of `platmon.load_config` kept (defaults, the file and its checks, then
+  `--frontends`, then "nothing to run"); compared with the same inputs: precedence over `enabled =`,
+  unknown and empty names, an empty value, the file's own errors first; and the refusals of the two
+  servers as processes (exit 2, the same message). No new frontend system.
+- The `platmon` command (`frontends/cli.py`) stays the Python client; it is not rewritten.
+- Build: the release path builds the system allocator only (`build.sh`: no features, `--locked`, both musl
+  targets, SHA-256, and a check of the allocator each binary carries); `cache-alloc` and `mimalloc` are
+  built only by their own scripts, as records.
+
+**What the candidate has** (`platmon-native serve [platmon.ini] [--frontends LIST] --web DIR --app-version V`):
 
 3A (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
 - One writer thread collects every interval. A publication is immutable: its stats (with the passive
@@ -208,10 +231,56 @@ stays a diagnosis, never a candidate. Nothing else changes: no JSON or replay ch
   number, statvfs through a pinned descriptor), Wi-Fi (`/proc/net/wireless`, the namespace and ifindex,
   the carrier), battery (`/sys/class/power_supply`), the TCP connect probe.
 
+## Support scope
+
+Written down 2026-10-20 (after the eighth review), for the candidate as it is on #93: `platmon-native serve`
+built by `build.sh`, the system allocator. Four kinds: **implemented** (in the source, compared with the
+Python service on fixtures), **verified on hardware** (also run live on a host below), **unverified**
+(implemented, not shown on hardware or not by a fixture either), **unsupported** (not in the candidate).
+
+| area | implemented and compared | verified on hardware | unverified / unsupported |
+| --- | --- | --- | --- |
+| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM and other architectures unsupported |
+| core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`) | the fixtures' "not covered" lists below |
+| GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first | amdgpu and nvidia-smi on an NVIDIA GPU with its driver: **fixture verified, not verified on NVIDIA hardware** (NVIDIA does not promise a stable nvidia-smi output); NVML unsupported |
+| slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
+| configuration | `platmon.ini` as `load_config` reads and checks it, `--frontends` after it (67 cases, also the two servers' refusals) | on the three hosts (Python 3.14, 3.10, 3.13) | Unicode digits and whitespace in numbers, non-UTF-8 file names and files; argparse's abbreviations (`--front`) and a value that starts with `-` are unsupported |
+| HTTP API, web page, `/text`, history, replay | as `live_http.py` and `runtime_fixture.py` check them | the three hosts, no difference | which connections of a burst are refused (timing); Python versions' error page markup |
+| clients | the HTTP contracts the Hub and the web page use | the Hub-like poller of 3C | the `platmon` command (`frontends/cli.py`) stays the Python client and is not rewritten: the daemon runs without Python, a package that also installs the command still needs Python 3 for it (packaging decides later) |
+
+**Load and memory.** Verified: the default configuration with the 3C load (1 s collections, a Hub-like
+poller, a 480 s reconnect backlog fetched five times) and four pollers fetching the same backlog at once,
+three rounds (the allocator comparison). Not verified: more concurrent replays. The HTTP server's limit of
+32 handler threads bounds threads, not the memory 32 replay pages at once would hold; it is not a
+verified load. The candidate's PSS there (system allocator, 2026-10-20, mean of two runs), and the budget
+for the integrated run, set now, before it (measured + 25 %, to the MiB above; the owner may change it
+before that run):
+
+| PSS MiB | PC measured / budget | Orin | Pi |
+| --- | --- | --- | --- |
+| buffers full | 17.3 / 22 | 9.7 / 13 | 5.4 / 7 |
+| four pollers' peak | 69.6 / 87 | 36.7 / 46 | 21.4 / 27 |
+| 120 s after | 18.7 / 24 | 10.7 / 14 | 5.9 / 8 |
+
+The 25 % rule against S chose an allocator; these absolute numbers are the candidate's own budget for
+the load above. Python's PSS with full buffers was 32.8 / 25.4 / 21.8 MiB (3C); its four-poller peak was
+not measured.
+
+**Python versions.** The comparisons run against the Python service on 3.14 (PC), 3.10 (Orin) and 3.13
+(Pi). Where Python itself differs, the candidate follows 3.11 and later: a NUL inside nvidia-smi's CSV is a
+character (3.10's `csv` refuses the whole answer, 3.11 and later refuse only that field's number).
+
+**Build.** `build.sh` is the candidate's build: the system allocator only (no features; `--all-features`
+is never a build of it, and the two allocator features cannot be built together), `Cargo.lock` as
+committed (`--locked`), both musl targets, each binary checked to carry the system allocator's mark
+(`platmon-native build-info` prints it), then the SHA-256. `build-cache-alloc.sh` and
+`build-mimalloc.sh` build the two records, never the candidate.
+
 ## Use
 
 ```sh
-native/build.sh                     # in a rust:1.88 container; unit tests, then both builds for both targets
+native/build.sh                     # in a rust:1.88 container; unit tests, then the system allocator build for both targets
+native/build-cache-alloc.sh         # the cache-alloc build (a record, for bench.sh's C), into target/cache-alloc
 native/tools/fixture.sh             # deterministic equivalence on fake trees, in a container
 PYTHONPATH=. python3 native/tools/compare.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 PYTHONPATH=. native/tools/bench.sh native/target/x86_64-unknown-linux-musl/release/platmon-native out.jsonl \
@@ -260,7 +329,8 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
   pages (it differs between Python versions; the status line with the message stays). Runs on the host,
   reads no tree; the same self-test and deadlines as `fixture.py`.
 - `config_fixture.py`: platmon.ini files read by `platmon.load_config` and `platmon-native config-check`:
-  every setting with its type, the levels and the probe targets, or the same refusal message.
+  every setting with its type, the levels and the probe targets, or the same refusal message, also with
+  a `--frontends` value; then refusals of `platmon.py` and `platmon-native serve` as processes.
 - `live_http.py`: **a live check of the service.** Starts the Python service and `platmon-native serve`
   with the same platmon.ini (the defaults, each on its own local port), checks both the same way and
   compares them (see its docstring). It stops only the two processes it started, by their handles.
@@ -274,7 +344,8 @@ On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share
 
 ### Equivalence on fake trees
 
-`fixture.sh`, 2026-10-19, x86_64 build: 8 of 8 scenarios, no difference: 40 collections and observations
+`fixture.sh`, 2026-10-20 with the nvidia-smi scenarios: 11 of 11 scenarios, 72 collections and observations
+equal and the 2 expected failures on both sides (the x86_64 build of the support scope step). Before, 2026-10-19, x86_64 build: 8 of 8 scenarios, no difference: 40 collections and observations
 equal and the 2 expected failures (below) failed on both sides; every side exited with 0. Harness
 self-test: 15 of 15 controls reported as they must be.
 
@@ -287,6 +358,9 @@ self-test: 15 of 15 controls reported as they must be.
 | `pi` | Raspberry Pi device tree, a zone whose hwmon twin is named with `_`, a DRM card (`v3d`) named but not read |
 | `passive` | interfaces with and without an ifindex (one named beyond ASCII), physical, virtual and partition disks, a disk with the 11 fields of older kernels; rates, counters reset (no rate, a new baseline), in flight falling (a gauge, not a reset), an interface and a disk removed and others added, an interface back under its name with a new ifindex, a counter at 2^64−1 and one beyond (not a counter), bytes beyond 64 bits, a delta whose rate depends on the float conversion, windows of 1.7 s and 0.3 s, a gap, the same clock twice, the network namespace changed and the rates after it, a disk whose `/sys/block` link went away (its classification is kept) |
 | `slow` | the slow groups' readers (`observe-script` against `observe_py.py`), 5 steps: partitions of physical, virtual and missing disks, a row listed twice; mountinfo with the real device numbers of the container's mounts, a bind mount, an escaped path, read only from the super-options, a file bind listed before a directory (`ENOTDIR`, skipped), a mount point gone, another device behind a path (`mount_changed`), one nobody cannot reach, non-local and non-`/dev` mounts, lines that do not parse; Wi-Fi rows connected, down, with a moved ifindex, an unreadable carrier, no ifindex, a level that is not dBm and one of 0, out of range, not a row; batteries present, an empty bay, invalid numbers and text, an unreadable attribute, a UPS, external supplies, one without a type; TCP connects accepted, refused and unreachable (their times only checked to be ≥ 0); then mountinfo unreadable, files gone, files broken, nothing there |
+| `nvidia` | a card no DRM reader knows (driver `nvidia`) and a fake `nvidia-smi` on PATH: two GPUs (the smallest UUID, 12.25 % rounded, MHz to Hz), `[N/A]` and `[Not Supported]`, out of range, `nan`, `inf`, underscores and exponents, quoted fields, CRLF and lone CR, a field over two lines, a NUL, no rows, an empty line, three fields, not a GPU UUID, a quote not closed, stdout and stderr that are not UTF-8, the Orin's real answer; past the 0.5 s limit, exit 3 after an answer, killed by a signal, the answer after (nothing kept), not executable, removed, back; then no process left (`/proc` of the container: no fake, `sleep` or zombie) and every run with the query's arguments |
+| `nvidia_alone` | no DRM card: nvidia-smi answers for the GPU; exit 3 (no GPU entry), no rows, back |
+| `nvidia_drm_first` | an i915 card and nvidia-smi present: the DRM reader answers, nvidia-smi is never run |
 | `passive_failures` | a header that is not `/proc/net/dev`'s, diskstats that is not UTF-8, a pressure file that cannot be read, one that is not ASCII, one without `some`; then bad rows (an interface listed twice, 15 fields, invalid names, a line without `:`, a negative counter; a disk listed twice, too few fields, a later field that is not a counter, a major that is not a number, a line without a name, a `/sys/block` entry that is not a link), a namespace that cannot be identified, `some` twice, CRLF line ends; then every file gone, back (warmup), empty files, recovered |
 
 The harness was checked against itself: deliberate defects in a copy of the Rust code were each reported.
@@ -297,7 +371,10 @@ counters written as 64-bit signed, the I/O ratio rounded to 3 digits, the pressu
 first read, duplicate interfaces kept, line numbers off by one, the rate computed without Python's float
 conversion. The RC6 clamp, the I/O ratio and the float conversion were first missed (every window was
 exactly 1 s), which added the clamped case to `pc` and the 1.7 s / 0.3 s windows and the large delta to
-`passive`.
+`passive`. nvidia-smi, ten: the largest UUID taken, a timed-out query not reaped, usage over 100
+accepted, `[N/A]` not known, the span ending at its start, a quoted field not continued on the next line,
+PATH not searched, stderr's UTF-8 not checked, no newline translation, a 6 s limit. The last but two were
+first missed, which added stdout that is valid with stderr that is not, and rows ended by a lone CR.
 
 Not covered by the fixtures: `ENODATA` and `EIO` (a tmpfs cannot return them; the reason mapping has a
 unit test), an error in the middle of a listing, a file that vanishes while it is read, a failing
@@ -467,7 +544,8 @@ Not covered: which connections of a burst are refused (timing: with 40 opened at
 answered a request while the client held 40; the limit check opens them 20 ms apart, the burst check
 looks at bounds and recovery only), Python versions' error page markup (the shape of the answer is
 compared, not the page), a reader that stops in the live check (a unit test covers it with a 64 MiB
-answer: no live answer is larger than the socket buffers), the nvidia-smi GPU fallback, configparser and
+answer: no live answer is larger than the socket buffers), the nvidia-smi fallback on NVIDIA hardware,
+configparser and
 `float()`/`int()` beyond the forms listed (Unicode digits, other whitespace), non-UTF-8 file names and
 config files, IPv6 scope ids and Python 3.10's text for IPv4-mapped addresses in probe targets.
 
@@ -485,12 +563,20 @@ one core.
 | idle, no client (CPU %) | 1.841 | 0.729 | −60 % | 1.909 | 0.675 | −65 % | 0.867 | 0.637 | −27 % |
 | reconnect, 480 s backlog, per round (s) | 0.502 | 0.433 | −14 % | 0.490 | 0.450 | −8 % | 0.247 | 0.263 | +6 % |
 | reconnect CPU per round (s) | 0.315 | 0.209 | −34 % | 0.375 | 0.286 | −24 % | 0.162 | 0.196 | **+21 %** |
-| reconnect peak VmRSS (MiB) | 41.7 | 16.8 | −60 % | 34.6 | 9.1 | −74 % | 56.0 | 29.9 | −47 % |
+| reconnect peak VmRSS, highest sample¹ (MiB) | 41.7 | 16.8 | −60 % | 34.6 | 9.1 | −74 % | 56.0 | 29.9 | −47 % |
 | full buffers RSS / PSS (MiB) | 33.1 / 25.4 | 9.8 / 9.8 | −70 / −61 % | 30.6 / 21.8 | 5.4 / 5.4 | −82 / −75 % | 44.6 / 32.8 | 17.4 / 17.4 | −61 / **−47 %** |
 | end PSS (MiB) | 33.1 | 10.3 | −69 % | 25.1 | 5.6 | −78 % | 42.9 | 18.0 | −58 % |
 | w2 `/api/stats` p95 (ms) | 3.36 | 2.21 | | 5.64 | 3.02 | | 3.04 | 2.04 | |
 | w3 replay page p95 (ms) | 7.06 | 4.05 | | 12.49 | 10.57 | | 4.47 | 4.73 | |
 | w2 collection p95 (ms) | 20.4 | 10.7 | | 13.7 | 4.8 | | 24.7 | 22.1 | |
+
+¹ The highest value sampled, which may be below the true peak: the sampler missed the reconnect's first
+seconds (see "Found later" below). The fixed points (full buffers, end) and the CPU windows are not
+affected.
+
+These are the 3C candidate's numbers (source `35cdbdf`); the JSON writing changed after them (`fc63a02`),
+and nothing since compared Python with the current candidate, so the PC's +21 % reconnect is a record of
+that candidate, not the current one's rate.
 
 Repeats: A's two runs within 0.15 pp (the Pi's w1), B's within 0.06 pp except on the Orin, where the
 first B run was about 0.2 pp higher in w2, w3 and idle (0.883 / 0.683, 0.875 / 0.692, 0.825 / 0.633).
@@ -636,26 +722,63 @@ M against S):
 | threads / fds, 120 s after | 5 / 4 → 5 / 4 | 5 / 4 → 5 / 4 | 5 / 4 → 5 / 4 |
 
 - **M breaks the memory rule on every host** (PC and Orin at all three points, Pi at the concurrent
-  peak); every other rule holds for both, and S's memory is 3C's B again (17.4 / 9.8 / 5.4 MiB then).
+  peak). Of what was recorded, neither S nor M broke another rule; each collection step during the
+  concurrent rounds was not recorded in these runs and stays unverified (below). Leaving M out rests on
+  the memory breaches alone, which were recorded directly. S's memory is 3C's B again (17.4 / 9.8 /
+  5.4 MiB then).
   M is lower in CPU everywhere, beyond the spread, and its replay pages are faster; but with full
   buffers on the PC and the Orin it holds about what Python held in 3C (32.8 / 25.4 MiB, another day's
   runs), which takes away most of what Rust saves in memory there.
-- **Decision: the system allocator stays.** The `mimalloc` feature stays in the source only as the
-  record of this comparison, off by default; nothing was tuned (no purge, huge page or other setting),
-  and as set before the run, no second allocator, JSON redesign or `cache-alloc` follows from it. The
-  PC's misses (3C gates, the +21 % reconnect, the replay page above Python's) stay as recorded.
+- **Decision: the system allocator stays.** In this version (mimalloc 3.3.2), its default configuration
+  and these loads, mimalloc lowered CPU and response times but does not fit platmon's memory budget, so
+  it is not adopted. That is a trade-off measured in this configuration, not a finding about mimalloc or
+  musl in general: memory settled and threads and descriptors came back (no leak seen), and the return
+  policy, fragmentation and caches were not separated. The `mimalloc` feature stays in the source only
+  as the record of this comparison, off by default; nothing was tuned (no purge, huge page or other
+  setting), and as set before the run, no second allocator, JSON redesign or `cache-alloc` follows from
+  it. The PC's misses (3C gates, the 3C candidate's +21 % reconnect, the replay page above Python's)
+  stay as recorded.
+- S itself, at the concurrent peak of four pollers, holds about four times its full-buffer PSS (PC 69.6,
+  Orin 36.7, Pi 21.4 against 17.3, 9.7, 5.4 MiB); that is a load the support scope has to state and give
+  a budget ([Support scope](#support-scope)). The 25 % rule chose between allocators; it is not the
+  product's memory limit.
 - A measuring defect found in these runs: the concurrent pollers stop at the ids they started for, so
   the collections made during the rounds are not theirs to see; the completeness check counted them
   there and refused both boards' S runs (5 collections over 13 s, where the PC's faster rounds passed).
   `service_ab.py` now records them from the main poller's after walk (`concurrent.collected`), and
   `ab_report.py` judges that. These runs predate it: for them the core sequence's advance over the
   rounds (9 to 13 ids, as many as the seconds) and the after walk's losses (none) stand for it, marked
-  unverified. Judged that way, all four S runs are complete with no rule broken, all four M runs break
-  only the memory rule.
+  unverified. Judged that way, the six S runs (two per host) are complete with no recorded rule broken,
+  and the six M runs break only the memory rule. What the stand-in cannot show is each step: a 1.5 s
+  step could hide in an advance that matches the seconds. The candidate's integrated run records
+  `collected` and checks it.
 
 Raw: `~/.local/state/platmon-measure/native-20261020-mimalloc/`, `cost-{x86,orin,pi}.txt` (SHA-256 first
 16: `ba80e600bee7222d`, `57d46cc58e9667c5`, `e5b2635794a48d37`), `ab-{x86,orin,pi}.jsonl` (`ddac5318ddec7486`,
 `c97188ba3dab8c0b`, `48a16cebe2b28997`) with each run's stderr in `ab-*.err`.
+
+### Support scope step: nvidia-smi, `--frontends`, the build
+
+2026-10-20, as set before the work (above). Binaries from `build.sh`: x86_64 `30a8985e52dc15cb`, aarch64
+`dc1a281ccae9502b` (SHA-256, first 16), both with the system allocator's mark; `cargo test` 26 passed.
+- nvidia-smi: `fixture.sh` 11 of 11 scenarios, of them `nvidia`, `nvidia_alone` and `nvidia_drm_first`
+  with 32 collections equal; no process left after the timeout and the signal; every run with the
+  query's arguments. Ten mutants, all caught (two only after two steps were added; see
+  [Equivalence on fake trees](#equivalence-on-fake-trees)). **Fixture verified, not verified on NVIDIA
+  hardware.** The Orin has nvidia-smi (`nvidia-l4t-nvml`): its answer, read by hand once (30 ms, exit 0),
+  is replayed in `nvidia`; the Jetson reader answers there first, so the fallback is not reached.
+- `--frontends`: `config_fixture.py` 67 of 67 (49 configurations as before, 12 with `--frontends`, 6
+  refusals of the two servers as processes) on the PC, the Orin and the Pi. Seven mutants: six caught
+  (sorting and repeats of unknown names, an empty value taken as a name, `--frontends` checked before
+  the file, the first value counting, `--frontends=` not read); one cannot be seen: with `http` the only
+  frontend, a valid list always names it, so leaving `enabled` alone for frontends not named changes
+  nothing. A live start with `[http] enabled = no` and `--frontends http`: 200 on `/api/status`.
+- `live_http.py` with the new binaries: no difference on the PC, the Orin and the Pi (the v1.3.0 tree as
+  the Python side on the boards). `runtime_fixture.py` 7 of 7.
+- `build.sh` refused a binary without the mark and the `cache-alloc` build (its mark names it).
+
+Raw: `~/.local/state/platmon-measure/native-20261020-scope/` (`live-orin.json` `ca5c7cccc48d00fc`,
+`live-pi.json` `8c8f289f71991e21`). The board copies were removed.
 
 ### Earlier run (2026-10-18)
 
