@@ -234,14 +234,14 @@ pub fn sample(path: &str, g: &mut Group) -> Option<Value> {
             g.note(attr, "not_exposed", None);
         } else {
             match py_float(text) {
-                Some(v) if v.is_finite() && v >= 0.0 && (key != "usage" || v <= 100.0) && (key == "usage" || (v * 1e6).is_finite()) => value = Some(v),
+                Some(v) if v.is_finite() && v >= 0.0 && (key != "usage" || v <= 100.0) && (key == "usage" || hertz(v).is_some()) => value = Some(v),
                 _ => g.note(attr, "invalid_data", None),
             }
         }
         entry.set(key, match value {
             None => Value::Null,
             Some(v) if key == "usage" => g.got(Value::Float(round_to(v, 1))),
-            Some(v) => g.got(hertz((v * 1e6).round_ties_even())),
+            Some(v) => g.got(hertz(v).unwrap()),
         });
         let src = source("nvidia-smi", if key == "usage" { "percent" } else { "hertz" }, "device_channel",
                          vec![("device", uuid.into()), ("channel", attr.into())]);
@@ -250,9 +250,14 @@ pub fn sample(path: &str, g: &mut Group) -> Option<Value> {
     Some(entry)
 }
 
-/// round(MHz × 10**6) as Python's int: beyond i64 it is still exact (to 2**128, over 10**32 MHz).
-fn hertz(x: f64) -> Value {
-    if x < 9.223372036854775807e18 { Value::Int(x as i64) } else { Value::Big(x as u128) }
+/// round(MHz × 10**6) as Python's int, exact beyond i64 too; None from 2**128 Hz (over 3.4 × 10**32 MHz) on,
+/// where Python still gives an int: refused here as invalid_data (README, Support scope), never saturated.
+fn hertz(mhz: f64) -> Option<Value> {
+    let x = (mhz * 1e6).round_ties_even();
+    if !(x < 340282366920938463463374607431768211456.0) { // 2**128, exact as a double; also inf and nan
+        return None;
+    }
+    Some(if x < 9223372036854775808.0 { Value::Int(x as i64) } else { Value::Big(x as u128) })
 }
 
 #[cfg(test)]
@@ -280,6 +285,36 @@ mod tests {
         assert_eq!(rows(&["a\"\"b", "\"a\"\"b\""]), Some(vec![vec!["a\"\"b".into()], vec!["a\"b".into()]]));
         assert_eq!(rows(&[&"x".repeat(FIELD_LIMIT)]).map(|r| r[0][0].len()), Some(FIELD_LIMIT));
         assert_eq!(rows(&[&"x".repeat(FIELD_LIMIT + 1)]), None);
+    }
+
+    #[test]
+    fn clocks_in_hertz_like_python_or_refused() {
+        // python3 -c 'print(round(1410 * 10**6), round(5e-7 * 10**6), round(9223372036854.775807 * 10**6), round(1e30 * 10**6), round(3.4e32 * 10**6))'
+        assert_eq!(hertz(1410.0), Some(Value::Int(1_410_000_000)));
+        assert_eq!(hertz(0.0000005), Some(Value::Int(0))); // 0.5 Hz: ties to even
+        assert_eq!(hertz(9223372036854.775807), Some(Value::Big(9223372036854775808)));
+        assert_eq!(hertz(1e30), Some(Value::Big(1000000000000000042420637374017961984)));
+        assert_eq!(hertz(3.4e32), Some(Value::Big(339999999999999996123846586046231871488)));
+        assert_eq!(hertz(340282366920938.463463374607431768211456e18), None); // 2**128 Hz
+        assert_eq!(hertz(1e40), None);
+        assert_eq!(hertz(f64::MAX), None); // × 10**6 is inf
+    }
+
+    #[test]
+    fn a_clock_beyond_2_128_hz_is_null_and_invalid() {
+        let dir = std::env::temp_dir().join(format!("platmon-nvidia-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("nvidia-smi");
+        std::fs::write(&fake, "#!/bin/sh\necho 'GPU-review, 10, 1e40, 1980'\n").unwrap();
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let mut g = Group::new("gpu", true);
+        let entry = sample(fake.to_str().unwrap(), &mut g).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(entry.get("usage"), Some(&Value::Float(10.0)));
+        assert_eq!(entry.get("freq"), Some(&Value::Null));
+        assert_eq!(entry.get("max_freq"), Some(&Value::Int(1_980_000_000)));
+        assert_eq!(g.issues, [("clocks.current.graphics".to_string(), "invalid_data")]);
+        assert_eq!(g.values, 2);
     }
 
     #[test]
