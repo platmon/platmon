@@ -68,7 +68,8 @@ same dependency policy (only `libc`); the `cache-alloc` build is not part of ste
 | 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
 | 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
 
-Status (2026-10-19, #93): 3A and 3B done; 3C not started. With 3B the candidate has every feature of
+Status (2026-10-20, #93): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)); no decision taken.
+With 3B the candidate has every feature of
 the default configuration on the three hosts compared (x86 PC, Orin, Raspberry Pi), checked against the
 Python service below. Still missing: the nvidia-smi fallback of the GPU (none of the three hosts has
 nvidia-smi; a PC with an NVIDIA card would differ), the `--frontends` option.
@@ -382,6 +383,12 @@ servers: 320 concurrent requests, all 320 verified with no client error (last ru
 sequence going back, at most 2 snapshots published while they ran; of 40 idle connections 8 closed, a
 request refused while 32 were held and answered after; a cut-off request line closed after 10.0–10.2 s.
 
+Fixed after the fifth review (2026-10-20): the replay walk accepted duplicate ids, a cursor that stayed
+while `has_more`, a last page short of `latest_id`, a changed instance, an id both returned and missing,
+and ran out of pages without failing. `tools/walk.py` checks every page and fails a walk that does not end
+(17 synthetic cases; the old walker passed 8 of the 11 that must fail). Rerun on the x86 PC: no
+difference, both walks of 4 pages complete.
+
 Fixed after review: the concurrent check counted the requests it planned, and an exception in a client
 thread (a timeout, an answer that was not JSON or had no sample) was lost with that thread; it now counts
 attempted, verified and failed answers, collects every client's errors, and passes only with all verified.
@@ -397,6 +404,57 @@ compared, not the page), a reader that stops in the live check (a unit test cove
 answer: no live answer is larger than the socket buffers), the nvidia-smi GPU fallback, configparser and
 `float()`/`int()` beyond the forms listed (Unicode digits, other whitespace), non-UTF-8 file names and
 config files, IPv6 scope ids and Python 3.10's text for IPv4-mapped addresses in probe targets.
+
+### Whole service A/B (step 3C)
+
+2026-10-20, `tools/service_ab.py` as set above, one A B B A round per host, the three at once; tables from
+`tools/ab_report.py`. A = Python 1.3.0, B = `platmon-native serve`; the mean of the two runs of each, % of
+one core.
+
+| | Orin A | Orin B | | Pi A | Pi B | | x86 A | x86 B | |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| w1, release window, buffers filling (CPU %) | 1.871 | 0.671 | −64 % | 2.042 | 0.829 | −59 % | 1.021 | 0.637 | −38 % |
+| w2, release window, buffers full (CPU %) | 1.970 | 0.783 | −60 % | 2.304 | 0.808 | −65 % | 1.058 | 0.754 | **−29 %** |
+| w3, Hub polling (CPU %) | 2.125 | 0.783 | −63 % | 2.784 | 1.021 | −63 % | 1.171 | 0.800 | −32 % |
+| idle, no client (CPU %) | 1.841 | 0.729 | −60 % | 1.909 | 0.675 | −65 % | 0.867 | 0.637 | −27 % |
+| reconnect, 480 s backlog, per round (s) | 0.502 | 0.433 | −14 % | 0.490 | 0.450 | −8 % | 0.247 | 0.263 | +6 % |
+| reconnect CPU per round (s) | 0.315 | 0.209 | −34 % | 0.375 | 0.286 | −24 % | 0.162 | 0.196 | **+21 %** |
+| reconnect peak VmRSS (MiB) | 41.7 | 16.8 | −60 % | 34.6 | 9.1 | −74 % | 56.0 | 29.9 | −47 % |
+| full buffers RSS / PSS (MiB) | 33.1 / 25.4 | 9.8 / 9.8 | −70 / −61 % | 30.6 / 21.8 | 5.4 / 5.4 | −82 / −75 % | 44.6 / 32.8 | 17.4 / 17.4 | −61 / **−47 %** |
+| end PSS (MiB) | 33.1 | 10.3 | −69 % | 25.1 | 5.6 | −78 % | 42.9 | 18.0 | −58 % |
+| w2 `/api/stats` p95 (ms) | 3.36 | 2.21 | | 5.64 | 3.02 | | 3.04 | 2.04 | |
+| w3 replay page p95 (ms) | 7.06 | 4.05 | | 12.49 | 10.57 | | 4.47 | 4.73 | |
+| w2 collection p95 (ms) | 20.4 | 10.7 | | 13.7 | 4.8 | | 24.7 | 22.1 | |
+
+Repeats: A's two runs within 0.15 pp (the Pi's w1), B's within 0.06 pp except on the Orin, where the
+first B run was about 0.2 pp higher in w2, w3 and idle (0.883 / 0.683, 0.875 / 0.692, 0.825 / 0.633).
+
+- Release target (≤ 2.5 % in w1 and w2): both pass on every host; with full buffers the Pi's Python
+  service is at 2.30 %, the candidate at 0.81 %. Hub polling (w3) is not the release condition: the Pi's
+  Python service is at 2.78 % there.
+- Rules for B: none broken on any host (no error answer, loss, walk problem, missing collection id,
+  `gap_before` or cadence step over 1.5 s; no response p95 more than 1 ms above A's). A broke none either.
+- The same data on both: 600 core, 20 storage, 120 Wi-Fi and 10 battery records held with full buffers,
+  the same history points (11 300 Orin, 4 700 Pi, 16 760 PC); the backlog was 483–485 core records and
+  3 065–3 068 records in all over the five rounds (Orin 25.9 MB, Pi 13.8 MB, PC 49.1 MB of answers).
+- Memory (VmRSS): flat on B once the buffers filled (Orin 9–10 MiB, Pi 5 MiB, PC 16–18 MiB from 600 s
+  on). A steps up once more when the poller starts (Orin 30–33 → 37–41, Pi 30 → 33–34, PC 44 → 53–56 MiB)
+  and is flat after; neither grows from round to round of the reconnect (after each round: Orin A 37–41,
+  B 9–10; Pi A 33–34, B 5; PC A 54–56, B 18 MiB).
+- The slowest collection while the backlog was fetched: Python 23 and 49 ms on the Orin, 61 and 74 ms on
+  the Pi (at most 24 and 15 ms in w3), the candidate 11–13 ms and 5 ms; on the PC 24–25 and 21–22 ms. No
+  cadence step over 1.02 s anywhere.
+- Proposed gates (docs/performance/rust-feasibility.md): CPU at least 30 % lower and RSS/PSS at least
+  50 % lower hold on the Orin and the Pi in every window. On the PC they do not quite: w2 −29 %, PSS with
+  full buffers −47 % (RSS −61 %), and fetching the backlog takes the candidate 21 % more CPU than Python.
+  The PC's core records are the largest (about 20 KB; 64 history series, at the limit). Likely, but not
+  measured: most of the candidate's PSS there is the data it holds, and decoding and re-encoding each
+  replayed record (as both services do) costs the candidate more than CPython's C `json` at that size.
+- Not measured here: 24 h, other hosts, the `cache-alloc` build, a candidate changed after these runs.
+
+Raw (outside the repository, `~/.local/state/platmon-measure/native-20261020-3c/`), SHA-256 first 16 hex
+digits: Orin `5aec9a9779e7f0ba`, Pi `60999a7d8e28e89d`, PC `0f6671002b378032`; tool `service_ab.py`
+`2ce211c8700b22c8` as run.
 
 ### Earlier run (2026-10-18)
 
