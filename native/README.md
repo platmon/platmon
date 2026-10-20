@@ -273,7 +273,7 @@ Python service on fixtures), **verified on hardware** (also run live on a host b
 | --- | --- | --- | --- |
 | targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM and other architectures unsupported |
 | core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`) | the fixtures' "not covered" lists below |
-| GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first | the nvidia-smi fallback with a PC or server NVIDIA GPU that answers normally (`GPU-` UUIDs and numbers): **fixture verified, not verified on such hardware** (NVIDIA does not promise a stable nvidia-smi output); amdgpu fixture only; NVML unsupported; clocks of 2^128 Hz and more refused (below) |
+| GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first; **the fallback on a real NVIDIA GPU under WSL2** (GeForce RTX 4070 Ti, Windows driver 610.88, `/usr/lib/wsl/lib/nvidia-smi`; [results](#nvidia-smi-on-an-nvidia-gpu-wsl2)) | the nvidia-smi fallback with a native Linux NVIDIA driver on a PC or server: **not verified on such hardware** (WSL2 and the fixtures only; NVIDIA does not promise a stable nvidia-smi output); amdgpu fixture only; NVML unsupported; clocks of 2^128 Hz and more refused (below) |
 | slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
 | configuration | `platmon.ini` as `load_config` reads and checks it, `--frontends` after it (67 cases, also the two servers' refusals) | on the three hosts (Python 3.14, 3.10, 3.13) | Unicode digits and whitespace in numbers, non-UTF-8 file names and files; argparse's abbreviations (`--front`) and a value that starts with `-` are unsupported |
 | HTTP API, web page, `/text`, history, replay | as `live_http.py` and `runtime_fixture.py` check them | the three hosts, no difference | which connections of a burst are refused (timing); Python versions' error page markup |
@@ -580,7 +580,8 @@ Not covered: which connections of a burst are refused (timing: with 40 opened at
 answered a request while the client held 40; the limit check opens them 20 ms apart, the burst check
 looks at bounds and recovery only), Python versions' error page markup (the shape of the answer is
 compared, not the page), a reader that stops in the live check (a unit test covers it with a 64 MiB
-answer: no live answer is larger than the socket buffers), the nvidia-smi fallback on NVIDIA hardware,
+answer: no live answer is larger than the socket buffers), the nvidia-smi fallback with a native Linux
+NVIDIA driver (checked under WSL2 since, [below](#nvidia-smi-on-an-nvidia-gpu-wsl2)),
 configparser and
 `float()`/`int()` beyond the forms listed (Unicode digits, other whitespace), non-UTF-8 file names and
 config files, IPv6 scope ids and Python 3.10's text for IPv4-mapped addresses in probe targets.
@@ -801,7 +802,8 @@ Raw: `~/.local/state/platmon-measure/native-20261020-mimalloc/`, `cost-{x86,orin
   with 32 collections equal; no process left after the timeout and the signal; every run with the
   query's arguments. Ten mutants, all caught (two only after two steps were added; see
   [Equivalence on fake trees](#equivalence-on-fake-trees)). **The fallback with a PC or server NVIDIA GPU
-  that answers normally: fixture verified, not verified on such hardware.** The Orin has nvidia-smi (`nvidia-l4t-nvml`): its answer, read by hand once (30 ms, exit 0),
+  that answers normally: fixture verified, not verified on such hardware.** (Since checked on an NVIDIA
+  GPU under WSL2: [below](#nvidia-smi-on-an-nvidia-gpu-wsl2).) The Orin has nvidia-smi (`nvidia-l4t-nvml`): its answer, read by hand once (30 ms, exit 0),
   is replayed in `nvidia`; the Jetson reader answers there first, so the fallback is not reached.
 - `--frontends`: `config_fixture.py` 67 of 67 (49 configurations as before, 12 with `--frontends`, 6
   refusals of the two servers as processes) on the PC, the Orin and the Pi. Seven mutants: six caught
@@ -863,21 +865,64 @@ Raw: `~/.local/state/platmon-measure/native-20261020-final/` (SHA-256, first 16 
 beside them). Each record names the binary's SHA-256 and the tools'. The board copies were removed; the
 production `platmon` service on both boards stayed active (200).
 
-**The deployed form: not run.** It needs root on a host (a second unit, its user, `/etc` and
-`/usr/lib/systemd`), and `sudo` asks for a password on the PC, the Orin and the Pi. Planned, for this same
-candidate:
-- A unit `platmon-native-candidate.service` beside the product one, never in its place: the product unit's
-  hardening (`DynamicUser=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `NoNewPrivileges=yes`,
-  `Restart=on-failure`), its own INI under `/etc/platmon-native-candidate/`, port 19797, the binary and web
-  assets under `/usr/lib/platmon-native-candidate/`.
-- 24 h with the Hub-like poller and a reconnect and concurrent load every hour: RSS, PSS, threads and
-  descriptors back to the same values each time the same load returns; collection and replay keep going
-  (cadence, losses); replay retention expiring; the load generator's and the measurer's own end states.
-- Install and upgrade: the Python unit's INI used as it is; swapping Python → candidate → Python on the
-  same port (restart, rebind, a new `instance_id`, 409 for a cursor of the previous instance).
-- Recovery and stopping: `systemctl stop` and `restart` during a collection, during a replay answer, and
-  during a fake nvidia-smi run (a slow one); no child, thread or socket left; a crash restarted by
-  `Restart=on-failure`.
+**The deployed form, set before it was run (2026-10-21).** Candidate 1 as a service, on the Orin and the
+Pi (the long run) and the PC (the short checks only); not on a production service's place. The owner ran
+`native/tools/deploy/install.sh` once per host (root); it installs, beside `platmon.service`:
+- three units with the product unit's hardening (`DynamicUser=yes`, `ProtectSystem=strict`,
+  `ProtectHome=yes`, `NoNewPrivileges=yes`, `Restart=on-failure`, `RestartSec=5`), none enabled, each in
+  `Conflicts=` with the others: `platmon-python-candidate` (the installed Python 1.3.0),
+  `platmon-native-candidate` (candidate 1, its SHA-256 checked at install), and
+  `platmon-native-candidate-fakesmi` (the same with a slow fake nvidia-smi first on `PATH`);
+- one INI for the three, `/etc/platmon/platmon.ini` with `bind = 127.0.0.1` and `port = 19797` (nothing else
+  changed); the binary under `/usr/lib/platmon-candidate/`, the installed web assets;
+- a sudoers file letting the login user start, stop, restart and kill these units and run a read-only
+  `measure` (PSS, threads, descriptors and processes of a DynamicUser process); `platmon.service` is not
+  named. `uninstall.sh` removes all of it.
+
+`native/tools/deploy_check.py` drives it (its docstring has every step):
+- `checks` (each host; a check passes with no problem): Python → candidate on the same INI and port
+  (`Conflicts=` stops the other, a new `instance_id`, 409 for the previous instance's cursor, `/api/status`
+  the same but for its moment, the INI unchanged); `restart`; SIGKILL brought back by `Restart=on-failure`;
+  the port held: the unit keeps restarting and serves on its own once released; rollback to Python; stops at
+  7 offsets from a collection's start, during replay answers to 4 clients (whole or an error, no hang), and
+  3 times while the fake nvidia-smi runs: each within 2 s, `Result=success`, no process left, the port free;
+  at the end `platmon.service` active and answering.
+- `soak --hours 24` (Orin and Pi at once), one record per hour: 2400 s of Hub-like polling, then no client
+  for 480 s (720 s in odd hours: the oldest replay records expire), the reconnect, one round of 4 pollers on
+  the same backlog, 120 s settle, a reading; one `systemctl restart` after the twelfth hour's reading
+  (hour 11). Every reading is taken at least 2900 s after a start, with full buffers (600 s retention).
+- Pass, per hour, every hour: no HTTP error, loss or walk problem (in odd hours a missing range only on the
+  reconnect's first page, from the cursor up to below the oldest held record); reconnect and round done;
+  every replayed collection step at most 1.5 s, no `gap_before`; the unit active with no automatic restart;
+  after the restart, 409 for the old cursor; settled threads, descriptors, sockets and processes equal to
+  hour 0's; settled PSS at most hour 0's + 10 % (at least + 1 MiB); settled PSS within the budget (Orin 14,
+  Pi 8 MiB) and the round-end PSS readings within the concurrent budget (46, 27 MiB; no 50 ms PSS sampling
+  here). `--quick` (420 s hours, to try the tool) reads before the buffers are full: its PSS rule does not
+  apply. At the end the tool's own workers ended without error, its VmRSS reported, the stop clean,
+  `platmon.service` active and answering. A run stopped by the tools: fix, record, run that host again once.
+- Not here: nvidia-smi on an NVIDIA GPU (the fake only; the WSL2 check is separate, below), the package's
+  postinst, a reboot.
+
+### nvidia-smi on an NVIDIA GPU (WSL2)
+
+2026-10-21, candidate 1's x86_64 binary (`027e35b1c9251b9d`) against the v1.3.0 tree, as plain processes
+(no service unit), on a Windows PC's WSL2: Ubuntu 24.04.5, kernel 6.6.87.2-microsoft-standard-WSL2+, Python
+3.12.3, NVIDIA GeForce RTX 4070 Ti with the Windows driver 610.88. Reached over SSH (port 2222, key only),
+set up by the owner.
+- The path it takes: the only DRM card is `vgem` (a driver neither side reads), so both go to the
+  nvidia-smi fallback; `nvidia-smi` is not on `PATH`, so both find it at the WSL path
+  (`/usr/lib/wsl/lib/nvidia-smi`). The query answered in about 0.04 to 0.05 s (the timeout is 0.5 s).
+- `compare.py` 10 times: no difference in any run. Both sides wrote the same entry each time, `driver`
+  `nvidia`, `provider` `nvidia-smi`, `usage` 0 to 2 %, `freq` 210 MHz, `max_freq` 3105 MHz in Hz; the
+  `gpu` collector `ok` with no issue; the same sensor source ids (the GPU's UUID in the descriptor).
+- `live_http.py` once: no difference (the whole default service, the replay walk, 320 concurrent answers,
+  the burst back to its threads, 409 after the restart).
+- What it shows: the fallback on a real GPU answering normally, through the WSL path. What it does not:
+  a native Linux NVIDIA driver on a PC or server (WSL2's `nvidia-smi` answers through the Windows driver),
+  a GPU under load (the clocks were idle), several GPUs on real hardware (fixture only).
+
+Raw: `~/.local/state/platmon-measure/native-20261021-deploy/wsl/` (`live.json` `c4013bc96a7d6b50`,
+`compare-1.json` `c9c5e81d10b0f5d2`, ten `compare-*.json`). The copies on the WSL host were removed.
 
 ### Earlier run (2026-10-18)
 
