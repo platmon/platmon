@@ -4,6 +4,7 @@ processes this tool starts are stopped, by their own handles. One JSON line per 
 the host and what was run.
 
   python3 service_ab.py --tree PYTHON_TREE --binary platmon-native --out OUT.jsonl [--port 19797]
+  python3 service_ab.py ... --variant S=SYSTEM_BINARY --variant M=MIMALLOC_BINARY --order "S M M S"
 
 Each run, in seconds from the service's start (docs/performance/budget.md for the first window):
 
@@ -16,7 +17,10 @@ Each run, in seconds from the service's start (docs/performance/budget.md for th
   1560-2040 disconnected      no client; 1590-1710 is an idle window
   2040-     reconnect         the poller again, from its cursors: the backlog up to each stream's latest id
                               when it reconnects (480 s of it), five times from the same cursors, 2 s apart;
-                              then 120 s more polling
+           concurrent         then four pollers fetch the same backlog (from the same cursors to the latest
+                              ids) at once, three times, 2 s apart; VmRSS and PSS every 50 ms meanwhile
+           settle             120 s with no client
+           after              then 120 s more polling
 
 The poller does what platmon-hub's Fleet does for one node (hub/runtime.py, hub/replay.py): one request at
 a time; /api/status + /api/stats every 5 s; /api/observations every 10 s; replay turns round robin over
@@ -32,8 +36,9 @@ collection cadence meanwhile (the replayed core records that started then). A ba
 unexpected missing range is not a success: the data is still within the retention.
 
 CPU is /proc/PID/stat utime + stime + cutime + cstime, in clock ticks (SC_CLK_TCK); % of one core over a
-window. VmRSS every 5 s through the run; smaps_rollup Rss/Pss/Pss_Anon at the main points, with what is
-retained then (replay oldest..latest per stream from an empty page, history series and points)."""
+window. VmRSS every 5 s through the run; smaps_rollup Rss/Pss/Pss_Anon, threads and open descriptors at the
+main points, with what is retained then (replay oldest..latest per stream from an empty page, history series
+and points)."""
 import argparse
 import http.client
 import json
@@ -52,7 +57,8 @@ import worker
 TICK = os.sysconf("SC_CLK_TCK")
 STREAMS = ("core", "storage", "wifi", "battery", "probe")
 PHASES = {"warmup": 30, "window": 120, "w2_at": 1290, "hub_warmup": 30, "disconnect": 480, "idle_at": 30,
-          "after": 120, "reconnect_limit": 300, "repeats": 5}
+          "after": 120, "reconnect_limit": 300, "repeats": 5, "concurrent_rounds": 3, "concurrent_pollers": 4,
+          "settle": 120}
 
 
 def get(port, path, timeout=10):
@@ -91,6 +97,9 @@ class Proc:
             s = dict(line.split(":", 1) for line in f)
         return {k: int(s[k].split()[0]) for k in ("VmRSS", "VmHWM", "Threads")}
 
+    def fds(self):
+        return len(os.listdir(f"/proc/{self.pid}/fd"))
+
     def rollup(self):
         with open(f"/proc/{self.pid}/smaps_rollup") as f:
             s = dict(line.split(":", 1) for line in f if ":" in line and not line.startswith("0"))
@@ -112,12 +121,28 @@ class Clock:
 class Rss:
     def __init__(self, proc, clock):
         self.proc, self.clock, self.every, self.trace, self.stop = proc, clock, 5.0, [], threading.Event()
-        self.gone = None
+        self.gone, self.pss, self.pss_trace, self.wake = None, False, [], threading.Event()
+
+    def speed(self, every, pss=False):
+        """Samples every `every` s from now on (not after the wait under way), with PSS if asked."""
+        self.every, self.pss = every, pss
+        self.wake.set()
+
+    def end(self):
+        self.stop.set()
+        self.wake.set()
 
     def run(self):
-        while not self.stop.wait(self.every):
+        while True:
+            self.wake.wait(self.every)
+            self.wake.clear()
+            if self.stop.is_set():
+                return
             try:
-                self.trace.append((round(self.clock.now(), 2), self.proc.status()["VmRSS"]))
+                t = round(self.clock.now(), 2)
+                self.trace.append((t, self.proc.status()["VmRSS"]))
+                if self.pss:  # smaps_rollup as well, while a peak is looked for
+                    self.pss_trace.append((t, self.proc.rollup()["Pss"]))
             except (OSError, KeyError) as e:  # gone, or a zombie without VmRSS: the trace ends here
                 self.gone = (round(self.clock.now(), 2), type(e).__name__)
                 return
@@ -265,8 +290,8 @@ def cpu_window(proc, clock, a, b):
 
 def retained(port, proc):
     """What the service holds now, and its memory: smaps_rollup, replay oldest..latest, history."""
-    out = {"rollup_kib": proc.rollup(), **{k.lower() + "_kib" if k != "Threads" else "threads": v
-                                           for k, v in proc.status().items()}}
+    out = {"rollup_kib": proc.rollup(), "fds": proc.fds(),
+           **{k.lower() + "_kib" if k != "Threads" else "threads": v for k, v in proc.status().items()}}
     status = json.loads(get(port, "/api/status")[1])
     obs = json.loads(get(port, "/api/observations")[1])
     latest = {"core": status["sample"]["sequence"],
@@ -297,9 +322,75 @@ def config(port):
 
 
 def command(variant, args, ini):
+    """A: the Python service; B: --binary; any other name: its --variant binary."""
     if variant == "A":
         return [sys.executable, f"{args.tree}/platmon.py", ini]
-    return [args.binary, "serve", ini, "--web", f"{args.tree}/frontends/web", "--app-version", args.app_version]
+    binary = args.binary if variant == "B" else args.variants[variant]
+    return [binary, "serve", ini, "--web", f"{args.tree}/frontends/web", "--app-version", args.app_version]
+
+
+def concurrent(port, clock, proc, rss, hub, cursor, ph):
+    """concurrent_pollers pollers fetch the same backlog at once, from the same cursors to the latest ids,
+    concurrent_rounds times, 2 s apart: the seconds until all are done, the CPU seconds, the pages' times,
+    the peak VmRSS and PSS, the collections meanwhile. Every missing range is a loss (the cursors are within
+    the retention)."""
+    status = json.loads(get(port, "/api/status")[1])
+    obs = json.loads(get(port, "/api/observations")[1])
+    target = {"core": status["sample"]["sequence"]}
+    for s in cursor:
+        o = (obs.get("groups", {}).get(s) or {}).get("observation") or {}
+        if s != "core" and o.get("id") is not None:
+            target[s] = o["id"]
+    rounds, hubs, first = [], [], clock.now()
+    rss.speed(0.05, pss=True)
+    for _ in range(ph["concurrent_rounds"]):
+        group = []
+        for _ in range(ph["concurrent_pollers"]):
+            h = Hub(port, clock)
+            h.mono0, h.wall0 = hub.mono0, hub.wall0
+            for s in target:
+                h.walks[s].after, h.walks[s].target, h.walks[s].instance = cursor[s], target[s], status["instance_id"]
+                h.first[s], h.supported[s] = False, True
+            for s in STREAMS:
+                if s not in target:
+                    h.supported[s] = hub.supported[s]
+            group.append(h)
+        stop = threading.Event()
+        limit = threading.Timer(ph["reconnect_limit"], stop.set)
+        threads = [worker.Worker(f"concurrent {i}", h.run, stop,
+                                 lambda h=h: all(h.walks[s].after >= t for s, t in target.items()))
+                   for i, h in enumerate(group)]
+        limit.start()
+        c0, t0 = proc.ticks(), time.monotonic()
+        for t in threads:
+            t.start()
+        states = [t.finish(ph["reconnect_limit"] + 10) for t in threads]
+        c1, t1 = proc.ticks(), time.monotonic()
+        limit.cancel()
+        rounds.append({"seconds": round(t1 - t0, 3), "cpu_s": (c1 - c0) / TICK,
+                       "rss_kib": proc.status()["VmRSS"], "pss_kib": proc.rollup()["Pss"],
+                       "done": all(h.walks[s].after >= t for h in group for s, t in target.items()),
+                       "workers": states})
+        hubs += group
+        time.sleep(2)
+    last = clock.now()
+    rss.speed(5.0)
+    merged = Hub(port, clock)
+    merged.mono0, merged.wall0 = hub.mono0, hub.wall0
+    for h in hubs:
+        merged.requests += h.requests
+        merged.core.update(h.core)
+    out = {"target": target, "backlog": {s: t - cursor[s] for s, t in target.items()}, "rounds": rounds,
+           "done": all(r["done"] for r in rounds), "span_s": round(last - first, 2),
+           "seconds": spread([r["seconds"] for r in rounds]),
+           "cpu_s_each": round(sum(r["cpu_s"] for r in rounds) / len(rounds), 4),
+           "peak_rss_kib": max([v for t, v in rss.trace if first <= t <= last] + [r["rss_kib"] for r in rounds]),
+           "peak_pss_kib": max([v for t, v in rss.pss_trace if first <= t <= last] + [r["pss_kib"] for r in rounds]),
+           "samples": sum(1 for t, _ in rss.pss_trace if first <= t <= last),
+           "losses": [x for h in hubs for x in h.losses], "problems": [x for h in hubs for x in h.problems]}
+    out.update(merged.window(first, last))
+    out["cadence"] = merged.cadence(first - 1, last + 1)
+    return out
 
 
 def run(variant, args, ini, ph):
@@ -361,7 +452,7 @@ def run(variant, args, ini, ph):
         cursor = {s: hub.walks[s].after for s in target}
         losses0, problems0 = len(hub.losses), len(hub.problems)
         hwm0 = proc.status()["VmHWM"]
-        rss.every = 0.05
+        rss.speed(0.05)
         rounds, first = [], clock.now()
         for _ in range(ph["repeats"]):  # the same backlog again: CPU seconds above the tick's resolution
             for s, t in target.items():
@@ -379,7 +470,7 @@ def run(variant, args, ini, ph):
                            "cursors": {s: hub.walks[s].after for s in target}})
             time.sleep(2)
         last = clock.now()
-        rss.every = 5.0
+        rss.speed(5.0)
         peak = max([v for t, v in rss.trace if first <= t <= last] + [r["rss_kib"] for r in rounds])
         res["reconnect"] = {"target": target, "backlog": {s: t - cursor[s] for s, t in target.items()},
                             "rounds": rounds, "done": all(r["done"] for r in rounds),
@@ -392,6 +483,12 @@ def run(variant, args, ini, ph):
         res["reconnect"]["cadence"] = hub.cadence(first - 1, last + 1)
         r1 = last
         res["points"]["reconnected"] = retained(args.port, proc)
+        if ph.get("concurrent_rounds"):
+            res["concurrent"] = concurrent(args.port, clock, proc, rss, hub, cursor, ph)
+            res["points"]["concurrent"] = retained(args.port, proc)
+            time.sleep(ph["settle"])  # no client: threads, descriptors and memory settle
+            res["points"]["settled"] = retained(args.port, proc)
+            r1 = clock.now()
         for s in target:
             hub.walks[s].target = None
         stop = threading.Event()
@@ -408,7 +505,7 @@ def run(variant, args, ini, ph):
         res["failed"] = f"{type(e).__name__}: {e}"
     finally:
         budget.stop.set()
-        rss.stop.set()
+        rss.end()
         for name, w in workers.items():
             if w.ident is not None and name not in res["workers"]:
                 res["workers"][name] = w.finish()
@@ -493,8 +590,9 @@ def host(args, ini):
             "nvpmodel": run_(["nvpmodel", "-q"]) if os.path.exists("/usr/sbin/nvpmodel") else None,
             "loadavg": read("/proc/loadavg"), "clk_tck": TICK,
             "tree": args.tree, "tree_ref": args.tree_ref, "binary": args.binary, "binary_sha256": sha256(args.binary),
-            "tools_sha256": {os.path.basename(f): sha256(f) for f in (__file__, walk.__file__)},
-            "commands": {v: command(v, args, ini) for v in "AB"}, "config": cfg}
+            "tools_sha256": {os.path.basename(f): sha256(f) for f in (__file__, walk.__file__, worker.__file__)},
+            "variants_sha256": {n: sha256(b) for n, b in args.variants.items()}, "order": args.order.split(),
+            "commands": {v: command(v, args, ini) for v in dict.fromkeys(["A", "B", *args.variants])}, "config": cfg}
 
 
 def main():
@@ -506,6 +604,8 @@ def main():
     ap.add_argument("--tree", required=True)
     ap.add_argument("--tree-ref", default=None)
     ap.add_argument("--binary", required=True)
+    ap.add_argument("--variant", action="append", default=[], metavar="NAME=BINARY",
+                    help="another binary to run as variant NAME (e.g. S=system M=mimalloc)")
     ap.add_argument("--app-version", default="1.3.0")
     ap.add_argument("--out", required=True)
     ap.add_argument("--port", type=int, default=19797)
@@ -513,9 +613,11 @@ def main():
     ap.add_argument("--quick", action="store_true", help="short phases, to try the tool")
     args = ap.parse_args()
     args.tree, args.binary = os.path.abspath(args.tree), os.path.abspath(args.binary)
+    args.variants = {n: os.path.abspath(b) for n, b in (v.split("=", 1) for v in args.variant)}
     ph = dict(PHASES)
     if args.quick:
-        ph.update(warmup=5, window=15, w2_at=40, hub_warmup=10, disconnect=40, idle_at=5, after=10, reconnect_limit=30, repeats=3)
+        ph.update(warmup=5, window=15, w2_at=40, hub_warmup=10, disconnect=40, idle_at=5, after=10, reconnect_limit=30, repeats=3,
+                  concurrent_rounds=2, settle=10)
     ini = config(args.port)
     with open(args.out, "a") as f:
         f.write(json.dumps({"setup": host(args, ini)}) + "\n")
