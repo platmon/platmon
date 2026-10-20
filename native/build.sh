@@ -9,9 +9,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 docker run --rm -u "$(id -u):$(id -g)" -e CARGO_HOME=/src/target/cargo-home -v "$PWD":/src -w /src rust:1.88-slim bash -euo pipefail -c '
   rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl >/dev/null
-  cargo test -q --release --locked
+  cargo test -q --release --locked --no-default-features
   for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
-    RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static" cargo build -q --release --locked --target $t
+    RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static" cargo build -q --release --locked --no-default-features --target $t
   done'
 for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
   marks=$(grep -a -o 'platmon-native-allocator=[a-z-]*;' "target/$t/release/platmon-native" | sort -u | tr '\n' ' ' || true)
