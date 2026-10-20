@@ -52,8 +52,9 @@ struct layouts per target. JSON output and SHA-256 are implemented here, because
 Python's float repr and key order exactly, and both are tested against Python. Builds target `x86_64` and
 `aarch64-unknown-linux-musl` as static binaries.
 
-The allocator cache measured on 2026-10-18 (`src/alloc.rs`) is behind the `cache-alloc` feature. The default
-build uses the system allocator; see [Results](#results).
+The allocator cache measured on 2026-10-18 (`src/alloc.rs`) is behind the `cache-alloc` feature, and
+mimalloc, compared on 2026-10-20, behind the `mimalloc` feature (`build-mimalloc.sh`); neither is a
+candidate. The default build uses the system allocator; see [Results](#results).
 
 ## Step 3: the runtime
 
@@ -68,7 +69,7 @@ same dependency policy (only `libc`); the `cache-alloc` build is not part of ste
 | 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
 | 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
 
-Status (2026-10-20, #93): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); no decision taken.
+Status (2026-10-20, #93): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)). No switch decided.
 With 3B the candidate has every feature of
 the default configuration on the three hosts compared (x86 PC, Orin, Raspberry Pi), checked against the
 Python service below. Still missing: the nvidia-smi fallback of the GPU (none of the three hosts has
@@ -137,6 +138,37 @@ PC's replay cost.
   CPU per round against A's). The boards' A/B and the 24 h run wait for the final candidate.
 - Budget: the three candidates and that one PC run (about 2.5 h). If B is still above A after them, stop
   and report what is left.
+
+**System against mimalloc, set before it was run (2026-10-20, after the seventh review).** One outside
+allocator, compared with the default; the default build stays the system allocator, and `cache-alloc`
+stays a diagnosis, never a candidate. Nothing else changes: no JSON or replay change meanwhile.
+- The allocator: mimalloc 3.3.2 (MIT) through the `mimalloc` crate `=0.1.52` (MIT; `libmimalloc-sys`
+  0.1.49, MIT; built with `cc` 1.5.1, `find-msvc-tools` 0.1.14, `shlex` 2.0.1, MIT OR Apache-2.0; every
+  version at least two weeks old, pinned in Cargo.lock), as `#[global_allocator]` behind the `mimalloc`
+  feature (Rust's allocations; libc's own malloc is not replaced). Its defaults: no crate feature, no
+  `MIMALLOC_*` setting, no purge or huge page tuning. Its C is compiled by `musl-gcc` (Debian's
+  `musl-tools`) in the same `rust:1.88-slim` image, natively on each architecture (aarch64 on the
+  Orin's docker), with the compiler's default CPU baseline (x86-64, armv8-a), never `-march=native`; the
+  compile commands are recorded.
+- Stage 1, the measure: `replay-cost` and `replay_cost_py.py` decode a page keeping the 80 records alive
+  and free them together on both sides, and time writing alone on records decoded beforehand (same
+  data on both sides); the whole page stays as it is. Elapsed times; the inputs of the replay cost run.
+- Stage 2, fixed pages: System against mimalloc on the three inputs, on the three hosts, twice each.
+  On to stage 3 only if the PC's page on the PC input gets faster by more than the larger of 5 % and the
+  spread of the two repeats, and no host and input gets slower by more than its spread.
+- Stage 3, the whole service: `service_ab.py` with the two binaries (S = system, M = mimalloc), S M M S
+  per host, the three at once, the 3C phases plus, after the reconnect rounds, three rounds of four
+  pollers fetching the same backlog at once, and 120 s with no client to settle. Recorded as in 3C, plus
+  threads and open file descriptors at every point. Rules for M against S: the 3C rules (complete, no
+  error, loss, missing id, `gap_before`, cadence step over 1.5 s, p95 more than 1 ms above S's in the
+  same window, the concurrent pages too); threads and descriptors back to their count before the
+  reconnect after settling; PSS with full buffers, at the concurrent peak and after settling at most
+  25 % above S's (the memory saving against Python is part of why Rust).
+- Decision: mimalloc only if stage 3 keeps every rule and its CPU (w2, w3, reconnect, concurrent) is
+  lower than S's beyond the spread of the repeats; otherwise the system allocator stays. Either way, the
+  3C results and the PC's earlier misses stay as recorded; nothing is estimated from page numbers.
+- Budget: one allocator, one configuration, stage 2 once, stage 3 one round per host (about 2.8 h).
+  If a stage fails its condition, stop and report; no tuning, no JSON redesign, no `cache-alloc`.
 
 **What the candidate has** (`platmon-native serve [platmon.ini] --web DIR --app-version V`):
 
@@ -484,8 +516,8 @@ first B run was about 0.2 pp higher in w2, w3 and idle (0.883 / 0.683, 0.875 / 0
   50 % lower hold on the Orin and the Pi in every window. On the PC they do not quite: w2 −29 %, PSS with
   full buffers −47 % (RSS −61 %), and fetching the backlog takes the candidate 21 % more CPU than Python
   (the first round +22 %, rounds 2–5 +21 %: not a first-round effect). The PC's core records are the
-  largest (about 20 KB; 64 history series, at the limit); the replay cost below shows the host decides,
-  not the record size.
+  largest (about 20 KB; 64 history series, at the limit); the replay cost below shows that the record
+  size alone does not explain the reversal.
 - Not measured here: 24 h, other hosts, the `cache-alloc` build, a candidate changed after these runs.
 
 Raw (outside the repository, `~/.local/state/platmon-measure/native-20261020-3c/`), SHA-256 first 16 hex
@@ -503,6 +535,9 @@ reconnect records, a memory sampler that stopped), the twelve stored runs: all c
 counts stand for it (w3: 24 stats, 12 observations, 62 replay requests and 115–117 replayed collections
 in every run; the reconnect: 3 064–3 071 records for five rounds of a 604–608 record backlog, every round
 done). A short run of the new tool on the PC records the threads' end (`workers`).
+Found later (the seventh review's run): the memory sampler went from every 5 s to every 50 ms only when
+its wait under way ended, so the reconnect's first seconds (up to 5) were sampled only by the reading
+after each round. The reconnect peaks above may miss a peak there; fixed since (`Rss.speed`).
 
 ### Replay cost (after 3C)
 
@@ -523,10 +558,17 @@ candidate with only `replay-cost` added; c2 = candidates 1 and 2 (now in the sou
 | | Orin | 442 / 333 / 906 | 421 / 253 / 767 | 429 / 198 / 705 | −22 % |
 | | Pi | 265 / 187 / 537 | 205 / 135 / 427 | 210 / 102 / 391 | −27 % |
 
-- The host decides, not the record size: on the PC the candidate's page is slower than Python's for
-  every input, the Pi's 5 KB records too (c2: decoding 1.3–1.6 ×, writing 1.1–1.3 ×); on the boards it is
-  faster for every input, the PC's 20 KB records too. The 3C note that the PC's record size explained it
-  was wrong.
+- The relative cost follows where it runs: on the PC the candidate's page is slower than Python's for
+  every input tried, the Pi's 5 KB records too; on the boards it is faster for every input, the PC's
+  20 KB records too. So the PC's large records alone do not explain the reversal (the 3C note suggested
+  they did). Size and structure still set the absolute cost (on the PC 113 µs a Pi record, 352 µs a PC
+  record). "Where it runs" is the CPU and also the Python version and build (3.14, 3.10, 3.13) and the
+  system: not narrowed down to the instruction set.
+- How to read the stages: decoding / writing are not like for like. Python's decoding keeps a page of
+  80 decoded records alive and frees them together, the Rust one frees each record at once; writing is
+  (decoding and writing) − decoding, an estimate of what writing adds, not writing timed alone. All are
+  elapsed times, not CPU profiles. The whole page is like for like (each side's own Replay, the same
+  page byte for byte).
 - Candidate 1 (objects in order without a member list): about 4 % off the PC's writing, within the
   runs' spread. Candidate 2 (floats written in place): with 1, writing 12–24 % less than base on every host and input.
   Candidate 3 (repeated keys found by a key hash first): no change in decoding (199–200 µs both), so
@@ -535,15 +577,85 @@ candidate with only `replay-cost` added; c2 = candidates 1 and 2 (now in the sou
   c2 keeps every answer: `cargo test` 23 passed, `live_http.py` no difference, the pages above equal.
 - Added after the three candidates, a diagnosis, not a candidate: the same c2 source built with
   `cache-alloc` decodes the PC's input in 109 µs instead of 192 (page 254 µs, −3 % against Python;
-  −3 to −8 % on the PC for every input, −54 to −62 % on the Orin, −32 to −41 % on the Pi). What is left
-  on the PC is the system allocator under decoding (musl's), one allocation per key, string, object and
-  array; not the parser's work. Nothing here turns `cache-alloc` on: that, or decoding with fewer
-  allocations, is the next decision.
+  −3 to −8 % on the PC for every input, −54 to −62 % on the Orin, −32 to −41 % on the Pi). So on the PC
+  the allocations the decoding asks for (one per key, string, object and array), with how the system
+  allocator (musl's) serves and frees them, are a large part of the cost. `cache-alloc` changes more than
+  the time of a malloc (size classes, blocks kept and reused, never returned), so this shows that
+  changing that path can help; it does not split the cost between the parser and the allocator. Nothing
+  here turns `cache-alloc` on.
 
 Raw (outside the repository, `~/.local/state/platmon-measure/native-20261020-replay/`): the inputs
 (`core-*.jsonl`, SHA-256 first 16 hex digits PC `30561610b9ca81e2`, Orin `f4a990e77926add0`, Pi
 `bc48e15822041bde`), `cost-{x86,orin,pi}.txt`. Binaries x86_64 / aarch64: base `334e5440ee866210` /
 `260de2a0d5c7082f`, c2 `93bc8944f1f4ccf4` / `f10dc3f46ec4f92e` (the source as committed rebuilds to these).
+
+### System against mimalloc
+
+2026-10-20, as set before it was run (above). Source `6c26614` (feature `mimalloc`), tools `56236c2`.
+S = system allocator, M = mimalloc; x86_64 S `40b6db573533e64c`, M `14dcca1967608f81`; aarch64 S
+`3b8369bb7d38c867` (cross-built as `build.sh` does), M `b88ec453038df9e6` (on the Orin's docker, then
+the image removed). mimalloc's C: `x86_64-linux-musl-gcc -O3 ... -m64` / `aarch64-linux-musl-gcc -O3 ...`,
+no `-march` (gcc 12.2 defaults x86-64 / armv8-a); `cargo test` 23 passed with M on both.
+
+Stage 1: decoding now keeps a page of records and frees them together on both sides, writing is timed
+on records decoded beforehand. Stage 2, fixed pages, µs per record (decoding / writing / whole page),
+the mean of two medians; every page byte for byte equal to Python's:
+
+| host | input | A (Python) | S | M | M page vs S |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PC | PC | 123 / 126 / 260 | 208 / 133 / 345 | 107 / 121 / 234 | −32 % |
+| | Orin | 76 / 74 / 154 | 119 / 78 / 199 | 60 / 70 / 134 | −33 % |
+| | Pi | 42 / 42 / 86 | 66 / 42 / 111 | 32 / 38 / 74 | −34 % |
+| Orin | PC | 349 / 371 / 836 | 338 / 169 / 513 | 157 / 144 / 310 | −40 % |
+| | Orin | 190 / 224 / 482 | 185 / 88 / 277 | 86 / 74 / 166 | −40 % |
+| | Pi | 107 / 125 / 264 | 100 / 45 / 146 | 48 / 38 / 89 | −39 % |
+| Pi | PC | 781 / 728 / 1553 | 866 / 409 / 1251 | 418 / 351 / 783 | −37 % |
+| | Orin | 451 / 425 / 909 | 491 / 223 / 702 | 234 / 188 / 431 | −39 % |
+| | Pi | 265 / 243 / 536 | 274 / 119 / 387 | 132 / 98 / 238 | −39 % |
+
+- The condition to go on holds: the PC input on the PC −32 % (repeats 337 / 353 µs for S, 230 / 238
+  for M), every host and input faster, none slower.
+- With decoding freed a page at a time, S decodes slower than when each record was freed at once (PC
+  input on the PC 208 against 192 µs): the earlier stage numbers did depend on the lifetimes. M decodes
+  in about half S's time on every host and input; writing takes 9–18 % less.
+- On the PC, M's page is below Python's for every input (−10 to −14 %).
+
+Stage 3, the whole service, S M M S on each host, the three at once (each value the mean of two runs,
+M against S):
+
+| | PC | Orin | Pi |
+| --- | --- | --- | --- |
+| CPU %, buffers full (w2) | 0.750 → 0.650 (−13 %) | 0.696 → 0.587 (−16 %) | 0.804 → 0.692 (−14 %) |
+| CPU %, Hub-like polling (w3) | 0.792 → 0.688 (−13 %) | 0.700 → 0.617 (−12 %) | 0.975 → 0.837 (−14 %) |
+| reconnect, CPU s per fetch | 0.187 → 0.131 (−30 %) | 0.199 → 0.126 (−37 %) | 0.239 → 0.155 (−35 %) |
+| concurrent, CPU s per round (4 pollers) | 2.22 → 0.55 (−75 %) | 5.19 → 0.49 (−91 %) | 2.33 → 0.75 (−68 %) |
+| concurrent page p95 ms | 200 → 64 | 469 → 148 | 235 → 133 |
+| **PSS MiB, buffers full** | 17.3 → 32.2 (**+86 %**) | 9.7 → 23.3 (**+140 %**) | 5.4 → 6.7 (+24 %) |
+| **PSS MiB, concurrent peak** | 69.6 → 174.9 (**+151 %**) | 36.7 → 124.2 (**+239 %**) | 21.4 → 43.9 (**+105 %**) |
+| **PSS MiB, 120 s after** | 18.7 → 33.3 (**+78 %**) | 10.7 → 24.2 (**+127 %**) | 5.9 → 7.0 (+17 %) |
+| threads / fds, 120 s after | 5 / 4 → 5 / 4 | 5 / 4 → 5 / 4 | 5 / 4 → 5 / 4 |
+
+- **M breaks the memory rule on every host** (PC and Orin at all three points, Pi at the concurrent
+  peak); every other rule holds for both, and S's memory is 3C's B again (17.4 / 9.8 / 5.4 MiB then).
+  M is lower in CPU everywhere, beyond the spread, and its replay pages are faster; but with full
+  buffers on the PC and the Orin it holds about what Python held in 3C (32.8 / 25.4 MiB, another day's
+  runs), which takes away most of what Rust saves in memory there.
+- **Decision: the system allocator stays.** The `mimalloc` feature stays in the source only as the
+  record of this comparison, off by default; nothing was tuned (no purge, huge page or other setting),
+  and as set before the run, no second allocator, JSON redesign or `cache-alloc` follows from it. The
+  PC's misses (3C gates, the +21 % reconnect, the replay page above Python's) stay as recorded.
+- A measuring defect found in these runs: the concurrent pollers stop at the ids they started for, so
+  the collections made during the rounds are not theirs to see; the completeness check counted them
+  there and refused both boards' S runs (5 collections over 13 s, where the PC's faster rounds passed).
+  `service_ab.py` now records them from the main poller's after walk (`concurrent.collected`), and
+  `ab_report.py` judges that. These runs predate it: for them the core sequence's advance over the
+  rounds (9 to 13 ids, as many as the seconds) and the after walk's losses (none) stand for it, marked
+  unverified. Judged that way, all four S runs are complete with no rule broken, all four M runs break
+  only the memory rule.
+
+Raw: `~/.local/state/platmon-measure/native-20261020-mimalloc/`, `cost-{x86,orin,pi}.txt` (SHA-256 first
+16: `ba80e600bee7222d`, `57d46cc58e9667c5`, `e5b2635794a48d37`), `ab-{x86,orin,pi}.jsonl` (`ddac5318ddec7486`,
+`c97188ba3dab8c0b`, `48a16cebe2b28997`) with each run's stderr in `ab-*.err`.
 
 ### Earlier run (2026-10-18)
 
