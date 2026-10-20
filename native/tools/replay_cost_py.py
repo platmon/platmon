@@ -1,6 +1,8 @@
 """The Python side of `platmon-native replay-cost`: the same stages for the same core publications, with the
 Python service's runtime/replay.py and the server's encoding (frontends/server.py: json.dumps with
-separators=(",", ":")). Per record, in µs, the median of 7 rounds of PAGES pages.
+separators=(",", ":")). Per record, in µs of elapsed time, the median of 7 rounds of PAGES pages: decoding a
+page of records (kept, then freed together), writing records decoded beforehand (the texts kept, then
+freed together), a whole page.
 
   python3 replay_cost_py.py FILE PYTHON_TREE [PAGES [OUT]]     # OUT gets the page itself"""
 import json
@@ -44,11 +46,12 @@ def main():
             rounds.append((time.perf_counter() - t) * 1e6 / (pages * n))
         return sorted(rounds)[3]
 
+    decoded = [json.loads(p) for p in payloads]
     decode = median(lambda: [json.loads(p) for p in payloads])
-    both = median(lambda: [json.dumps(json.loads(p), separators=(",", ":")) for p in payloads])
+    write = median(lambda: [json.dumps(d, separators=(",", ":")) for d in decoded])
     whole = median(page)
-    print(json.dumps({"records": n, "payload_bytes": sum(map(len, payloads)) // max(n, 1), "pages": pages,
-                      "decode_us": round(decode, 3), "write_us": round(both - decode, 3), "page_us": round(whole, 3)}))
+    print(json.dumps({"allocator": "python", "records": n, "payload_bytes": sum(map(len, payloads)) // max(n, 1),
+                      "pages": pages, "decode_us": round(decode, 3), "write_us": round(write, 3), "page_us": round(whole, 3)}))
 
 
 if __name__ == "__main__":

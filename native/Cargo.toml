@@ -10,10 +10,15 @@ description = "Experimental Rust port of the platmon collector (docs/performance
 # MIT OR Apache-2.0, no dependencies of its own: system call numbers, flags and struct layouts per target,
 # instead of hand-written ones (statvfs, utsname, rusage, O_PATH, errno)
 libc = "=0.2.172"
+# MIT (mimalloc 3.3.2's C, built by its sys crate with cc; Cargo.lock pins every version): the outside
+# allocator compared with the system one (README, System against mimalloc); off by default
+mimalloc = { version = "=0.1.52", optional = true, default-features = false }
 
 [features]
 # the experimental size-class cache in front of the system allocator (src/alloc.rs); off by default
 cache-alloc = []
+# mimalloc as the global allocator; off by default, never with cache-alloc
+mimalloc = ["dep:mimalloc"]
 
 [profile.release]
 opt-level = 3

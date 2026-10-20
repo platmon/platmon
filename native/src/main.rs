@@ -43,6 +43,16 @@ use metadata::{pointer, Group, Slot};
 #[global_allocator]
 static ALLOC: alloc::Cached = alloc::Cached::new();
 
+#[cfg(all(feature = "cache-alloc", feature = "mimalloc"))]
+compile_error!("cache-alloc and mimalloc are two allocators: choose one");
+
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// The global allocator this binary was built with, for the results.
+pub const ALLOCATOR: &str = if cfg!(feature = "cache-alloc") { "cache-alloc" } else if cfg!(feature = "mimalloc") { "mimalloc" } else { "system" };
+
 pub struct Groups {
     pub cpu_frequency: Group,
     pub gpu: Group,
@@ -354,9 +364,11 @@ impl Stats {
 }
 
 /// replay-cost FILE [PAGES [OUT]]: what a replay answer costs, by stage, for the core publications in FILE (one
-/// JSON publication per line, at most one page of them). Per record, in µs, the median of 7 rounds of PAGES
-/// pages: decoding the stored payloads; decoding and writing them back; a whole Replay.view (decoding,
-/// ages and stale, the records and the envelope, writing). One JSON line; OUT gets the page itself.
+/// JSON publication per line, at most one page of them). Per record, in µs of elapsed time, the median of 7
+/// rounds of PAGES pages: decoding the stored payloads, a page of records kept and then freed together;
+/// writing records decoded beforehand, the page of texts kept and then freed together; a whole
+/// Replay.view (decoding, ages and stale, the records and the envelope, writing). The same work as
+/// tools/replay_cost_py.py. One JSON line; OUT gets the page itself.
 fn replay_cost(args: &[String]) {
     let Some(path) = args.first() else { eprintln!("replay-cost FILE [PAGES [OUT]]"); std::process::exit(2) };
     let pages: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(20);
@@ -393,15 +405,17 @@ fn replay_cost(args: &[String]) {
         rounds.sort_by(f64::total_cmp);
         rounds[3]
     };
-    let decode = median(&|| payloads.iter().map(|p| json::parse(p).is_ok() as usize).sum());
-    let both = median(&|| payloads.iter().map(|p| json::parse(p).map_or(0, |v| v.to_py_compact().len())).sum());
+    let decoded: Vec<Value> = payloads.iter().map(|p| json::parse(p).unwrap()).collect();
+    let decode = median(&|| payloads.iter().map(|p| json::parse(p).unwrap()).collect::<Vec<Value>>().len());
+    let write = median(&|| decoded.iter().map(Value::to_py_compact).collect::<Vec<String>>().iter().map(String::len).sum());
     let whole = median(&|| page().len());
     let mut out = Value::obj();
+    out.set("allocator", ALLOCATOR.into());
     out.set("records", (n as i64).into());
     out.set("payload_bytes", ((payloads.iter().map(String::len).sum::<usize>() / n.max(1)) as i64).into());
     out.set("pages", (pages as i64).into());
     out.set("decode_us", json::round_to(decode, 3).into());
-    out.set("write_us", json::round_to(both - decode, 3).into());
+    out.set("write_us", json::round_to(write, 3).into());
     out.set("page_us", json::round_to(whole, 3).into());
     println!("{}", out.to_string(false));
 }
