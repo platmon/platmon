@@ -71,7 +71,7 @@ same dependency policy (only `libc`); the `cache-alloc` build is not part of ste
 | 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
 | 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
 
-Status (2026-10-20, #93; the candidate under verification: [CANDIDATE.md](CANDIDATE.md)): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)); the nvidia-smi fallback and `--frontends` ported, the support scope written down ([Support scope](#support-scope)); candidate 1 passes the final comparison on every host ([results](#final-comparison-candidate-1)); the deployed form not run (needs root). No switch decided.
+Status (2026-10-22, #93; the candidate under verification: [CANDIDATE.md](CANDIDATE.md)): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)); the nvidia-smi fallback and `--frontends` ported, the support scope written down ([Support scope](#support-scope)); candidate 1 passes the final comparison on every host ([results](#final-comparison-candidate-1)) and the deployed form (service checks on three hosts, 24 h on both boards; [results](#final-comparison-candidate-1)); nvidia-smi checked on a GPU through WSL2. No switch decided.
 With 3B the candidate has every feature of
 the default configuration on the three hosts compared (x86 PC, Orin, Raspberry Pi), checked against the
 Python service below. Missing then, ported since: the nvidia-smi fallback of the GPU and the `--frontends`
@@ -873,8 +873,8 @@ Pi (the long run) and the PC (the short checks only); not on a production servic
   `Conflicts=` with the others: `platmon-python-candidate` (the installed Python 1.3.0),
   `platmon-native-candidate` (candidate 1, its SHA-256 checked at install), and
   `platmon-native-candidate-fakesmi` (the same with a slow fake nvidia-smi first on `PATH`);
-- one INI for the three, `/etc/platmon/platmon.ini` with `bind = 127.0.0.1` and `port = 19797` (nothing else
-  changed); the binary under `/usr/lib/platmon-candidate/`, the installed web assets;
+- one INI for the three, `/etc/platmon-candidate/platmon.ini`: a copy of `/etc/platmon/platmon.ini` with
+  `bind = 127.0.0.1` and `port = 19797` (nothing else changed); the binary under `/usr/lib/platmon-candidate/`, the installed web assets;
 - a sudoers file letting the login user start, stop, restart and kill these units and run a read-only
   `measure` (PSS, threads, descriptors and processes of a DynamicUser process); `platmon.service` is not
   named. `uninstall.sh` removes all of it.
@@ -902,6 +902,67 @@ Pi (the long run) and the PC (the short checks only); not on a production servic
   `platmon.service` active and answering. A run stopped by the tools: fix, record, run that host again once.
 - Not here: nvidia-smi on an NVIDIA GPU (the fake only; the WSL2 check is separate, below), the package's
   postinst, a reboot.
+
+**The deployed form: results (2026-10-21 to 22).** Judged as set above; nothing in the candidate, the
+units or the tools changed after the criteria were committed (`18b8f8a`), and no run was repeated. **Candidate 1
+passes on every host**: `checks` 11 of 11 on the PC, the Orin and the Pi, and the 24 h run on the Orin and
+the Pi. The production `platmon` service stayed active and answering on every host throughout.
+
+`checks` (2026-10-21, about 07:00 KST, the three at once; the INI's SHA-256 the same on all three):
+
+| | PC | Orin | Pi |
+| --- | --- | --- | --- |
+| Python → candidate (`Conflicts=`) | ready 0.11 s, 409 | ready 5.39 s, 409 | ready 5.40 s, 409 |
+| `restart` | ready 0.1 s, 409 | ready 0.1 s, 409 | ready 0.1 s, 409 |
+| SIGKILL | back in 5.13 s, `NRestarts` 0 → 1 | 5.26 s | 5.24 s |
+| port held | `exit-code`, `auto-restart`; serves once released | the same | the same |
+| rollback to Python | ready 0.16 s, 409 | 0.31 s | 0.61 s |
+| stops at 7 collection offsets | 0.02 s each, clean | 0.03 s | 0.06 to 0.12 s |
+| stop with 4 replay answers in flight | 200, `RemoteDisconnected`, refused; no hang | the same | the same |
+| stop during the fake nvidia-smi | not reached (i915 answers first) | not reached (the Jetson reader) | reached 3 times: 3 processes at the stop, none left |
+
+- "ready": seconds from `systemctl start` to the first answer. 5.4 s for the swap on the boards against
+  0.1 s on the PC; no rule on it, not looked into further.
+- Clean stop each time: within 2 s, `Result=success`, no process left in the unit's cgroup, the port free.
+
+The 24 h run (2026-10-21 07:39 to 2026-10-22 07:40 KST, the Orin and the Pi at once), 24 hourly records each:
+
+| | Orin | Pi |
+| --- | --- | --- |
+| Hub-like requests / errors | 105 948 / 0 | 105 942 / 0 |
+| replayed collections / longest step / `gap_before` | 84 283 / 1.001 s / 0 | 84 284 / 1.004 s / 0 |
+| CPU (% of one core, per hour) | 0.81 to 0.89 | 0.93 to 1.01 |
+| settled PSS: hour 0, range, hour 23 (limit, budget) | 10.5, 10.5 to 11.3, 11.2 MiB (11.6, 14) | 5.9, 5.8 to 6.2, 6.1 MiB (6.9, 8) |
+| round-end PSS, highest (budget) | 12.3 MiB (46) | 6.7 MiB (27) |
+| threads / descriptors (sockets, processes the same every hour) | 5 / 4 every hour | 5 / 4 every hour |
+| reconnect, per hour | 0.39 to 0.54 s, done | 0.39 to 0.52 s, done |
+| round of 4 pollers: seconds / CPU seconds | 1.7 to 2.6 / 3.5 to 6.1 | 1.1 to 1.4 / 1.8 to 2.4 |
+| replay / stats response p95, highest hour | 4.6 / 1.5 ms | 8.8 / 2.9 ms |
+| `restart` after hour 11 | 409 for the old cursor, ready 0.1 s | the same |
+| automatic restarts | 0 | 0 |
+| end: stop | 0.03 s, clean | 0.07 s, clean |
+
+- Odd hours: the missing range is only on the reconnect's first page, from the cursor + 1 up to below the
+  oldest held record (core 125 records each time, the time the client was away past retention).
+- The Orin's settled PSS rose about 0.7 MiB over the first 23 hours (10.5 to 11.3 MiB) and did not come back
+  after the restart (10.8 MiB at hour 12); it stayed under hour 0 + 10 % (11.6 MiB) every hour, and
+  hour 23 was lower than hour 22. A slow rise within the limit; 24 h does not show whether it levels off.
+  The Pi's stayed within 5.8 to 6.2 MiB and fell back after the restart.
+- The test tool's own VmRSS (not the candidate's) grew from 46 to 55 MiB (Orin) and 36 to 44 MiB (Pi), the
+  Hub-like client's bookkeeping; it ended without error.
+
+What this shows: candidate 1 installed as a hardened, DynamicUser service beside the production one, swapped
+in and out on the same INI and port, restarted, killed and stopped at awkward moments without a leftover
+process or a lost record, and 24 h under a Hub-like load with a restart in the middle, within its memory
+budget. What it does not: the package's `postinst` and an `apt` upgrade (the units were installed by a
+script, not by the `.deb`), a reboot, the production port 9797 and a real Hub (the client was the tool),
+nvidia-smi on a native Linux NVIDIA driver, more than 24 h.
+
+Raw: `~/.local/state/platmon-measure/native-20261021-deploy/` (SHA-256, first 16 hex digits: `checks-pc.jsonl`
+`de7d4b0b005396ba`, `checks-orin.jsonl` `05c266b57571e433`, `checks-pi.jsonl` `10e544e660d08fef`,
+`soak-orin.jsonl` `c6a182c0cf493c18`, `soak-pi.jsonl` `598339ce2e0116f4`, the `.log` files beside them;
+the `--quick` try `quick-pi.jsonl` `eda2b1b1567d7fc4`). The board copies were removed; the installed
+candidate units stay until the owner runs `uninstall.sh`.
 
 ### nvidia-smi on an NVIDIA GPU (WSL2)
 

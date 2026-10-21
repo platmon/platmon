@@ -61,4 +61,6 @@ Two builds of the commit gave the same two hashes.
 ## Results
 
 The final comparison (2026-10-21): passed on the PC, the Orin and the Pi, every run
-([README](README.md#final-comparison-candidate-1)). The deployed form: not run (needs root on a host).
+([README](README.md#final-comparison-candidate-1)). The deployed form (2026-10-21 to 22): passed, `checks` 11 of 11 on the PC, the Orin and the Pi,
+and 24 h as a service on the Orin and the Pi ([README](README.md#final-comparison-candidate-1), "The deployed
+form: results"). The same two binaries as above.
