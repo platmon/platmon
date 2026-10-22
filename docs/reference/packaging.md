@@ -1,11 +1,13 @@
 # Packaging and releases
 
 The primary distribution is a Debian package for Ubuntu and Debian-derived Linux hosts
-(including supported Jetson and Raspberry Pi systems). It uses the host's Python 3.9+
-and systemd; it bundles neither Python nor OS/NVIDIA binaries. Runtime Python remains
-standard-library only. `Architecture: all` means the files are architecture-independent,
-not that every OS/kernel has been validated. A device whose Python is older than 3.9
-needs a supported OS/interpreter before installation.
+(including supported Jetson and Raspberry Pi systems), one per architecture: `amd64` and `arm64`.
+The service is a static native server built from `native/` (Rust, musl, the system allocator); the
+`platmon` command is one Python file that uses the host's Python 3.9+ standard library only. The package
+uses the host's systemd; it bundles neither Python nor OS/NVIDIA binaries. A package for an architecture
+does not mean that every OS/kernel on it has been validated. A device whose Python is older than 3.9
+needs a supported OS/interpreter before installation. Releases up to 1.3.0 are one `Architecture: all`
+package with the Python server; the source installation and the container still run that server.
 
 Python 3.8 and Ubuntu 20.04 are CI observation targets under
 [ADR 0001](../development/adr/0001-ubuntu-lts-python-support.md), outside official support and
@@ -17,13 +19,14 @@ and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
 ## Versioning
 
 `VERSION` in `runtime/__init__.py` is the single source of the application version. The
-service imports it; the builder reads that assignment without importing the collector.
-`frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/test_layers.py`
+service imports it; the builder reads that assignment without importing the collector and writes it
+into the package's unit (`--app-version`), which the native server shows on its web page and logs at
+start. `frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/test_layers.py`
 fails until both say the same, so a release changes both. Check versions with:
 
 ```sh
 platmon --version
-python3 /usr/share/platmon/platmon.py --version
+journalctl -u platmon -b | grep -m1 version
 dpkg-query -W platmon
 ```
 
@@ -43,22 +46,31 @@ changing the application version. Never replace an already released version's fi
 
 ## Build
 
-Build on Linux with Python 3.9+ and the installed `dpkg-deb` tool (dpkg 1.19+).
-No Python build dependency or root access is needed:
+Build on Linux with Python 3.9+, the installed `dpkg-deb` tool (dpkg 1.19+) and Docker.
+`native/build.sh` builds the server for both architectures in a throwaway `rust:1.88-slim`
+container (Cargo.lock as committed, the Rust tests first, then each binary checked for the
+system allocator's mark). No Python build dependency, Rust toolchain on the host or root access
+is needed:
 
 ```sh
+native/build.sh
 platmon_version=$(python3 scripts/packaging/package.py --version)
+platmon_arch=$(dpkg --print-architecture)
 platmon_dist="dist/${platmon_version}-1"
 python3 scripts/packaging/package.py --output "$platmon_dist"
-python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_all.deb"
-lintian --no-cfg --info --pedantic --fail-on error,warning "$platmon_dist/platmon_${platmon_version}-1_all.deb"
+python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_${platmon_arch}.deb"
+lintian --no-cfg --info --pedantic --fail-on error,warning "$platmon_dist"/*.deb
 (cd "$platmon_dist" && sha256sum -c SHA256SUMS)
 ```
 
-The fresh output directory contains `platmon_<version>-1_all.deb`, `platmon-<version>.tar.gz`, `BUILD.json`
-(input content hashes and versions) and `SHA256SUMS`. The source archive includes
+The fresh output directory contains `platmon_<version>-1_amd64.deb`, `platmon_<version>-1_arm64.deb`,
+`platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the servers' SHA-256 and versions) and
+`SHA256SUMS`. The builder takes the servers from `native/target/` by default, or one per
+`--binary ARCH=PATH`; it refuses a file that is not an ELF for that architecture or lacks the
+system allocator's mark. `check_package.py` runs the extracted server, so it needs a host of the
+package's architecture. The source archive includes `native/` (without `native/target/`),
 runtime, tests, installation/build scripts and documentation, excluding caches and
-private validation artifacts. It can rebuild the package without `.git`.
+private validation artifacts. With the same servers it can rebuild the packages without `.git`.
 `SOURCE_DATE_EPOCH` controls timestamps; when unset, the builder uses the dated
 maintainer signature in `packaging/debian/changelog`. Update that date and its entries
 when changing packaging. The template's `@VERSION@` is replaced by the application
@@ -74,7 +86,10 @@ the source archive is an upstream distribution, not a Debian source package with
 `debian/rules` or a `.dsc` file.
 Revision 1 includes a scoped Lintian override for `initial-upload-closes-no-bugs`:
 this upstream distribution is not an upload to the Debian archive and has no Debian
-Intent To Package bug. Other policy errors and warnings remain checked.
+Intent To Package bug. Every revision overrides the tags of the deliberately static server,
+per architecture (`statically-linked-binary` on arm64; `shared-library-lacks-prerequisites`
+on amd64, whose static PIE looks like a shared object). Other policy errors and warnings
+remain checked.
 
 ## Install and update
 
@@ -110,14 +125,14 @@ Install the local package using APT, which checks the declared host dependencies
 checkout build, use the variables from the Build section:
 
 ```sh
-sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_all.deb"
+sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}.deb"
 systemctl status platmon --no-pager
 platmon --version
 platmon --once
 ```
 
 For a downloaded release, replace the package path with the exact verified `.deb` file,
-including that release's application version and packaging revision.
+including that release's application version, packaging revision and the host's architecture.
 
 `SHA256SUMS` comes from the same release page as the package, so it detects a damaged
 download but does not show who built the file. Releases after 1.3.0-1 also carry a GitHub
@@ -125,7 +140,7 @@ build provenance attestation. With the GitHub CLI, check that the package was bu
 repository's release workflow from the release tag:
 
 ```sh
-gh attestation verify platmon_<version>-<revision>_all.deb --repo platmon/platmon \
+gh attestation verify platmon_<version>-<revision>_<arch>.deb --repo platmon/platmon \
   --signer-workflow platmon/platmon/.github/workflows/release.yml \
   --source-ref refs/tags/v<version>
 ```
@@ -133,14 +148,16 @@ gh attestation verify platmon_<version>-<revision>_all.deb --repo platmon/platmo
 Use the release's own tag, including a `-<revision>` suffix when it has one.
 The published packages 1.0.0-1 to 1.3.0-1 have no attestation.
 
-Code goes to `/usr/share/platmon/`, the client to `/usr/bin/platmon`, the vendor unit
-to `/usr/lib/systemd/system/platmon.service`, and config to `/etc/platmon/platmon.ini`.
+The server goes to `/usr/lib/platmon/platmon-native`, its web files to `/usr/share/platmon/`,
+the client to `/usr/bin/platmon`, the vendor unit to `/usr/lib/systemd/system/platmon.service`,
+and config to `/etc/platmon/platmon.ini`.
 The CLI manual is available with `man platmon`. Compressed documentation and
 changelogs are in `/usr/share/doc/platmon/`; `copyright` references the system's
 Apache-2.0 license. Package metadata includes `md5sums` for non-conffile contents
 for tools such as `debsums`; release artifact verification uses `SHA256SUMS`.
-The code keeps its existing directory structure and relative web paths. The service
-retains DynamicUser, ProtectSystem, ProtectHome and NoNewPrivileges. Logs:
+The service retains DynamicUser, ProtectSystem, ProtectHome and NoNewPrivileges; the server
+reads the same INI, with the same keys, defaults and refusal messages, and answers the same
+HTTP API, web page and replay as the Python server. Logs:
 `journalctl -u platmon`. Configure the listener and restart with
 `sudo systemctl restart platmon`; `platmon --once host:port` follows a custom port.
 
@@ -150,11 +167,17 @@ your conffile policy explicitly; do not assume a prompt is answered automaticall
 Existing explicit `enabled = no` values remain effective. Omitted options follow the
 new version's defaults, so read its changelog before updating.
 
-Upgrades validate the preserved INI before restarting the service. They preserve an
-administrator's disabled/masked service state and respect Debian's service-start policy.
-A config or restart failure leaves dpkg reporting the failure; it is not an automatic
-rollback. Check `/api/status` ready and `/api/stats` 200 after starting, and check the
-expected readings on the actual device. The health check is not evidence that every
+Upgrades validate the preserved INI with the new server (`platmon-native config-check`)
+before restarting the service, so an INI it refuses leaves the running service alone. They
+preserve an administrator's disabled/masked service state and respect Debian's service-start
+policy. After a start or restart, the package waits up to 20 s for the service to stay running
+and, with HTTP on, for its `/api/status` to answer ready on the configured address (`0.0.0.0`
+is checked on `127.0.0.1`); a service that was not started (disabled, masked or held by
+policy) is reported and not checked. A config, restart or health-check failure fails
+configuration: dpkg reports the package half-configured and the unit keeps retrying. It is
+not an automatic rollback; install the previous package (see [Rollback](#rollback)) or fix
+the cause and run `sudo dpkg --configure platmon`. Check the expected readings on the actual
+device. The health check is not evidence that every
 sensor or filesystem is exposed. The unauthenticated API belongs on a trusted network.
 
 ```sh
@@ -200,6 +223,13 @@ administrator-owned local commands.
 
 ## Rollback
 
+From 1.3.0 (the Python server, `_all.deb`) the upgrade to a native package keeps the INI and
+swaps the server in the same `platmon.service`: the unit restarts once, so the two servers never
+hold the port together. The replay cursor of the previous instance gets 409 (a new
+`instance_id`) as after any restart, and in-memory history starts again. Going back is the same
+in reverse: `sudo apt install --allow-downgrades platmon=1.3.0-1` (or the retained
+`platmon_1.3.0-1_all.deb`), which also recovers from a failed health check.
+
 Before an update, retain the previous `.deb` and back up the operational INI. To roll
 back during a maintenance window, stop platmon, restore the compatible backed-up INI,
 and install the retained package with `sudo apt install --allow-downgrades ./OLD.deb`.
@@ -223,19 +253,21 @@ directories are never automatically deleted by subsequent updates or uninstall.
 ## Release procedure
 
 1. Update VERSION in `runtime/__init__.py` (and its copy in `frontends/cli.py`) and the changelog. Review the scoped change and run
-   `git diff --check`, `pytest -v`, the build, package checker and Lintian.
+   `git diff --check`, `pytest -v`, `native/build.sh`, the build, package checker and Lintian.
 2. Test fresh install, upgrade with an edited INI, downgrade, remove/purge and existing
-   installation migration. CI uses an isolated container for dpkg lifecycle checks;
-   actual systemd sandbox/startup and ARM device readings require real-device acceptance.
+   installation migration. CI uses isolated containers for the dpkg lifecycle and, with systemd
+   booted in the container, the service check (below), on amd64 and arm64 runners; device
+   readings, a real reboot and a real Hub require real-device acceptance.
 3. Merge the reviewed change into `main` using the repository's signing/hooks policy.
    Tag the verified commit included in `main` as `v<version>` matching VERSION; use `v<version>-2` for packaging
    revision 2. Confirm the intended commit and required checks before pushing the tag.
    Creating a local tag alone does not start the workflow. This document does not create a tag.
 4. The release workflow fetches `main` and rejects tags whose commit is not an ancestor
    of its current tip, before building. It verifies tag/version/changelog and runs the tests.
-   It then builds the release files **once** and checks those same files with the package
-   checker, Lintian, the dpkg lifecycle check (against a next-revision fixture that is not
-   released) and `SHA256SUMS`. It records a GitHub build provenance attestation for the
+   It then builds the release files **once**, from the server binaries the checks built and
+   compared in the same run, and checks those same files with the package checker, Lintian,
+   the dpkg lifecycle check (amd64, against a next-revision fixture that is not released) and
+   `SHA256SUMS`. It records a GitHub build provenance attestation for the
    `.deb` and source archive, and creates a **draft** GitHub Release with the four artifacts
    and the version's `CHANGELOG.md` section as notes. Review the attached bytes, acceptance
    evidence and notes before publishing the draft. Do not distribute a container image;
@@ -260,15 +292,33 @@ To run the dpkg lifecycle check locally, use Docker and a disposable Ubuntu cont
 
 ```sh
 platmon_version=$(python3 scripts/packaging/package.py --version)
+platmon_arch=$(dpkg --print-architecture)
 platmon_dist="dist/${platmon_version}-lifecycle"
 python3 scripts/packaging/package.py --output "$platmon_dist/first"
 python3 scripts/packaging/package.py --revision 2 --output "$platmon_dist/second"
 python3 scripts/packaging/check_package_install.py \
-  "$platmon_dist/first/platmon_${platmon_version}-1_all.deb" \
-  "$platmon_dist/second/platmon_${platmon_version}-2_all.deb"
+  "$platmon_dist/first/platmon_${platmon_version}-1_${platmon_arch}.deb" \
+  "$platmon_dist/second/platmon_${platmon_version}-2_${platmon_arch}.deb"
 ```
 
 This installs test OS tools inside the container, mounts only the artifact directories
 read-only and removes the container afterward. It checks config preservation,
 disabled/masked state, downgrade, remove/purge, source-unit refusal and invalid-config
 recovery. It does not boot systemd or change host services. CI runs the same check.
+
+The service check boots systemd in a disposable container and upgrades from the last Python
+release (download `platmon_1.3.0-1_all.deb` and check it against that release's `SHA256SUMS`):
+
+```sh
+python3 scripts/packaging/check_package_service.py platmon_1.3.0-1_all.deb \
+  "$platmon_dist/second/platmon_${platmon_version}-2_${platmon_arch}.deb"
+```
+
+It checks that the upgrade keeps an edited INI and runs the native server in the same unit
+with one process, that a start that fails (the port held) fails configuration and installing
+the previous package recovers, that a disabled service is not started, that a refused INI stops
+the upgrade before the restart, and that after the container restarts the enabled service is
+back. The container gets `CAP_SYS_ADMIN` without seccomp/AppArmor confinement, which systemd's
+sandboxing needs, never `--privileged`; it removes the image's `policy-rc.d` (a host has none).
+It restarts the unit faster than systemd's start limit allows, so it clears that count
+(`systemctl reset-failed`) before each step. A container's boot is not a device's reboot.

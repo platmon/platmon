@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract and smoke-test a .deb outside the checkout, without installing it."""
+"""Extract and smoke-test a .deb outside the checkout, without installing it, on a host of its architecture."""
 import argparse
 import json
 import os
@@ -16,26 +16,36 @@ import urllib.request
 def check(package):
     package = Path(package).resolve()
     release = subprocess.check_output(["dpkg-deb", "-f", str(package), "Version"], text=True).strip().split("-")[0]
+    arch = subprocess.check_output(["dpkg-deb", "-f", str(package), "Architecture"], text=True).strip()
+    host = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
+    if arch != host:
+        raise ValueError(f"a {arch} package needs a {arch} host to run its server (this is {host})")
     with tempfile.TemporaryDirectory(prefix="platmon-smoke-") as directory:
         work = Path(directory)
         root = work / "root"
         subprocess.run(["dpkg-deb", "-R", str(package), str(root)], check=True)
-        app, cli = root / "usr/share/platmon", root / "usr/bin/platmon"
+        server, cli = root / "usr/lib/platmon/platmon-native", root / "usr/bin/platmon"
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
         # PYTHONPATH must not accidentally make the source checkout available.
         env.pop("PYTHONPATH", None)
-        for command, expected in (([sys.executable, str(app / "platmon.py"), "--version"], f"platmon server {release}"),
-                                  ([sys.executable, str(cli), "--version"], f"platmon {release}")):
-            result = subprocess.check_output(command, cwd=work, env=env, text=True).strip()
-            if result != expected:
-                raise ValueError(f"version mismatch: {result!r} != {expected!r}")
+        result = subprocess.check_output([sys.executable, str(cli), "--version"], cwd=work, env=env, text=True).strip()
+        if result != f"platmon {release}":
+            raise ValueError(f"version mismatch: {result!r} != 'platmon {release}'")
+        # The server's arguments are the packaged unit's, with the extracted paths and a test config.
+        unit = (root / "usr/lib/systemd/system/platmon.service").read_text(encoding="utf-8")
+        exec_start = next(line for line in unit.splitlines() if line.startswith("ExecStart=")).split()
+        expected = ["ExecStart=/usr/lib/platmon/platmon-native", "serve", "/etc/platmon/platmon.ini", "--web",
+                    "/usr/share/platmon/frontends/web", "--app-version", release]
+        if exec_start != expected:
+            raise ValueError(f"unexpected ExecStart: {exec_start}")
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         config = work / "smoke.ini"
         config.write_text(f"[http]\nbind = 127.0.0.1\nport = {port}\n", encoding="utf-8")
         with (work / "server.log").open("w+") as log:
-            process = subprocess.Popen([sys.executable, str(app / "platmon.py"), str(config)],
+            process = subprocess.Popen([str(server), "serve", str(config), "--web",
+                                        str(root / "usr/share/platmon/frontends/web"), "--app-version", release],
                                        cwd=work, env=env, stdout=log, stderr=log)
             try:
                 base = f"http://127.0.0.1:{port}"
@@ -59,8 +69,11 @@ def check(package):
                               "/assets/brand/platmon-logo-light.svg", "/assets/brand/platmon-logo-dark.svg",
                               "/assets/brand/favicon.svg"):
                     with urllib.request.urlopen(base + route, timeout=5) as response:
-                        if not response.read():
+                        body = response.read()
+                        if not body:
                             raise ValueError("empty packaged response: " + route)
+                        if route == "/" and release.encode() not in body:
+                            raise ValueError("the web page does not show version " + release)
                 output = subprocess.check_output([sys.executable, str(cli), f"127.0.0.1:{port}", "--once"],
                                                  cwd=work, env=env, text=True, timeout=15)
                 if "CPU" not in output:

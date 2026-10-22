@@ -20,7 +20,9 @@ flowchart LR
 
 ## Highlights
 
-- **Dependency-free runtime:** Python 3.9+ standard library; no Python packages to install on the device.
+- **Dependency-free runtime:** the Debian package's server is one static native binary (amd64, arm64);
+  the `platmon` command, the source installation and the container use the Python 3.9+ standard library
+  only. No Python packages to install on the device.
 - **Hardware-aware monitoring:** CPU, available GPU/NPU, memory, network and disk I/O, storage,
   temperatures, power, fans, battery, Wi-Fi and pressure. Unsupported sources remain unavailable.
 - **One collector, multiple views:** live terminal and web interfaces read the same published snapshots.
@@ -30,17 +32,19 @@ flowchart LR
 
 ## Quick start
 
-On Ubuntu/Debian-derived Linux with Python 3.9+ and systemd, install from the signed
+On Ubuntu/Debian-derived Linux (amd64 or arm64) with Python 3.9+ and systemd, install from the signed
 [APT repository](https://platmon.github.io/apt/) (see [getting started](docs/guides/getting-started.md)),
 download a verified package from [GitHub Releases](https://github.com/platmon/platmon/releases),
-or build one from this checkout (Linux with `dpkg-deb` required):
+or build one from this checkout (Linux with `dpkg-deb` and Docker for the server's build required):
 
 ```sh
+native/build.sh
 platmon_version=$(python3 scripts/packaging/package.py --version)
+platmon_arch=$(dpkg --print-architecture)
 platmon_dist="dist/${platmon_version}-1"
 python3 scripts/packaging/package.py --output "$platmon_dist"
-python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_all.deb"
-sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_all.deb"
+python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_${platmon_arch}.deb"
+sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}.deb"
 ```
 
 ```sh

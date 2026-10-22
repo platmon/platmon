@@ -21,24 +21,52 @@ jobs:
       - run: python -m pip install -r tests/requirements.txt
       - run: pytest -v
 
+  # The server: Rust tests and both static targets (native/build.sh), then the same answers as the Python
+  # service on fake trees, configurations, the runtime and a live HTTP check.
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The Python the server was verified against (native/CANDIDATE.md, the Raspberry Pi's). Answers that
+      # differ between CPython releases (a malformed request version) are checked apart, on the server alone.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.5"
+      - name: Build the server (Rust tests, amd64 and arm64, the system allocator)
+        run: native/build.sh
+      - name: Compare with the Python service
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          SERVER: native/target/x86_64-unknown-linux-musl/release/platmon-native
+        run: |
+          python3 native/tools/config_fixture.py "$SERVER"
+          python3 native/tools/runtime_fixture.py "$SERVER"
+          native/tools/fixture.sh
+          python3 native/tools/live_http.py "$SERVER"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platmon-server
+          path: native/target/*-unknown-linux-musl/release/platmon-native
+          if-no-files-found: error
+
   package:
-    needs: test
+    needs: [test, native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-server
+          path: native/target
       - name: Install package policy checker
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lintian
       - run: python3 scripts/packaging/package.py --output dist/first
       - run: python3 scripts/packaging/package.py --revision 2 --output dist/second
       - name: Check package policy
         run: lintian --no-cfg --info --pedantic --fail-on error,warning dist/first/*.deb dist/second/*.deb
-      - name: Verify extracted distribution
-        run: python3 scripts/packaging/check_package.py dist/first/*.deb
-      - name: Verify dpkg install, upgrade, downgrade and removal
-        run: python3 scripts/packaging/check_package_install.py dist/first/*.deb dist/second/*.deb
       - name: Verify checksums
         working-directory: dist/first
         run: sha256sum -c SHA256SUMS
@@ -47,20 +75,31 @@ jobs:
           name: platmon-package
           path: dist/first/*
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platmon-upgrade-fixture
+          path: dist/second/*.deb
+          if-no-files-found: error
 
+  # Each architecture's package on a runner of that architecture, in each Ubuntu release's userspace.
   ubuntu-userspace:
     needs: package
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         ubuntu: ["20.04", "22.04", "24.04", "26.04"]
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: platmon-package
           path: dist/first
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-upgrade-fixture
+          path: dist/second
       - name: Check extracted package with the OS default Python
         run: |
           docker run --rm --security-opt=no-new-privileges \
@@ -69,13 +108,22 @@ jobs:
               apt-get update -qq
               DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3
               python3 --version
-              python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/*.deb
+              python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/*_${{ matrix.arch }}.deb
             '
       # Ubuntu 20.04 is an observation target, outside official native support.
       # The package requires Python >= 3.9; never force dependencies.
-      - name: Build upgrade fixture
-        if: matrix.ubuntu != '20.04'
-        run: python3 scripts/packaging/package.py --revision 2 --output dist/second
       - name: Check package lifecycle
         if: matrix.ubuntu != '20.04'
-        run: python3 scripts/packaging/check_package_install.py dist/first/*.deb dist/second/*.deb --image ubuntu:${{ matrix.ubuntu }}
+        run: python3 scripts/packaging/check_package_install.py dist/first/*_${{ matrix.arch }}.deb dist/second/*_${{ matrix.arch }}.deb --image ubuntu:${{ matrix.ubuntu }}
+      # The last release with the Python server: the package users upgrade from.
+      - name: Fetch the previous release
+        if: matrix.ubuntu != '20.04'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.3.0 --repo "$GITHUB_REPOSITORY" --dir previous \
+            --pattern platmon_1.3.0-1_all.deb --pattern SHA256SUMS
+          (cd previous && grep ' platmon_1.3.0-1_all.deb$' SHA256SUMS | sha256sum -c)
+      - name: Check the service under systemd (upgrade, failed start, recovery, boot)
+        if: matrix.ubuntu != '20.04'
+        run: python3 scripts/packaging/check_package_service.py previous/platmon_1.3.0-1_all.deb dist/second/*_${{ matrix.arch }}.deb --image ubuntu:${{ matrix.ubuntu }}

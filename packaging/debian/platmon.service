@@ -1,0 +1,15 @@
+[Unit]
+Description=platmon platform monitor
+After=network.target
+
+[Service]
+ExecStart=/usr/lib/platmon/platmon-native serve /etc/platmon/platmon.ini --web /usr/share/platmon/frontends/web --app-version @VERSION@
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
