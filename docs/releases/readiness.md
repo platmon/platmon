@@ -28,9 +28,23 @@ Not verified, and therefore the gates still open before this draft is published:
   platmon/platmon.github.io#4, which must be merged before the `apt` workflow adds 1.4.0.
 - **No real device upgrade or reboot:** the upgrade and boot ran in containers; the plan is one Orin Nano
   first (apt upgrade, reboot, `/api/status`, the Hub reconnecting), the others after.
-- **Long memory trend:** the Orin's settled PSS rose about 0.7 MiB in 24 h; whether it levels off is
-  unknown. An accelerated soak (2.5 times the reconnect work in 6 h) and the canary's PSS over its first
-  days are the evidence; going back is `apt install --allow-downgrades platmon=1.3.0-1`.
+- **Long memory trend:** the Orin's settled PSS rose about 0.7 MiB in 24 h. An accelerated soak
+  (2026-10-22/23, `deploy_check.py soak --accel`, 20 cycles of 18 min, each a reconnect after 480 or
+  720 s away and 3 rounds of 4 concurrent pollers, a restart at cycle 10; raw
+  `~/.local/state/platmon-measure/native-20261023-accel/`) put about 60 such rounds into 6 h:
+  - Orin: settled PSS 11.33 → 11.92 MiB over cycles 1–9 and 11.14 → 11.76 MiB over cycles 11–19, about
+    25–30 KiB per round, the same per round as the 24 h soak (0.7 MiB, 24 rounds with 40 minutes of
+    polling an hour). So it grows with the backlog work, not with time or steady polling, and did not level
+    off within 6 h. The tool's report says FAIL: its limit is cycle 0 + 10 %, and cycle 0 here is read
+    before the buffers fill (541 records against about 1,194 in later cycles); against cycle 1 every
+    cycle is within 10 %. Highest settled 11.9 MiB (budget 14), highest concurrent peak 13.0 MiB (46). No
+    error, loss or automatic restart.
+  - Pi: 6.16 → 6.61 and 6.30 → 6.51 MiB; PASS.
+  - Meaning for a release: a Hub that stays connected polls small pages and rarely makes a backlog round,
+    so the growth there should be small; it shows when Hubs reconnect after downtime, at about 1 MiB per
+    35 to 40 rounds on the Orin. Its cause (allocator fragmentation or a leak in serving replay pages) is
+    not found. The canary's PSS over its first days is the next evidence; going back is
+    `apt install --allow-downgrades platmon=1.3.0-1`.
 - **Known difference:** a request line with `HTTP/2.0` or an invalid version gets the body without a
   status line, as from CPython 3.13.5 and 3.14.4 (newer 3.13 releases answer with a status line).
 - **Not covered:** nvidia-smi under a native Linux NVIDIA driver (verified under WSL2 and fake trees).
