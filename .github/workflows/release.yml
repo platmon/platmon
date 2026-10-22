@@ -60,6 +60,11 @@ jobs:
               output.write("version=" + release + "\n")
               output.write("revision=" + (match.group(1) or "1") + "\n")
           PY
+      # The server binaries the checks built and compared (native/build.sh), in the same run.
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-server
+          path: native/target
       - name: Build fixed-version release files
         env:
           REVISION: ${{ steps.version.outputs.revision }}
@@ -68,14 +73,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lintian
       - name: Check package policy
         run: lintian --no-cfg --info --pedantic --fail-on error,warning dist/*.deb
-      - run: python3 scripts/packaging/check_package.py dist/*.deb
+      # This runner is amd64; the checks ran both architectures' packages on their own runners.
+      - run: python3 scripts/packaging/check_package.py dist/*_amd64.deb
       - name: Verify dpkg lifecycle of the release package
         env:
           REVISION: ${{ steps.version.outputs.revision }}
         run: |
           # The next revision is only an upgrade fixture; it is not released.
           python3 scripts/packaging/package.py --revision "$((REVISION + 1))" --output "$RUNNER_TEMP/upgrade"
-          python3 scripts/packaging/check_package_install.py dist/*.deb "$RUNNER_TEMP"/upgrade/*.deb
+          python3 scripts/packaging/check_package_install.py dist/*_amd64.deb "$RUNNER_TEMP"/upgrade/*_amd64.deb
       - name: Verify checksums
         working-directory: dist
         run: sha256sum -c SHA256SUMS
