@@ -48,7 +48,7 @@ def inside(first, second):
     invoke("dpkg", "--remove", "platmon")
     assert ini.read_text() == custom
     assert not Path("/usr/bin/platmon").exists()
-    assert not Path("/usr/share/platmon/platmon.py").exists()
+    assert not Path("/usr/lib/platmon/platmon-native").exists()
     invoke("dpkg", "--purge", "platmon")
     assert not ini.exists()
     # A source unit must be refused before it or any source-installed code is lost.
@@ -56,7 +56,7 @@ def inside(first, second):
     unit.write_text("[Service]\nExecStart=/old/platmon.py\n")
     invoke("dpkg", "-i", str(first), success=False)
     assert unit.read_text().endswith("ExecStart=/old/platmon.py\n")
-    assert not Path("/usr/share/platmon/platmon.py").exists()
+    assert not Path("/usr/lib/platmon/platmon-native").exists()
     unit.unlink()  # Only the fixture created above is removed.
     # Migration preserves a pre-existing INI and administrator-owned local command.
     ini.parent.mkdir(parents=True, exist_ok=True)

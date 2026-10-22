@@ -2,11 +2,11 @@ Package: platmon
 Version: @VERSION@
 Section: admin
 Priority: optional
-Architecture: all
+Architecture: @ARCH@
 Depends: python3 (>= 3.9), systemd, init-system-helpers (>= 1.56)
 Maintainer: platmon maintainers <jwsung91@users.noreply.github.com>
 Homepage: https://github.com/platmon/platmon
 Installed-Size: @SIZE@
 Description: lightweight read-only Linux platform monitor
- Collects platform metrics using the Python standard library and exposes
- an HTTP API, web viewer and standalone terminal client.
+ Collects platform metrics with a static native server and exposes an HTTP
+ API and web viewer; the standalone terminal client uses the host's Python.

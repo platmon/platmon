@@ -3,14 +3,19 @@ set -eu
 case "$1" in
     configure)
         # Validate the preserved config before enabling or restarting any service.
+        # The server prints the settings it would use, or {"error": ...} with the same text as before.
+        PLATMON_CONFIG=$(/usr/lib/platmon/platmon-native config-check /etc/platmon/platmon.ini)
+        export PLATMON_CONFIG
         python3 -B -c '
+import json
+import os
 import sys
-sys.path.insert(0, "/usr/share/platmon")
-from platmon import load_config
 try:
-    load_config("/etc/platmon/platmon.ini")
+    error = json.loads(os.environ["PLATMON_CONFIG"]).get("error")
 except ValueError as e:
-    sys.exit("invalid platmon config: " + str(e))
+    sys.exit("platmon config check failed: " + str(e))
+if error is not None:
+    sys.exit("invalid platmon config: " + error)
 '
         if [ -e /usr/local/bin/platmon ] || [ -e /usr/local/sbin/platmon ]; then
             echo "a local platmon command may shadow /usr/bin/platmon; check command -v platmon" >&2
@@ -28,6 +33,51 @@ except ValueError as e:
             else
                 deb-systemd-invoke start platmon.service
             fi
+            # A service that was started must stay running and, with HTTP on, answer /api/status ready.
+            # Failing here leaves the package unconfigured; installing the previous package recovers.
+            python3 -B -c '
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.request
+
+def unit():
+    out = subprocess.run(["systemctl", "show", "platmon.service", "-p", "ActiveState", "-p", "SubState",
+                          "-p", "Result", "-p", "NRestarts"], capture_output=True, text=True).stdout
+    return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+http = json.loads(os.environ["PLATMON_CONFIG"])["http"]
+first = unit()
+if first.get("ActiveState") == "inactive" and first.get("Result") == "success":
+    print("platmon.service is not started (disabled, masked or held by policy); health check skipped")
+    sys.exit(0)
+host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(http["bind"], http["bind"])
+url = "http://%s:%d/api/status" % ("[%s]" % host if ":" in host else host, http["port"])
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # never through a proxy
+deadline, why = time.monotonic() + 20, "no answer"
+while time.monotonic() < deadline:
+    state = unit()
+    if state.get("ActiveState") != "active" or state.get("NRestarts") != first.get("NRestarts"):
+        why = "the service stopped (%s/%s, result %s)" % (state.get("ActiveState"), state.get("SubState"),
+                                                         state.get("Result"))
+        break
+    if not http["enabled"]:
+        if time.monotonic() > deadline - 15:
+            sys.exit(0)
+    else:
+        try:
+            with opener.open(url, timeout=2) as response:
+                if json.load(response).get("ready") is True:
+                    sys.exit(0)
+                why = "not ready"
+        except (OSError, ValueError) as e:
+            why = str(e)
+    time.sleep(0.5)
+sys.exit("platmon.service failed its health check: " + why + "; see journalctl -u platmon. "
+         "To go back, install the previous package: sudo apt install --allow-downgrades platmon=VERSION")
+'
         fi
         ;;
 esac

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.packaging.package import build, packaging_epoch, version
+from scripts.packaging.package import ALLOCATOR_MARK, ARCHES, build, check_binary, default_binary, packaging_epoch, version
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -95,11 +95,34 @@ def test_source_update_success_retains_backup(source_install):
     assert config.read_text() == "custom config"
 
 
+def fake_server(path, arch, mark=ALLOCATOR_MARK):
+    """An ELF header for the architecture and the allocator mark: what the builder checks, not a program."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x7fELF\x02\x01\x01" + bytes(11) + ARCHES[arch][1].to_bytes(2, "little") + bytes(44) + mark)
+    path.chmod(0o755)
+    return path
+
+
 @pytest.fixture
-def package(tmp_path):
+def binaries(tmp_path):
+    """The binaries native/build.sh left, else fakes (enough to package, not to run)."""
+    real = {arch: default_binary(arch) for arch in ARCHES}
+    if all(path.is_file() for path in real.values()):
+        return real
+    return {arch: fake_server(tmp_path / "bin" / arch, arch) for arch in ARCHES}
+
+
+def runnable(binaries):
+    host = run("dpkg", "--print-architecture").stdout.strip()
+    path = binaries.get(host)
+    return path if path is not None and path == default_binary(host) else None
+
+
+@pytest.fixture
+def package(tmp_path, binaries):
     if shutil.which("dpkg-deb") is None:
         pytest.skip("dpkg-deb is required for distribution tests")
-    return build(tmp_path / "dist")
+    return build(tmp_path / "dist", binaries=binaries)
 
 
 def test_release_versions_match_and_cli_stays_standalone(tmp_path):
@@ -121,17 +144,26 @@ def test_bad_version_refused(tmp_path, value):
         version(tmp_path)
 
 
-def test_package_contents_and_config_ownership(package, tmp_path):
+@pytest.mark.parametrize("arch", sorted(ARCHES))
+def test_package_contents_and_config_ownership(package, binaries, tmp_path, arch):
+    package = package[0].parent / f"platmon_{version()}-1_{arch}.deb"
     metadata = run("dpkg-deb", "-f", str(package))
     assert metadata.returncode == 0
-    assert "Architecture: all" in metadata.stdout and "python3 (>= 3.9)" in metadata.stdout
+    assert f"Architecture: {arch}" in metadata.stdout and "python3 (>= 3.9)" in metadata.stdout
     assert f"Version: {version()}-1" in metadata.stdout
     root = tmp_path / "extracted"
     assert run("dpkg-deb", "-R", str(package), str(root)).returncode == 0
     assert (root / "DEBIAN/conffiles").read_text() == "/etc/platmon/platmon.ini\n"
     unit = (root / "usr/lib/systemd/system/platmon.service").read_text()
-    assert "/usr/share/platmon/platmon.py" in unit and "DynamicUser=yes" in unit
+    assert (f"ExecStart=/usr/lib/platmon/platmon-native serve /etc/platmon/platmon.ini "
+            f"--web /usr/share/platmon/frontends/web --app-version {version()}\n") in unit
+    assert "DynamicUser=yes" in unit and "@VERSION@" not in unit
+    server = root / "usr/lib/platmon/platmon-native"
+    assert server.read_bytes() == binaries[arch].read_bytes() and os.access(server, os.X_OK)
+    # The Python server stays in the source tree (source install, container), not in the package.
+    assert not (root / "usr/share/platmon/platmon.py").exists() and not list(root.rglob("*.py"))
     assert (root / "usr/share/platmon/frontends/web/assets/brand/favicon.svg").is_file()
+    assert (root / "usr/share/platmon/frontends/web/index.html").is_file()
     assert not (root / "usr/local").exists()
     assert not list(root.rglob("*.pyc"))
     assert os.access(root / "usr/bin/platmon", os.X_OK)
@@ -153,32 +185,42 @@ def test_package_contents_and_config_ownership(package, tmp_path):
     assert set(checksums) == expected
 
 
-def test_package_smoke_outside_checkout(package, tmp_path):
+def test_package_smoke_outside_checkout(package, binaries, tmp_path):
+    host = run("dpkg", "--print-architecture").stdout.strip()
+    if runnable(binaries) is None:
+        pytest.skip(f"needs the {host} server from native/build.sh")
+    package = package[sorted(binaries).index(host)]
     result = run(sys.executable, str(ROOT / "scripts/packaging/check_package.py"), str(package), cwd=tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "package smoke passed" in result.stdout
 
 
-def test_checksums_and_repeated_builds_match(package, tmp_path):
-    output = package.parent
+def test_checksums_and_repeated_builds_match(package, binaries, tmp_path):
+    output = package[0].parent
+    assert [p.name for p in package] == [f"platmon_{version()}-1_{arch}.deb" for arch in sorted(ARCHES)]
     manifest = json.loads((output / "BUILD.json").read_text())
     assert manifest["version"] == version() and manifest["package_version"] == f"{version()}-1"
     assert manifest["source_date_epoch"] == packaging_epoch() > 0
+    assert manifest["server_sha256"] == {arch: hashlib.sha256(binaries[arch].read_bytes()).hexdigest()
+                                         for arch in ARCHES}
     for line in (output / "SHA256SUMS").read_text().splitlines():
         digest, name = line.split("  ")
         assert hashlib.sha256((output / name).read_bytes()).hexdigest() == digest
-    second = build(tmp_path / "repeat")
-    for name in (package.name, f"platmon-{version()}.tar.gz", "BUILD.json", "SHA256SUMS"):
-        assert (output / name).read_bytes() == (second.parent / name).read_bytes(), name
+    second = build(tmp_path / "repeat", binaries=binaries)
+    for name in (*(p.name for p in package), f"platmon-{version()}.tar.gz", "BUILD.json", "SHA256SUMS"):
+        assert (output / name).read_bytes() == (second[0].parent / name).read_bytes(), name
     with pytest.raises(ValueError, match="already exist"):
-        build(output)
+        build(output, binaries=binaries)
 
 
-def test_source_archive_rebuilds_without_git(package, tmp_path):
-    source = package.parent / f"platmon-{version()}.tar.gz"
+def test_source_archive_rebuilds_without_git(package, binaries, tmp_path):
+    source = package[0].parent / f"platmon-{version()}.tar.gz"
     with tarfile.open(source) as archive:
         assert all(m.isfile() and ".." not in Path(m.name).parts for m in archive.getmembers())
         assert not any(".validation" in m.name or "__pycache__" in m.name for m in archive.getmembers())
+        names = {m.name.split("/", 1)[1] for m in archive.getmembers()}
+        assert {"native/Cargo.toml", "native/Cargo.lock", "native/build.sh", "native/src/main.rs"} <= names
+        assert not any(name.startswith("native/target/") for name in names)
         # Extract only these verified regular files; works on every supported Python.
         for member in archive.getmembers():
             assert not Path(member.name).is_absolute()
@@ -188,9 +230,11 @@ def test_source_archive_rebuilds_without_git(package, tmp_path):
             target.chmod(member.mode)
     root = tmp_path / "source" / f"platmon-{version()}"
     assert not (root / ".git").exists()
-    result = run(sys.executable, str(root / "scripts/packaging/package.py"), "--output", str(tmp_path / "rebuilt"))
+    result = run(sys.executable, str(root / "scripts/packaging/package.py"), "--output", str(tmp_path / "rebuilt"),
+                 *(f"--binary={arch}={path}" for arch, path in binaries.items()))
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "rebuilt" / package.name).read_bytes() == package.read_bytes()
+    for deb in package:
+        assert (tmp_path / "rebuilt" / deb.name).read_bytes() == deb.read_bytes()
     # The archive carries benchmark tests, so their implementations must also be available
     # without accidentally importing them from this checkout.
     env = dict(os.environ)
@@ -203,10 +247,12 @@ def test_source_archive_rebuilds_without_git(package, tmp_path):
 def test_revision_and_epoch_override_reach_package_metadata(tmp_path):
     epoch = 1780000000
     env = dict(os.environ, SOURCE_DATE_EPOCH=str(epoch))
+    server = fake_server(tmp_path / "bin/arm64", "arm64")
     result = run(sys.executable, str(ROOT / "scripts/packaging/package.py"),
-                 "--revision", "2", "--output", str(tmp_path / "dist"), env=env)
+                 "--revision", "2", "--output", str(tmp_path / "dist"), "--binary", f"arm64={server}", env=env)
     assert result.returncode == 0, result.stderr
-    package = tmp_path / "dist" / f"platmon_{version()}-2_all.deb"
+    assert sorted(p.name for p in (tmp_path / "dist").glob("*.deb")) == [f"platmon_{version()}-2_arm64.deb"]
+    package = tmp_path / "dist" / f"platmon_{version()}-2_arm64.deb"
     root = tmp_path / "extracted"
     assert run("dpkg-deb", "-R", str(package), str(root)).returncode == 0
     manifest = json.loads((package.parent / "BUILD.json").read_text())
@@ -222,9 +268,45 @@ def test_invalid_packaging_revision_refused(tmp_path, revision):
         build(tmp_path / "dist", revision)
 
 
-def test_lifecycle_inside_mode_refuses_host():
-    result = run(sys.executable, str(ROOT / "scripts/packaging/check_package_install.py"),
-                 "missing.deb", "missing-upgrade.deb", "--inside",
+@pytest.mark.parametrize("case, message", [
+    ("missing", "server binary not found"),
+    ("other arch", "not a 64-bit little-endian ELF for amd64"),
+    ("script", "not a 64-bit little-endian ELF for amd64"),
+    ("cut short", "not a 64-bit little-endian ELF for amd64"),
+    ("mimalloc", "system allocator's mark"),
+])
+def test_server_binary_checked(tmp_path, case, message):
+    path = tmp_path / "server"
+    if case == "other arch":
+        fake_server(path, "arm64")
+    elif case == "script":
+        path.write_text("#!/bin/sh\n" + ALLOCATOR_MARK.decode())
+    elif case == "cut short":
+        path.write_bytes(b"\x7fELF")
+    elif case == "mimalloc":
+        fake_server(path, "amd64", mark=b"platmon-native-allocator=mimalloc;")
+    with pytest.raises(ValueError, match=message):
+        check_binary("amd64", path)
+    with pytest.raises(ValueError, match=message):
+        build(tmp_path / "dist", binaries={"amd64": path})
+    assert not (tmp_path / "dist").exists() or not list((tmp_path / "dist").iterdir())
+
+
+@pytest.mark.parametrize("args, message", [
+    (["--binary", "amd64"], "ARCH=PATH"),
+    (["--binary", "amd64=a", "--binary", "amd64=b"], "once per architecture"),
+    (["--binary", "i386=a"], "among: amd64, arm64"),
+])
+def test_binary_option_refused(tmp_path, args, message):
+    result = run(sys.executable, str(ROOT / "scripts/packaging/package.py"), "--output", str(tmp_path / "dist"), *args)
+    assert result.returncode != 0 and message in result.stderr
+
+
+@pytest.mark.parametrize("script, inside", [("check_package_install.py", ["--inside"]),
+                                            ("check_package_service.py", ["--inside", "upgrade"])])
+def test_lifecycle_inside_mode_refuses_host(script, inside):
+    result = run(sys.executable, str(ROOT / "scripts/packaging" / script),
+                 "missing.deb", "missing-upgrade.deb", *inside,
                  env=dict(PATH=os.environ["PATH"], PYTHONDONTWRITEBYTECODE="1"))
     assert result.returncode != 0
     assert "requires the disposable package test container" in result.stderr
