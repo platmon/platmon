@@ -27,9 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The Python the server was verified against (native/CANDIDATE.md, the Raspberry Pi's): later
+      # patch releases answer a malformed request version with a status line (a known difference).
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.13.5"
       - name: Build the server (Rust tests, amd64 and arm64, the system allocator)
         run: native/build.sh
       - name: Compare with the Python service
