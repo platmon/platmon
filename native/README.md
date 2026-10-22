@@ -327,6 +327,7 @@ PYTHONPATH=. python3 native/tools/live_http.py native/target/x86_64-unknown-linu
 python3 native/tools/service_ab.py --tree PYTHON_TREE --binary BINARY --out ab.jsonl   # about 2.5 h; --quick to try it
 python3 native/tools/ab_report.py ab.jsonl
 BINARY replay-cost core.jsonl 20; python3 native/tools/replay_cost_py.py core.jsonl PYTHON_TREE 20
+python3 native/tools/hub_check.py native|python --hub HUB_EXECUTABLE --hosts pc,orin=USER@HOST --out DIR   # 13 min
 ```
 
 On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share/platmon`.
@@ -968,6 +969,40 @@ Raw: `~/.local/state/platmon-measure/native-20261021-deploy/` (SHA-256, first 16
 `soak-orin.jsonl` `c6a182c0cf493c18`, `soak-pi.jsonl` `598339ce2e0116f4`, the `.log` files beside them;
 the `--quick` try `quick-pi.jsonl` `eda2b1b1567d7fc4`). The board copies were removed; the installed
 candidate units stay until the owner runs `uninstall.sh`.
+
+### The released Hub (P1-1)
+
+2026-10-22, `native/tools/hub_check.py`, one run per server on the same events: platmon-hub 1.1.1 (the
+PyPI release, from the PC's Hub venv) as a temporary Hub with raw capture on and a new database, against
+the installed candidate units (127.0.0.1:19797) on the PC, the Orin and the Pi (boards through SSH
+tunnels); candidate 1 (`platmon-native-candidate`) and, as the reference, v1.3.0
+(`platmon-python-candidate`). Events: every agent restarted (180 s), killed with SIGKILL and restarted by
+systemd (300 s), the Hub stopped for 60 s and started on the same database (420 to 480 s), every agent
+stopped for 30 s (600 s), the end (780 s). Rules set before the runs, from the Hub's database and APIs (the
+tool's docstring has them in full): the stored instances are the agents' 4; no replay id missing without a
+loss; new instances stored from id 1; no `buffer_unavailable`; one `agent_restart_unknown_extent` per
+captured stream per instance change; the Hub's down time back-filled; the active core cursor on the
+agent's instance within 10 ids of its latest; the node current; no writer drop; `integrity_check` ok; no
+traceback.
+
+| per host (PC / Orin / Pi) | Python v1.3.0 | candidate 1 |
+| --- | --- | --- |
+| result | PASS on all 3 | PASS on all 3 |
+| instances stored / the agents had | 4 / 4 | 4 / 4 |
+| restart losses (core, storage, wifi, battery) | 3 each | 3 each |
+| other losses | none | none |
+| core publications stored | 741 / 738 / 741 | 744 / 738 / 746 |
+| core back-filled from the Hub's 60 s down | 56 / 56 / 56 | 57 / 57 / 57 |
+| end: core cursor behind the agent's latest | 4 / 2 / 2 ids | 2 / 5 / 0 ids |
+
+The `probe` stream is not configured on these hosts, so it has no cursor. What this shows: the released
+Hub follows the candidate the way it follows v1.3.0 through restarts, a crash, its own restart and an agent
+outage, with the same cursor and loss records. What it does not: the production port and the PC's own Hub
+(the agents were the candidate units, the Hub a temporary one), a reboot, more than 13 minutes, Hub
+versions other than 1.1.1.
+
+Raw: `~/.local/state/platmon-measure/native-20261022-hub/` (`python/report.json` `df3290b1e3297f60`,
+`native/report.json` `00322928f89de3fa`, each run's `history.db` and Hub log beside it).
 
 ### nvidia-smi on an NVIDIA GPU (WSL2)
 
