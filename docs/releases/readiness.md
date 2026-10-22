@@ -1,5 +1,40 @@
 # Release readiness
 
+## 1.4.0 release gate (2026-10-22)
+
+Changes since 1.3.0: the Debian package runs the static native server (Rust, `native/`) instead of the
+Python server, one package per architecture (`_amd64.deb`, `_arm64.deb` in place of `_all.deb`), with a
+health check after install and upgrade (#94; the experiments behind it are #92 and #93). A minor
+release by the repository's rule: the HTTP API, `platmon.ini` keys and defaults, command options,
+status codes and schema versions are unchanged (compared byte for byte or by shape against the Python
+service, native/README.md). The package's architecture and server change; armhf hosts get no 1.4.0 and
+stay on 1.3.0, and the source installation and the container keep the Python server.
+
+Verified for this release (candidate 1, binaries `027e35b1c9251b9d` x86_64 and `ff97aa9ad4e9dd28`
+aarch64, rebuilt byte for byte in CI):
+
+| check | result |
+| --- | --- |
+| whole-service A/B with 1.3.0 (step 3C, PC, Orin Nano, Raspberry Pi 4) | CPU −27..−38 % (PC), −60..−64 % (Orin), −59..−65 % (Pi); PSS with full buffers −47 % (PC), −61 % (Orin), −75 % (Pi) |
+| final comparison of candidate 1 (A B B A, the same hosts) | every candidate run within the absolute PSS budget; serving one backlog to 4 clients at once costs more CPU than 1.3.0 (+33 to +240 % a round) |
+| deployed form: hardened unit beside the production one, swap, restart, kill, stop (PC, Orin, Pi) | 11/11 checks on each |
+| 24 h under a Hub-like load with a restart (Orin, Pi) | PASS: no error or loss, no automatic restart; Orin settled PSS 10.5 → 11.3 MiB (under its +10 % limit), Pi flat |
+| the released Hub 1.1.1 through agent restart, SIGKILL, Hub down 60 s, agents down 30 s (PC, Orin, Pi) | PASS, the same records as with 1.3.0 |
+| package: Lintian, reproducible builds, dpkg lifecycle, upgrade from the released `1.3.0-1_all.deb` under a booted systemd (failed start, downgrade recovery, disabled service, refused INI, restart) | CI on amd64 and arm64 runners, Ubuntu 20.04–26.04 |
+
+Not verified, and therefore the gates still open before this draft is published:
+
+- **APT repository:** `apt/tools/update.sh` accepts per-architecture releases only with
+  platmon/platmon.github.io#4, which must be merged before the `apt` workflow adds 1.4.0.
+- **No real device upgrade or reboot:** the upgrade and boot ran in containers; the plan is one Orin Nano
+  first (apt upgrade, reboot, `/api/status`, the Hub reconnecting), the others after.
+- **Long memory trend:** the Orin's settled PSS rose about 0.7 MiB in 24 h; whether it levels off is
+  unknown. An accelerated soak (2.5 times the reconnect work in 6 h) and the canary's PSS over its first
+  days are the evidence; going back is `apt install --allow-downgrades platmon=1.3.0-1`.
+- **Known difference:** a request line with `HTTP/2.0` or an invalid version gets the body without a
+  status line, as from CPython 3.13.5 and 3.14.4 (newer 3.13 releases answer with a status line).
+- **Not covered:** nvidia-smi under a native Linux NVIDIA driver (verified under WSL2 and fake trees).
+
 ## 1.3.0 release gate (2026-10-17)
 
 Changes since 1.2.1: full-publication replay (#77), bounded HTTP connections and stalled writers
