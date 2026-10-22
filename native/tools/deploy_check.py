@@ -67,6 +67,10 @@ SYSTEMCTL = "/usr/bin/systemctl"
 MOMENT = ("instance_id", "state", "ready", "sample", "last_attempt", "collecting_for_ms")  # /api/status, per answer
 SOAK = {"hour": 3600, "poll": 2400, "disconnect": 480, "expire": 720, "settle": 120, "restart_at": 12,
         "concurrent_rounds": 1, "concurrent_pollers": 4, "reconnect_limit": 300}
+# Accelerated: the same reconnects and expiries with almost no polling between them, and 3 concurrent rounds
+# a cycle; 20 cycles (6 h) hold about 60 rounds of 4 pollers, 2.5 times the 24 h soak's 24.
+ACCEL = {"hour": 1080, "poll": 60, "disconnect": 480, "expire": 720, "settle": 120, "restart_at": 10,
+         "concurrent_rounds": 3, "concurrent_pollers": 4, "reconnect_limit": 300}
 QUICK = {"hour": 420, "poll": 120, "disconnect": 60, "expire": 60, "settle": 30, "restart_at": 1,
          "concurrent_rounds": 1, "concurrent_pollers": 4, "reconnect_limit": 60}
 
@@ -488,7 +492,7 @@ def own():
 
 
 def soak(args):
-    ph = dict(QUICK if args.quick else SOAK)
+    ph = dict(QUICK if args.quick else ACCEL if args.accel else SOAK)
     out = args.out
 
     def write(rec):
@@ -708,6 +712,8 @@ def main():
     s = sub.add_parser("soak")
     s.add_argument("--out", required=True)
     s.add_argument("--hours", type=int, default=24)
+    s.add_argument("--accel", action="store_true",
+                   help="18 min cycles in place of hours (use --hours 20): reconnects and rounds 2.5x as often")
     s.add_argument("--quick", action="store_true",
                    help="short hours, to try the tool: no expiry (60 s away), readings before the buffers are full")
     r = sub.add_parser("report")
