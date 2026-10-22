@@ -42,9 +42,16 @@ Not verified, and therefore the gates still open before this draft is published:
   - Pi: 6.16 → 6.61 and 6.30 → 6.51 MiB; PASS.
   - Meaning for a release: a Hub that stays connected polls small pages and rarely makes a backlog round,
     so the growth there should be small; it shows when Hubs reconnect after downtime, at about 1 MiB per
-    35 to 40 rounds on the Orin. Its cause (allocator fragmentation or a leak in serving replay pages) is
-    not found. The canary's PSS over its first days is the next evidence; going back is
-    `apt install --allow-downgrades platmon=1.3.0-1`.
+    35 to 40 rounds on the Orin. The canary's PSS over its first days is the next evidence; going back
+    is `apt install --allow-downgrades platmon=1.3.0-1`.
+  - Cause (2026-10-23, branch `diag/alloc-growth`: a build counting the bytes the program holds, and
+    `growth_probe.py`, 60 backlog rounds of 4 clients against a local server): on the PC and the Orin,
+    Anonymous grew about 2.2 MiB while the live bytes stayed within 10 KiB (PC 14.83 MB, Orin 8.37 MB).
+    It is musl's allocator keeping freed pages, not data the server keeps: no leak. The settled reading
+    cannot pass the process's high-water mark, which is the concurrent rounds' peak (VmHWM in the
+    accelerated soak: Orin 40.6 to 40.9 MiB, Pi 22.0 to 22.2 MiB, within the 46 and 27 MiB peak
+    budgets), though that peak also crept about 0.3 MiB over 27 rounds. Raw:
+    `~/.local/state/platmon-measure/native-20261023-growth/`.
 - **Known difference:** a request line with `HTTP/2.0` or an invalid version gets the body without a
   status line, as from CPython 3.13.5 and 3.14.4 (newer 3.13 releases answer with a status line).
 - **Not covered:** nvidia-smi under a native Linux NVIDIA driver (verified under WSL2 and fake trees).
