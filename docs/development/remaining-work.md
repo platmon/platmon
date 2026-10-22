@@ -199,6 +199,29 @@ Deferred until a second real source exists, so that the format is settled by the
 by one device's payload. The external device keeps whatever else it reports — motion, actuators, anything
 else on its bus — out of platmon: only the fields this group defines would be read.
 
+## Planned: desktop tray (2026-10-18)
+
+Not started. Recorded so the shape agreed with the owner does not have to be rediscovered; starting it is
+the owner's decision.
+
+A tray icon on a Linux desktop showing the state of this host's platmon service. It is one more frontend,
+like `frontends/cli.py`: a separate process that reads the local service's HTTP API, never part of the
+service itself.
+
+| Decision | Choice | Why |
+| --- | --- | --- |
+| Process | Separate, started in the user's desktop session (`/etc/xdg/autostart/`) | The service runs with `DynamicUser=yes` and has no access to the session bus a tray registers on |
+| Source | This repository, `frontends/tray` | It reads the same `/api/status` and `/api/observations` the CLI reads and changes with them |
+| Package | A second binary package `platmon-tray` (`Depends: platmon`) built from the same source | Headless boards keep installing `platmon` alone: no desktop files, no extra dependencies, no change to the measured budget |
+| Protocol | StatusNotifierItem plus `com.canonical.dbusmenu` over D-Bus; no XEmbed | XEmbed trays do not work on Wayland |
+| D-Bus library | jeepney (MIT, pure Python) or a standard-library implementation | GTK, libappindicator / Ayatana, pystray and Qt are LGPL or GPL |
+| Scope | Read-only: a state icon, a few key readings, "open the web view" | The HTTP frontend is read-only GET; the tray does not control the service |
+| Poll rate | Low (5–10 s), measured against [budget.md](../performance/budget.md) before release | Every client request is CPU on the host being monitored |
+
+Desktop support: KDE, XFCE and Cinnamon show StatusNotifierItem icons as installed; Ubuntu's GNOME ships the
+AppIndicator extension; plain GNOME (Debian) needs the user to install that extension. A tray showing several
+hosts would read `platmon-hub` instead and belongs with Hub or in its own repository, not here.
+
 ## Rollouts
 
 - Orin: switched to `8525942` (#31) on 2026-10-09 14:09 KST at the owner's request. Healthy, `/api/status`

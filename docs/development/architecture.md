@@ -21,7 +21,7 @@ flowchart TB
     Observations --> History
     Snapshot --> Replay["runtime/replay.py: Replay<br/>bounded full publications in memory"]
     Observations --> Replay
-    Snapshot --> HTTP["frontends/server.py<br/>read published state"]
+    Snapshot --> HTTP["runtime/server.py<br/>read published state"]
     Observations --> HTTP
     History --> HTTP
     Replay --> HTTP
@@ -49,21 +49,30 @@ See the [live API](../reference/api.md), [observations](../reference/observation
 | `runtime/slow.py` | Independent workers and published low-frequency observations |
 | `runtime/replay.py` | Bounded full-publication buffer for cursor-based Hub catch-up |
 | `runtime/history.py` | Bounded, in-memory history of published snapshots and observations |
+| `runtime/server.py` | HTTP API, `/text` and the web page's files; reads published state only |
+| `runtime/__init__.py` | `VERSION`, the application version |
 
-Readers do not import the runtime or frontends. Runtime modules consume collection records and
-metadata; the HTTP server consumes published snapshots, observations and history. Filesystem helpers
+## Layers
+
+Imports point one way: `collector/` (reading) ← `runtime/` (scheduling, publication and the HTTP API) ←
+`frontends/` (clients of that API). `tests/test_layers.py` checks it on the source. Readers do not import the
+runtime or frontends. Runtime modules consume collection records and metadata; the HTTP server consumes
+published snapshots, observations and history. The one import back is `/text`: `runtime/server.py` uses
+`frontends.cli.render`, the terminal client's plain screen, so the two stay identical. The web page is a
+client too, although the service serves its files. Filesystem helpers
 attach discovery diagnostics through metadata groups; `hwmon_chips()` imports `Group` locally to keep
 module initialization acyclic.
 
 ## Frontends
 
-`frontends/server.py` serves the API, `/text`, the HTML page and an explicit allowlist of web assets.
+`runtime/server.py` serves the API, `/text`, the HTML page and an explicit allowlist of web assets.
 `frontends/web/index.html` owns markup and server-injected version/threshold values; `styles.css` owns
 styling and `app.js` owns polling, navigation and rendering. No JavaScript build step is required.
 
 `frontends/cli.py` remains one standard-library Python file so `scripts/install-cli.sh` can install it
-on a client machine without the collector or runtime. The HTTP server also uses its plain renderer for
-`/text`, and the package builder reads its version constant without importing device readers.
+on a client machine without the collector or runtime; it imports nothing from the project. The HTTP
+server also uses its plain renderer for `/text`. The CLI keeps a copy of `runtime.VERSION`, checked by
+`tests/test_layers.py`.
 
 Clients request these routes from the same HTTP server. The requests below illustrate each client's
 role; clients poll independently, and the displayed order is not a shared schedule.
@@ -110,7 +119,7 @@ web files, `/opt/platmon` for source/container code, `/etc/platmon/platmon.ini` 
 
 ## Tests and documentation
 
-Tests mirror the responsible source areas in `tests/collector/`, `tests/runtime/`, `tests/frontends/`,
+`tests/test_layers.py` checks the import direction. Other tests mirror the responsible source areas in `tests/collector/`, `tests/runtime/`, `tests/frontends/`,
 `tests/packaging/` and `tests/benchmarks/`. Shared test helpers use explicit package imports. Web harness
 and browser scripts live with frontend tests. `pytest` still runs the entire suite from the root.
 

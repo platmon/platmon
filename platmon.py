@@ -18,6 +18,7 @@ from collector.common import CpuCounters
 from collector.disk_io import DiskCounters
 from collector.gpu import Gpu
 from collector.npu import Npu
+from runtime import VERSION, server
 from runtime.history import History
 from runtime.replay import Replay
 from collector.network import NetworkCounters
@@ -27,8 +28,6 @@ from runtime.sampler import Sampler, pick_clock
 from runtime.slow import Observations, Slow
 from collector.storage import Storage
 from collector.wifi import Wifi
-from frontends import server
-from frontends.cli import VERSION
 
 FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section, ...); outputs that run inside the core
 

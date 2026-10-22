@@ -223,7 +223,7 @@ class Sampler:
         return (None if view is None else copy.deepcopy(view)), status
 
     def _stats_json(self, timeout=0.0):
-        """For frontends/server.py: (the /api/stats body as JSON bytes, or None where read() gives no stats;
+        """For runtime/server.py: (the /api/stats body as JSON bytes, or None where read() gives no stats;
         status). The same JSON as json.dumps(read()[0]), without copying the snapshot first: only bytes and
         the new status dict leave the Sampler."""
         view, status = self._view(timeout)

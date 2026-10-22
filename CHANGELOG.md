@@ -1,7 +1,7 @@
 # Changelog
 
 Versions use MAJOR.MINOR.PATCH. The application version is defined once in
-`frontends/cli.py`; Debian packaging revisions use a separate `-N` suffix.
+`runtime/__init__.py` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
 ## Unreleased
@@ -28,6 +28,10 @@ API schema versions are independent of release versions.
   archive get a GitHub build provenance attestation (`gh attestation verify`), and the release
   notes contain only the version's changelog section (docs/reference/packaging.md).
 - The package homepage and copyright source point to github.com/platmon/platmon.
+- Internal: the HTTP server moved from `frontends/server.py` to `runtime/server.py` and the application
+  version to `runtime/__init__.py`, so the service no longer depends on its clients; `tests/test_layers.py`
+  checks the import direction. No change to the API, configuration, command or package contents a user
+  sees.
 
 ## 1.3.0 — 2026-10-17
 

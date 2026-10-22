@@ -18,10 +18,11 @@ and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
 
 ## Versioning
 
-`VERSION` in `frontends/cli.py` is the single source of the application version. The
-Python server imports it; the builder reads that assignment without importing the collector
-and writes it into the package's unit (`--app-version`), which the native server shows on its
-web page and logs at start. The copied CLI stays one independent file. Check versions with:
+`VERSION` in `runtime/__init__.py` is the single source of the application version. The
+service imports it; the builder reads that assignment without importing the collector and writes it
+into the package's unit (`--app-version`), which the native server shows on its web page and logs at
+start. `frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/test_layers.py`
+fails until both say the same, so a release changes both. Check versions with:
 
 ```sh
 platmon --version
@@ -251,7 +252,7 @@ directories are never automatically deleted by subsequent updates or uninstall.
 
 ## Release procedure
 
-1. Update the single VERSION and changelog. Review the scoped change and run
+1. Update VERSION in `runtime/__init__.py` (and its copy in `frontends/cli.py`) and the changelog. Review the scoped change and run
    `git diff --check`, `pytest -v`, `native/build.sh`, the build, package checker and Lintian.
 2. Test fresh install, upgrade with an edited INI, downgrade, remove/purge and existing
    installation migration. CI uses isolated containers for the dpkg lifecycle and, with systemd

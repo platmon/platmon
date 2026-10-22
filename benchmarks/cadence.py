@@ -258,7 +258,7 @@ def serve(a):
     from collector.disk_io import DiskCounters
     from collector.network import NetworkCounters
     from runtime.sampler import Sampler, pick_clock
-    from frontends import server
+    from runtime import server
 
     cap = int((a.warmup + a.measure) / a.interval) + 64
     t_collect = Table(["t", "prod_ns", "prod_cpu_ns", "passive_ns", "passive_cpu_ns"], cap)

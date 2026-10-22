@@ -7,10 +7,12 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .cli import VERSION, render
+# /text is the terminal client's plain screen; the one import from frontends (tests/test_layers.py)
+from frontends.cli import render
+from runtime import VERSION
 from runtime.replay import CursorError, MAX_LIMIT
 
-WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontends", "web")
 WEB_ASSETS = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),

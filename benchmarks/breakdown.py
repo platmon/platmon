@@ -124,7 +124,7 @@ def targets():
     from collector import core as collector
     from collector import common, jetson, metadata, sysfs
     from runtime import sampler
-    from frontends import server
+    from runtime import server
     return [
         # collection, by part
         (collector, "_collect", "collect._collect"),

@@ -402,7 +402,7 @@ def stop(p):
 
 
 def version():
-    with open(f"{REPO}/frontends/cli.py") as f:
+    with open(f"{REPO}/runtime/__init__.py") as f:
         return next(line.split('"')[1] for line in f if line.startswith("VERSION ="))
 
 
