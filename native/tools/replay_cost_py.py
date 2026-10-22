@@ -1,5 +1,5 @@
 """The Python side of `platmon-native replay-cost`: the same stages for the same core publications, with the
-Python service's runtime/replay.py and the server's encoding (frontends/server.py: json.dumps with
+Python service's runtime/replay.py and the server's encoding (runtime/server.py: json.dumps with
 separators=(",", ":")). Per record, in µs of elapsed time, the median of 7 rounds of PAGES pages: decoding a
 page of records (kept, then freed together), writing records decoded beforehand (the texts kept, then
 freed together), a whole page.

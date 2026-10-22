@@ -13,7 +13,7 @@ import sys
 import threading
 
 from collector.record import Collected
-from frontends.server import BoundedHTTPServer, make_handler
+from runtime.server import BoundedHTTPServer, make_handler
 from runtime.history import History
 from runtime.replay import Replay
 from runtime.sampler import Sampler
