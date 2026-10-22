@@ -10,7 +10,7 @@ TCP port 9797.
 flowchart TB
     subgraph Host["Monitored Linux host - choose one deployment"]
         Choice{"Installation method"}
-        Choice --> Deb["Debian package<br/>code: /usr/share/platmon"]
+        Choice --> Deb["Debian package<br/>server: /usr/lib/platmon/platmon-native"]
         Choice --> Source["Source installation<br/>code: /opt/platmon"]
         Deb --> Unit["systemd: platmon.service<br/>config: /etc/platmon/platmon.ini"]
         Source --> Unit
@@ -32,8 +32,9 @@ alone does not expose every host filesystem. See [Docker observation scope](../r
 For Ubuntu/Debian-derived Linux, the `.deb` is the primary distribution.
 Install it from the signed APT repository, or a checksum-verified package
 file with APT, then use `systemctl` and `platmon` to operate it. The package installs the service as
-`platmon.service`, code under `/usr/share/platmon` and
-configuration at `/etc/platmon/platmon.ini`.
+`platmon.service` (the static native server, `/usr/lib/platmon/platmon-native`), web files under
+`/usr/share/platmon` and configuration at `/etc/platmon/platmon.ini`. The source installation and
+the container run the Python server below.
 
 APT preserves edited configuration across updates. Existing source or
 Docker installs require an explicit migration, not an in-place switch.

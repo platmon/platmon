@@ -6,6 +6,23 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- The Debian package runs a static native server (Rust, built from `native/` by `native/build.sh`)
+  instead of the Python server, as one package per architecture: `platmon_<version>-<revision>_amd64.deb`
+  and `_arm64.deb` replace `_all.deb`. It reads the same `platmon.ini` (same keys, defaults and refusal
+  messages) and answers the same HTTP API, web page and replay; the `platmon` command stays Python and
+  still needs the host's Python 3.9+. Upgrading from 1.3.0 keeps the INI and swaps the server in the same
+  `platmon.service` (one restart: a new `instance_id`, 409 for a previous replay cursor, history starts
+  again); `apt install --allow-downgrades platmon=1.3.0-1` goes back. Measured against the Python service
+  (native/README.md, CANDIDATE.md): about 30 % less CPU on a PC and 60–70 % less on Jetson Orin Nano and
+  Raspberry Pi 4, and 47–77 % less memory (PSS) with full buffers. Serving one large replay backlog to
+  several clients at once costs more CPU than before. The source installation and the container keep
+  the Python server.
+- After installing or upgrading, the package waits for the started service to answer `/api/status` ready
+  (or, with HTTP off, to stay running) and fails configuration when it does not; a disabled or masked
+  service is left stopped and not checked (docs/reference/packaging.md).
+- CI builds and tests the server, compares it with the Python service (fake trees, configurations,
+  the runtime, a live HTTP check), and checks each architecture's package on a runner of that
+  architecture in Ubuntu 20.04–26.04 userspaces, including the upgrade from 1.3.0 under a booted systemd.
 - Releases build their files once and run the package checker, Lintian, the dpkg lifecycle check
   and checksums on those same files before attaching them to the draft. The `.deb` and source
   archive get a GitHub build provenance attestation (`gh attestation verify`), and the release

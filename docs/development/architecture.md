@@ -96,13 +96,17 @@ and durable storage outside this service.
 directory; direct Compose commands in the README run from the checkout root. Compose resolves its
 build context and default INI file back to that root.
 
-`packaging/debian/` contains package metadata and lifecycle hooks. `scripts/packaging/` contains the
-builder, extracted-package smoke check and disposable-container lifecycle check. The Debian runtime
-contains `platmon.py`, `collector/`, `runtime/` and `frontends/`. The source archive additionally
-includes deployment files, build tools, benchmarks, tests and documentation.
+`packaging/debian/` contains package metadata, the package's unit and lifecycle hooks. `scripts/packaging/`
+contains the builder, extracted-package smoke check and disposable-container lifecycle and systemd service
+checks. The Debian package contains the static server built from `native/` (`native/build.sh`, one package
+per architecture), the web files of `frontends/web/` and the `platmon` command (`frontends/cli.py`). The
+Python server (`platmon.py`, `collector/`, `runtime/`, `frontends/`) runs the source installation and the
+container; `native/tools/` compares the two. The source archive additionally includes `native/`, deployment
+files, build tools, benchmarks, tests and documentation.
 
-Installed paths remain `/usr/share/platmon` for Debian code, `/opt/platmon` for source/container code,
-`/etc/platmon/platmon.ini` for service configuration and `platmon.service` for the systemd unit.
+Installed paths are `/usr/lib/platmon/platmon-native` for the Debian server and `/usr/share/platmon` for its
+web files, `/opt/platmon` for source/container code, `/etc/platmon/platmon.ini` for service configuration and
+`platmon.service` for the systemd unit.
 
 ## Tests and documentation
 
