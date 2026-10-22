@@ -948,6 +948,11 @@ The 24 h run (2026-10-21 07:39 to 2026-10-22 07:40 KST, the Orin and the Pi at o
   after the restart (10.8 MiB at hour 12); it stayed under hour 0 + 10 % (11.6 MiB) every hour, and
   hour 23 was lower than hour 22. A slow rise within the limit; 24 h does not show whether it levels off.
   The Pi's stayed within 5.8 to 6.2 MiB and fell back after the restart.
+- The round-end PSS is read once after the round, not sampled during it: it is not the concurrent peak.
+  The backlog per round was the same as in the final comparison (core about 480 to 496 records, 4 pollers),
+  but one round an hour instead of 3 in a row and no 50 ms sampling; the comparable reading there is the
+  one after each round (Orin 10.9 to 13.4 MiB). The concurrent peak stays the final comparison's (40.0 to
+  41.5 MiB on the Orin): this run does not replace that memory check.
 - The test tool's own VmRSS (not the candidate's) grew from 46 to 55 MiB (Orin) and 36 to 44 MiB (Pi), the
   Hub-like client's bookkeeping; it ended without error.
 
