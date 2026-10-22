@@ -8,7 +8,9 @@ Per server:
 - every path: status code, Content-Type, Cache-Control; the web page and its files: the same bytes; the
   /text screen: the same sections
 - raw requests at the protocol's edges (HEAD, HTTP/0.9, versions, header and line limits): the same answer
-  shape from its bytes (status line and headers or none, header names, a body or none)
+  shape from its bytes (status line and headers or none, header names, a body or none); for HTTP/2.0 and
+  an invalid version (a known difference from some CPython releases) the server's answer alone: the body,
+  no status line
 - /api/stats, /api/status, /api/observations: the same keys, order and JSON types; values exact except
   those that move (compare.py's plausibility rules, sample identity and ages, read offsets, the slow
   groups' times and readings)
@@ -270,8 +272,6 @@ RAW = {  # request -> what is compared of the answer: bare (no status line), sta
     "HTTP/0.9 said": b"GET /api/status HTTP/0.9\r\n\r\n",
     "HTTP/0.9 two words": b"GET /api/status\r\n\r\n",
     "HTTP/00.9": b"GET /api/status HTTP/00.9\r\n\r\n",
-    "HTTP/2.0": b"GET /api/status HTTP/2.0\r\n\r\n",
-    "bad version": b"GET /api/status HTTP/x\r\n\r\n",
     "99 headers": b"GET /api/status HTTP/1.0\r\n" + b"A: b\r\n" * 99 + b"\r\n",
     "100 headers": b"GET /api/status HTTP/1.0\r\n" + b"A: b\r\n" * 100 + b"\r\n",
     "long header": b"GET /api/status HTTP/1.0\r\nA: " + b"x" * 70000 + b"\r\n\r\n",
@@ -279,6 +279,16 @@ RAW = {  # request -> what is compared of the answer: bare (no status line), sta
     "empty line": b"\r\n",
     "//path": b"GET //api/status HTTP/1.0\r\n\r\n",
 }
+
+
+# A known difference, kept apart from the comparison: CPython 3.13.16 answers these with a status line and
+# headers; 3.10.12, 3.13.5 and 3.14.4, which the server was verified against, and the server answer with the
+# body alone. The server's answer is checked on its own; Python's is only reported.
+KNOWN = {
+    "HTTP/2.0": b"GET /api/status HTTP/2.0\r\n\r\n",
+    "bad version": b"GET /api/status HTTP/x\r\n\r\n",
+}
+KNOWN_RUST = {"bare": True, "body": True}
 
 
 def raw(port, request):
@@ -359,6 +369,7 @@ def check(port, interval, pid):
     bodies["/api/history"] = json.loads(fetch(port, "/api/history?points=5")[2])
     bodies["/api/samples"] = json.loads(fetch(port, "/api/samples?limit=2")[2])
     return {"endpoints": eps, "bodies": bodies, "raw": {k: raw(port, r) for k, r in RAW.items()},
+            "known": {k: raw(port, r) for k, r in KNOWN.items()},
             "replay": replay_walk(port), "concurrent": concurrent(port, interval),
             "connection_limit": connection_limit(port), "request_timeout": request_timeout(port), "burst": burst(port, pid)}
 
@@ -447,6 +458,9 @@ def main():
     for name in RAW:
         if py["raw"][name] != rs["raw"][name]:
             out.append(f"raw {name}: {py['raw'][name]} (python) != {rs['raw'][name]} (rust)")
+    for name in KNOWN:
+        if rs["known"][name] != KNOWN_RUST:
+            out.append(f"known difference {name}: rust {rs['known'][name]} != {KNOWN_RUST}")
     for path in ("/api/stats", "/api/status", "/api/observations"):
         diff(py["bodies"][path], rs["bodies"][path], "", (d := []))
         out += [f"{path}{x}" for x in d]
@@ -490,7 +504,7 @@ def main():
               "groups": {n: {g: o["state"] for g, o in r["bodies"]["/api/observations"]["groups"].items()} for n, r in res.items()},
               "history_series": {n: len(b["series"]) for n, b in h.items()},
               "codes": {p: [py["endpoints"][p]["code"], rs["endpoints"][p]["code"]] for p in PATHS},
-              "raw": py["raw"], "restart": {n: r["code"] for n, r in restarted.items()},
+              "raw": py["raw"], "known": {n: r["known"] for n, r in res.items()}, "restart": {n: r["code"] for n, r in restarted.items()},
               **{n: {k: r[k] for k in ("replay", "concurrent", "connection_limit", "request_timeout", "burst")} for n, r in res.items()},
               "differences": out}
     if "--json" in sys.argv:

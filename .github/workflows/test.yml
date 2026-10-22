@@ -27,8 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The Python the server was verified against (native/CANDIDATE.md, the Raspberry Pi's): later
-      # patch releases answer a malformed request version with a status line (a known difference).
+      # The Python the server was verified against (native/CANDIDATE.md, the Raspberry Pi's). Answers that
+      # differ between CPython releases (a malformed request version) are checked apart, on the server alone.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13.5"
