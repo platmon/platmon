@@ -29,6 +29,7 @@ mod metadata;
 mod nvidia;
 mod observe;
 mod passive;
+mod pystr;
 mod render;
 mod replay;
 mod runtime;

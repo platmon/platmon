@@ -62,7 +62,7 @@ pub fn py_repr(s: &str) -> String {
 /// Python's float(text) as a config value gives it: surrounding whitespace, a sign, digits with single
 /// underscores between them, inf and nan.
 pub fn py_float(text: &str) -> Option<f64> {
-    let t = text.trim_matches(crate::sysfs::py_space);
+    let t = text.trim_matches(crate::pystr::py_space);
     let b = t.as_bytes();
     let between_digits = |i: usize| i > 0 && b[i - 1].is_ascii_digit() && b.get(i + 1).is_some_and(u8::is_ascii_digit);
     if (0..b.len()).any(|i| b[i] == b'_' && !between_digits(i)) {
@@ -136,7 +136,7 @@ impl Ini {
         let mut lines = text.split_inclusive('\n').enumerate().peekable();
         while let Some((i, line)) = lines.next() {
             let lineno = i + 1;
-            let stripped = line.trim_matches(crate::sysfs::py_space);
+            let stripped = line.trim_matches(crate::pystr::py_space);
             let comment = stripped.starts_with('#') || stripped.starts_with(';');
             let clean = if comment { "" } else { stripped };
             if clean.is_empty() {
@@ -150,7 +150,7 @@ impl Ini {
                 }
                 continue;
             }
-            let cur_indent = line.char_indices().find(|(_, c)| !crate::sysfs::py_space(*c)).map_or(0, |(i, _)| line[..i].chars().count());
+            let cur_indent = line.char_indices().find(|(_, c)| !crate::pystr::py_space(*c)).map_or(0, |(i, _)| line[..i].chars().count());
             if cursect.is_some() && optname.is_some() && cur_indent > indent_level {
                 let o = optname.as_ref().unwrap();
                 if let Some(v) = values.iter_mut().rev().find(|(s, k, _)| Some(s) == cursect.as_ref() && k == o) {
@@ -184,7 +184,7 @@ impl Ini {
                 errors.push(format!("\n\t[line {:2}]: {}", lineno, py_repr(line)));
                 continue;
             };
-            let name_part = clean[..pos].trim_end_matches(crate::sysfs::py_space);
+            let name_part = clean[..pos].trim_end_matches(crate::pystr::py_space);
             if name_part.is_empty() {
                 errors.push(format!("\n\t[line {:2}]: {}", lineno, py_repr(line)));
             }
@@ -196,13 +196,13 @@ impl Ini {
                                    py_repr(name), lineno, py_repr(&key), py_repr(&shown)));
             }
             added_options.push((shown, key.clone()));
-            let value = clean[pos + 1..].trim_matches(crate::sysfs::py_space).to_string();
+            let value = clean[pos + 1..].trim_matches(crate::pystr::py_space).to_string();
             values.retain(|(s, k, _)| !(*s == sect && *k == key));
             values.push((sect, key.clone(), vec![value]));
             optname = Some(key);
         }
         for (sect, key, lines) in values {
-            let value = lines.join("\n").trim_end_matches(crate::sysfs::py_space).to_string();
+            let value = lines.join("\n").trim_end_matches(crate::pystr::py_space).to_string();
             let target = match &sect {
                 None => &mut self.defaults,
                 Some(s) => &mut self.sections.iter_mut().find(|(n, _)| n == s).unwrap().1,
@@ -321,7 +321,7 @@ fn py_bound(b: f64) -> String {
 fn levels(ini: &Ini, platform: Option<&str>) -> Result<Value, String> {
     let mut out = Value::obj();
     for (name, default, _) in DEFAULTS.iter().find(|(s, _)| *s == "thresholds").unwrap().1.iter() {
-        let text = ini.get("thresholds", name).unwrap_or_default().trim_matches(crate::sysfs::py_space);
+        let text = ini.get("thresholds", name).unwrap_or_default().trim_matches(crate::pystr::py_space);
         if *name == "temperature" && text.is_empty() {
             out.set(name, platform.map_or(Value::Null, |p| {
                 let pair = match p { "Jetson Orin" => [85.0, 95.0], "Raspberry Pi" => [75.0, 80.0], _ => [80.0, 90.0] };
@@ -356,7 +356,7 @@ fn levels(ini: &Ini, platform: Option<&str>) -> Result<Value, String> {
 /// probe.parse_targets: [(address, port)] of IP literals.
 pub fn parse_targets(text: &str) -> Result<Vec<(String, u16)>, String> {
     let mut out: Vec<(String, u16)> = Vec::new();
-    for item in text.split(',').map(|t| t.trim_matches(crate::sysfs::py_space)).filter(|t| !t.is_empty()) {
+    for item in text.split(',').map(|t| t.trim_matches(crate::pystr::py_space)).filter(|t| !t.is_empty()) {
         let (host, port) = item.rsplit_once(':').unwrap_or(("", ""));
         let port_ok = !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) && port.parse::<u32>().is_ok_and(|p| 0 < p && p < 65536);
         if !item.contains(':') || !port_ok {

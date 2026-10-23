@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use crate::config::py_float;
 use crate::json::{round_to, Value};
 use crate::metadata::{clock, source, Group, Slot};
-use crate::sysfs::{self, py_space};
+use crate::pystr::py_space;
+use crate::sysfs;
 
 const FIELDS: [&str; 3] = ["utilization.gpu", "clocks.current.graphics", "clocks.max.graphics"];
 const TIMEOUT: Duration = Duration::from_millis(500);
