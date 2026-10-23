@@ -103,7 +103,8 @@ remain checked.
 `6D42 C14A BFB9 412F 34BA 4BEF F38B 9BB5 26A3 B0C6` (Ed25519, expires 2028-10-17).
 [Getting started](../guides/getting-started.md#requirements-and-installation) installs the key in
 `/etc/apt/keyrings/platmon.gpg` and the source in `/etc/apt/sources.list.d/platmon.sources`,
-with `Signed-By` so that the key is trusted for this repository only.
+with `Signed-By` so that the key is trusted for this repository only, and `Architectures:` set to the
+host's architecture, so that a foreign architecture such as i386 is not requested from it.
 
 ```sh
 sudo apt update && sudo apt install --only-upgrade platmon   # update platmon only
