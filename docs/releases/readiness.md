@@ -1,5 +1,61 @@
 # Release readiness
 
+## 1.4.0 release gate (2026-10-22)
+
+Changes since 1.3.0: the Debian package runs the static native server (Rust, `native/`) instead of the
+Python server, one package per architecture (`_amd64.deb`, `_arm64.deb` in place of `_all.deb`), with a
+health check after install and upgrade (#94; the experiments behind it are #92 and #93). A minor
+release by the repository's rule: the HTTP API, `platmon.ini` keys and defaults, command options,
+status codes and schema versions are unchanged (compared byte for byte or by shape against the Python
+service, native/README.md). The package's architecture and server change; armhf hosts get no 1.4.0 and
+stay on 1.3.0, and the source installation and the container keep the Python server.
+
+Verified for this release (candidate 1, binaries `027e35b1c9251b9d` x86_64 and `ff97aa9ad4e9dd28`
+aarch64, rebuilt byte for byte in CI):
+
+| check | result |
+| --- | --- |
+| whole-service A/B with 1.3.0 (step 3C, PC, Orin Nano, Raspberry Pi 4) | CPU −27..−38 % (PC), −60..−64 % (Orin), −59..−65 % (Pi); PSS with full buffers −47 % (PC), −61 % (Orin), −75 % (Pi) |
+| final comparison of candidate 1 (A B B A, the same hosts) | every candidate run within the absolute PSS budget; serving one backlog to 4 clients at once costs more CPU than 1.3.0 (+33 to +240 % a round) |
+| deployed form: hardened unit beside the production one, swap, restart, kill, stop (PC, Orin, Pi) | 11/11 checks on each |
+| 24 h under a Hub-like load with a restart (Orin, Pi) | PASS: no error or loss, no automatic restart; Orin settled PSS 10.5 → 11.3 MiB (under its +10 % limit), Pi flat |
+| the released Hub 1.1.1 through agent restart, SIGKILL, Hub down 60 s, agents down 30 s (PC, Orin, Pi) | PASS, the same records as with 1.3.0 |
+| package: Lintian, reproducible builds, dpkg lifecycle, upgrade from the released `1.3.0-1_all.deb` under a booted systemd (failed start, downgrade recovery, disabled service, refused INI, restart) | CI on amd64 and arm64 runners, Ubuntu 20.04–26.04 |
+
+Not verified, and therefore the gates still open before this draft is published:
+
+- **APT repository:** `apt/tools/update.sh` accepts per-architecture releases only with
+  platmon/platmon.github.io#4, which must be merged before the `apt` workflow adds 1.4.0.
+- **No real device upgrade or reboot:** the upgrade and boot ran in containers; the plan is one Orin Nano
+  first (apt upgrade, reboot, `/api/status`, the Hub reconnecting), the others after.
+- **Long memory trend:** the Orin's settled PSS rose about 0.7 MiB in 24 h. An accelerated soak
+  (2026-10-22/23, `deploy_check.py soak --accel`, 20 cycles of 18 min, each a reconnect after 480 or
+  720 s away and 3 rounds of 4 concurrent pollers, a restart at cycle 10; raw
+  `~/.local/state/platmon-measure/native-20261023-accel/`) put about 60 such rounds into 6 h:
+  - Orin: settled PSS 11.33 → 11.92 MiB over cycles 1–9 and 11.14 → 11.76 MiB over cycles 11–19, about
+    25–30 KiB per round, the same per round as the 24 h soak (0.7 MiB, 24 rounds with 40 minutes of
+    polling an hour). So it grows with the backlog work, not with time or steady polling, and did not level
+    off within 6 h. The tool's report says FAIL: its limit is cycle 0 + 10 %, and cycle 0 here is read
+    before the buffers fill (541 records against about 1,194 in later cycles); against cycle 1 every
+    cycle is within 10 %. Highest settled 11.9 MiB (budget 14), highest concurrent peak 13.0 MiB (46). No
+    error, loss or automatic restart.
+  - Pi: 6.16 → 6.61 and 6.30 → 6.51 MiB; PASS.
+  - Meaning for a release: a Hub that stays connected polls small pages and rarely makes a backlog round,
+    so the growth there should be small; it shows when Hubs reconnect after downtime, at about 1 MiB per
+    35 to 40 rounds on the Orin. The canary's PSS over its first days is the next evidence; going back
+    is `apt install --allow-downgrades platmon=1.3.0-1`.
+  - Cause (2026-10-23, branch `diag/alloc-growth`: a build counting the bytes the program holds, and
+    `growth_probe.py`, 60 backlog rounds of 4 clients against a local server): on the PC and the Orin,
+    Anonymous grew about 2.2 MiB while the live bytes stayed within 10 KiB (PC 14.83 MB, Orin 8.37 MB).
+    It is musl's allocator keeping freed pages, not data the server keeps: no leak. The settled reading
+    cannot pass the process's high-water mark, which is the concurrent rounds' peak (VmHWM in the
+    accelerated soak: Orin 40.6 to 40.9 MiB, Pi 22.0 to 22.2 MiB, within the 46 and 27 MiB peak
+    budgets), though that peak also crept about 0.3 MiB over 27 rounds. Raw:
+    `~/.local/state/platmon-measure/native-20261023-growth/`.
+- **Known difference:** a request line with `HTTP/2.0` or an invalid version gets the body without a
+  status line, as from CPython 3.13.5 and 3.14.4 (newer 3.13 releases answer with a status line).
+- **Not covered:** nvidia-smi under a native Linux NVIDIA driver (verified under WSL2 and fake trees).
+
 ## 1.3.0 release gate (2026-10-17)
 
 Changes since 1.2.1: full-publication replay (#77), bounded HTTP connections and stalled writers

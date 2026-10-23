@@ -4,7 +4,7 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `runtime/__init__.py` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.4.0 — 2026-10-23
 
 - The Debian package runs a static native server (Rust, built from `native/` by `native/build.sh`)
   instead of the Python server, as one package per architecture: `platmon_<version>-<revision>_amd64.deb`
