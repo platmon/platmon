@@ -122,6 +122,18 @@ def test_compare_flags_mismatch_and_missing_variant():
     assert cadence.compare([dict(base, variant="B0", cpu_pct_one_core=1.0)])["verdict"] == "insufficient"
 
 
+def test_scope_counts_cores_not_the_rows_of_one_window():
+    """A core without usage for one window (no_ticks, counter_regressed) is the same host, a core fewer is not."""
+    def stats(ids, unavailable=()):
+        return {"cpu": [{"id": n, "usage": 1.0} for n in ids],
+                "cpu_sampling": {"unavailable": [{"id": n, "reason": "no_ticks"} for n in unavailable]},
+                "sensor_meta": {**{f"/cpu/{n}/freq": {} for n in ids}, "/temperature/x": {}}}
+    four = cadence.scope_of(stats([0, 1, 2, 3]), {})
+    assert cadence.scope_of(stats([0, 1, 2], unavailable=[3]), {}) == four
+    assert four["cpu_rows"] == 4 and four["sensor_meta"] == 1
+    assert cadence.scope_of(stats([0, 1, 2]), {})["cpu_rows"] == 3
+
+
 def test_percentile_and_missing_values():
     assert cadence.percentile([], 95) is None
     assert cadence.percentile(list(range(1, 101)), 95) == 95

@@ -179,9 +179,12 @@ def scope_of(stats, passive):
     net = passive.get("network", {})
     disk = passive.get("disk", {})
     return {
-        "cpu_rows": len(stats.get("cpu") or []), "temperature": len(stats.get("temperature") or {}),
+        # The online cores: a core whose counters could not be used for one window (cpu_sampling.unavailable:
+        # no_ticks, counter_regressed) has no row and no /cpu/ sensor entry then, but is still the same host.
+        "cpu_rows": len(stats.get("cpu") or []) + len((stats.get("cpu_sampling") or {}).get("unavailable") or []),
+        "temperature": len(stats.get("temperature") or {}),
         "power": len(stats.get("power") or {}), "fans": len(stats.get("fans") or []),
-        "sensor_meta": len(stats.get("sensor_meta") or {}),
+        "sensor_meta": sum(1 for k in stats.get("sensor_meta") or {} if not k.startswith("/cpu/")),
         "collectors": {k: v.get("state") for k, v in (stats.get("collectors") or {}).items()},
         "interfaces": len(net.get("interfaces", {})),
         "physical_interfaces": sum(1 for i in net.get("interfaces", {}).values() if i["physical"]),
