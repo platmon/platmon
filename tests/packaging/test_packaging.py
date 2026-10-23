@@ -385,3 +385,12 @@ def test_release_main_guard_with_real_git_history(tmp_path, target):
     assert git("rev-parse", "refs/remotes/origin/main", cwd=checkout) == tip
     if target == "unmerged":
         assert "release tag must point to a commit included in main" in result.stdout
+
+
+def test_test_image_retries_apt_and_installs_the_check_tools():
+    """The checks' image (#96): the mirrors are used once, with retries, and the RUN line is valid sh."""
+    from scripts.packaging.prepare_test_image import ATTEMPTS, PACKAGES, dockerfile
+    first, line = dockerfile("ubuntu:24.04").splitlines()
+    assert first == "FROM ubuntu:24.04" and line.startswith("RUN ")
+    assert run("sh", "-n", "-c", line[len("RUN "):]).returncode == 0
+    assert f"seq {ATTEMPTS}" in line and all(package in line for package in PACKAGES)

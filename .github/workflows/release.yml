@@ -75,13 +75,18 @@ jobs:
         run: lintian --no-cfg --info --pedantic --fail-on error,warning dist/*.deb
       # This runner is amd64; the checks ran both architectures' packages on their own runners.
       - run: python3 scripts/packaging/check_package.py dist/*_amd64.deb
+      # The mirrors once, with retries; the lifecycle check runs in this local image (never pushed, #96).
+      - name: Prepare the test image (python3, systemd)
+        timeout-minutes: 20
+        run: python3 scripts/packaging/prepare_test_image.py ubuntu:24.04 platmon-package-test:local
       - name: Verify dpkg lifecycle of the release package
         env:
           REVISION: ${{ steps.version.outputs.revision }}
         run: |
           # The next revision is only an upgrade fixture; it is not released.
           python3 scripts/packaging/package.py --revision "$((REVISION + 1))" --output "$RUNNER_TEMP/upgrade"
-          python3 scripts/packaging/check_package_install.py dist/*_amd64.deb "$RUNNER_TEMP"/upgrade/*_amd64.deb
+          python3 scripts/packaging/check_package_install.py dist/*_amd64.deb "$RUNNER_TEMP"/upgrade/*_amd64.deb \
+            --image platmon-package-test:local
       - name: Verify checksums
         working-directory: dist
         run: sha256sum -c SHA256SUMS
