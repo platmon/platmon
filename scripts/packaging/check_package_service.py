@@ -165,6 +165,11 @@ def inside(phase, old, new):
 def booted(name, timeout=300):
     deadline = time.monotonic() + timeout
     while True:
+        # A container whose boot command failed (no systemd to exec) is gone: say so now, not at the deadline.
+        running = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", name], text=True,
+                                 capture_output=True).stdout.strip()
+        if running != "true":
+            raise RuntimeError("the container stopped before systemd booted (its log is above)")
         state = subprocess.run(["docker", "exec", name, "systemctl", "is-system-running"], text=True,
                                capture_output=True).stdout.strip()
         if state in ("running", "degraded"):
@@ -179,9 +184,11 @@ def check(old, new, image):
     if not old.is_file() or not new.is_file():
         raise ValueError("both package files must exist")
     name = "platmon-service-check-" + uuid.uuid4().hex[:12]
-    boot = ("if [ ! -x /lib/systemd/systemd ]; then apt-get update -qq && "
+    # The OS tools come with the image (CI: prepare_test_image.py); installed here only when it lacks them.
+    boot = ("if ! { command -v python3 && [ -x /lib/systemd/systemd ] && command -v deb-systemd-helper; } "
+            ">/dev/null; then apt-get update -qq && "
             "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "
-            "systemd python3 init-system-helpers >/dev/null; fi; "
+            "systemd python3 init-system-helpers || exit; fi; "
             # The image's policy-rc.d forbids service starts; a host has none.
             "rm -f /usr/sbin/policy-rc.d; mount -o remount,rw /sys/fs/cgroup && exec /lib/systemd/systemd")
     script = Path(__file__).read_text(encoding="utf-8")
@@ -201,6 +208,9 @@ def check(old, new, image):
                             "--env", "PLATMON_PACKAGE_TEST_CONTAINER=1", name, "python3", "-", "--inside", phase,
                             f"/old/{old.name}", f"/new/{new.name}"], input=script, text=True, check=True,
                            timeout=600)
+    except (RuntimeError, subprocess.SubprocessError):
+        subprocess.run(["docker", "logs", "--tail", "60", name], timeout=60)
+        raise
     finally:
         # The unique name identifies only this invocation's disposable container.
         subprocess.run(["docker", "rm", "-f", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

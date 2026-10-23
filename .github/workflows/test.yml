@@ -103,13 +103,16 @@ jobs:
         with:
           name: platmon-upgrade-fixture
           path: dist/second
+      # The only step that uses the Ubuntu mirrors: it retries a mirror in the middle of a sync, and the
+      # checks below run in this local image (never pushed) without the network (#96).
+      - name: Prepare the test image (python3, systemd)
+        timeout-minutes: 20
+        run: python3 scripts/packaging/prepare_test_image.py ubuntu:${{ matrix.ubuntu }} platmon-package-test:local
       - name: Check extracted package with the OS default Python
         run: |
           docker run --rm --security-opt=no-new-privileges \
             --mount "type=bind,src=$PWD,dst=/checkout,readonly" \
-            ubuntu:${{ matrix.ubuntu }} sh -ec '
-              apt-get update -qq
-              DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3
+            platmon-package-test:local sh -ec '
               python3 --version
               python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/*_${{ matrix.arch }}.deb
             '
@@ -117,7 +120,7 @@ jobs:
       # The package requires Python >= 3.9; never force dependencies.
       - name: Check package lifecycle
         if: matrix.ubuntu != '20.04'
-        run: python3 scripts/packaging/check_package_install.py dist/first/*_${{ matrix.arch }}.deb dist/second/*_${{ matrix.arch }}.deb --image ubuntu:${{ matrix.ubuntu }}
+        run: python3 scripts/packaging/check_package_install.py dist/first/*_${{ matrix.arch }}.deb dist/second/*_${{ matrix.arch }}.deb --image platmon-package-test:local
       # The last release with the Python server: the package users upgrade from.
       - name: Fetch the previous release
         if: matrix.ubuntu != '20.04'
@@ -129,4 +132,4 @@ jobs:
           (cd previous && grep ' platmon_1.3.0-1_all.deb$' SHA256SUMS | sha256sum -c)
       - name: Check the service under systemd (upgrade, failed start, recovery, boot)
         if: matrix.ubuntu != '20.04'
-        run: python3 scripts/packaging/check_package_service.py previous/platmon_1.3.0-1_all.deb dist/second/*_${{ matrix.arch }}.deb --image ubuntu:${{ matrix.ubuntu }}
+        run: python3 scripts/packaging/check_package_service.py previous/platmon_1.3.0-1_all.deb dist/second/*_${{ matrix.arch }}.deb --image platmon-package-test:local

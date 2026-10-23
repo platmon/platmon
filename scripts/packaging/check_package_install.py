@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check real dpkg lifecycle inside a disposable container, with read-only artifacts.
 
-Uses a local Ubuntu image by default. Only the test container installs OS tools;
-no host service, dpkg database, source checkout or Docker socket is mounted in it.
+Uses a local Ubuntu image by default. Only the test container installs OS tools, and only when the
+image lacks them (CI passes one from prepare_test_image.py); no host service, dpkg database, source
+checkout or Docker socket is mounted in it.
 """
 import argparse
 import os
@@ -86,9 +87,10 @@ def check(first, second, image):
     if not first.is_file() or not second.is_file():
         raise ValueError("both package files must exist")
     name = "platmon-package-check-" + uuid.uuid4().hex[:12]
-    setup = ('apt-get update -qq >&2 && '
+    setup = ('if ! { command -v python3 && [ -x /lib/systemd/systemd ] && command -v deb-systemd-helper; } '
+             '>/dev/null; then apt-get update -qq >&2 && '
              'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends '
-             'python3 systemd init-system-helpers >&2 && exec python3 - "$@"')
+             'python3 systemd init-system-helpers >&2 || exit; fi; exec python3 - "$@"')
     command = ["docker", "run", "--rm", "-i", "--name", name,
                "--security-opt=no-new-privileges", "--env", "PYTHONDONTWRITEBYTECODE=1",
                "--env", "PLATMON_PACKAGE_TEST_CONTAINER=1",

@@ -305,8 +305,11 @@ python3 scripts/packaging/check_package_install.py \
   "$platmon_dist/second/platmon_${platmon_version}-2_${platmon_arch}.deb"
 ```
 
-This installs test OS tools inside the container, mounts only the artifact directories
-read-only and removes the container afterward. It checks config preservation,
+This installs test OS tools inside the container when its image lacks them, mounts only the artifact
+directories read-only and removes the container afterward. CI installs them once per job instead:
+`scripts/packaging/prepare_test_image.py ubuntu:<version> platmon-package-test:local` builds a local image
+(never pushed) and retries a mirror in the middle of a sync, and every check gets `--image
+platmon-package-test:local`, so the checks themselves do not use the Ubuntu mirrors. It checks config preservation,
 disabled/masked state, downgrade, remove/purge, source-unit refusal and invalid-config
 recovery. It does not boot systemd or change host services. CI runs the same check.
 
