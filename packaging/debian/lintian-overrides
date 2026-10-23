@@ -1,5 +1,5 @@
 # The server is built static on purpose (musl, no shared libraries), so one package runs on every
 # supported distribution release; copyright lists what it includes.
-platmon [arm64]: statically-linked-binary [usr/lib/platmon/platmon-native]
+platmon [arm64 armhf]: statically-linked-binary [usr/lib/platmon/platmon-native]
 # The amd64 build is a static PIE: an ELF of type DYN without shared libraries, not a shared library.
 platmon [amd64]: shared-library-lacks-prerequisites [usr/lib/platmon/platmon-native]

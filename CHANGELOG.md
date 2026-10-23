@@ -4,6 +4,13 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `runtime/__init__.py` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+- armhf (32-bit ARM) is still not released: 1.4.0 has no armhf package, so armhf hosts stay on 1.3.0.
+  The server is kept ready for it: `native/build-armhf.sh` builds it, `package.py --binary armhf=PATH`
+  packages it, CI builds it, and its raw system calls now pass C longs, which 32-bit ARM needs (every
+  sysfs read failed there before). The amd64 and arm64 servers are byte for byte the same as 1.4.0's.
+
 ## 1.4.0 — 2026-10-23
 
 - The Debian package runs a static native server (Rust, built from `native/` by `native/build.sh`)

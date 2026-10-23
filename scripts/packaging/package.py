@@ -25,8 +25,12 @@ SOURCE_FILES = ("platmon.py", "platmon.ini", "deploy/systemd/platmon.service", "
                 "deploy/docker/compose.yaml", "deploy/docker/compose.jetson.yaml", ".dockerignore", ".gitignore")
 SOURCE_DIRS = ("collector", "runtime", "frontends", "native", "scripts", "packaging", "deploy", "benchmarks", "docs",
                "tests", ".github")
-# Debian architecture: the Rust target native/build.sh builds for it and its ELF e_machine.
-ARCHES = {"amd64": ("x86_64-unknown-linux-musl", 62), "arm64": ("aarch64-unknown-linux-musl", 183)}
+# Debian architecture: the Rust target native/build.sh builds for it, its ELF e_machine and class (bits).
+ARCHES = {"amd64": ("x86_64-unknown-linux-musl", 62, 64), "arm64": ("aarch64-unknown-linux-musl", 183, 64),
+          "armhf": ("arm-unknown-linux-musleabihf", 40, 32)}
+# What a release packages. armhf is kept buildable (native/build-armhf.sh) and packaged only when its binary
+# is passed (--binary armhf=PATH); it is not released (native/README.md, support scope).
+RELEASED = ("amd64", "arm64")
 ALLOCATOR_MARK = b"platmon-native-allocator=system;"
 
 
@@ -74,8 +78,9 @@ def check_binary(arch, path):
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"{arch} server binary not found: {path} (build it with native/build.sh)")
     body = path.read_bytes()
-    if body[:6] != b"\x7fELF\x02\x01" or int.from_bytes(body[18:20], "little") != ARCHES[arch][1]:
-        raise ValueError(f"{path} is not a 64-bit little-endian ELF for {arch}")
+    _, machine, bits = ARCHES[arch]
+    if body[:6] != b"\x7fELF" + bytes((bits // 32, 1)) or int.from_bytes(body[18:20], "little") != machine:
+        raise ValueError(f"{path} is not a {bits}-bit little-endian ELF for {arch}")
     if ALLOCATOR_MARK not in body:
         raise ValueError(f"{path} does not carry the system allocator's mark")
     return body
@@ -122,7 +127,7 @@ def source_archive(root, output, release, epoch):
 
 
 def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
-    """Build one package per architecture in `binaries` ({arch: path}; default: both, from native/target)."""
+    """Build one package per architecture in `binaries` ({arch: path}; default: RELEASED, from native/target)."""
     release = version(root)
     if not re.fullmatch(r"[1-9][0-9]*", revision):
         raise ValueError("revision must be a positive integer")
@@ -133,7 +138,7 @@ def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     if binaries is None:
-        binaries = {arch: default_binary(arch, root) for arch in ARCHES}
+        binaries = {arch: default_binary(arch, root) for arch in RELEASED}
     if not binaries or set(binaries) - set(ARCHES):
         raise ValueError("architectures must be among: " + ", ".join(ARCHES))
     bodies = {arch: check_binary(arch, binaries[arch]) for arch in sorted(binaries)}
@@ -228,7 +233,7 @@ def main():
     parser.add_argument("--revision", default="1", help="Debian packaging revision (default 1)")
     parser.add_argument("--binary", action="append", metavar="ARCH=PATH",
                         help="a server binary for one architecture (repeat; default: amd64 and arm64 from "
-                             "native/target, built by native/build.sh)")
+                             "native/target, built by native/build.sh; armhf only when given)")
     parser.add_argument("--version", action="version", version=version())
     args = parser.parse_args()
     try:
