@@ -8,6 +8,9 @@ uses the host's systemd; it bundles neither Python nor OS/NVIDIA binaries. A pac
 does not mean that every OS/kernel on it has been validated. A device whose Python is older than 3.9
 needs a supported OS/interpreter before installation. Releases up to 1.3.0 are one `Architecture: all`
 package with the Python server; the source installation and the container still run that server.
+`armhf` (32-bit ARM) is not released, so armhf hosts stay on 1.3.0. Its build is kept ready but
+unsupported: `native/build-armhf.sh` builds the server, and `package.py --binary armhf=PATH` packages it
+(native/README.md, 32-bit ARM).
 
 Python 3.8 and Ubuntu 20.04 are CI observation targets under
 [ADR 0001](../development/adr/0001-ubuntu-lts-python-support.md), outside official support and
@@ -87,7 +90,7 @@ the source archive is an upstream distribution, not a Debian source package with
 Revision 1 includes a scoped Lintian override for `initial-upload-closes-no-bugs`:
 this upstream distribution is not an upload to the Debian archive and has no Debian
 Intent To Package bug. Every revision overrides the tags of the deliberately static server,
-per architecture (`statically-linked-binary` on arm64; `shared-library-lacks-prerequisites`
+per architecture (`statically-linked-binary` on arm64 and armhf; `shared-library-lacks-prerequisites`
 on amd64, whose static PIE looks like a shared object). Other policy errors and warnings
 remain checked.
 

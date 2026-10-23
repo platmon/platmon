@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from scripts.packaging.package import ALLOCATOR_MARK, ARCHES, build, check_binary, default_binary, packaging_epoch, version
+from scripts.packaging.package import (ALLOCATOR_MARK, ARCHES, RELEASED, build, check_binary, default_binary,
+                                       packaging_epoch, version)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -98,7 +99,9 @@ def test_source_update_success_retains_backup(source_install):
 def fake_server(path, arch, mark=ALLOCATOR_MARK):
     """An ELF header for the architecture and the allocator mark: what the builder checks, not a program."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"\x7fELF\x02\x01\x01" + bytes(11) + ARCHES[arch][1].to_bytes(2, "little") + bytes(44) + mark)
+    elf_class = bytes((ARCHES[arch][2] // 32,))
+    path.write_bytes(b"\x7fELF" + elf_class + b"\x01\x01" + bytes(11) + ARCHES[arch][1].to_bytes(2, "little") + bytes(44)
+                     + mark)
     path.chmod(0o755)
     return path
 
@@ -106,10 +109,10 @@ def fake_server(path, arch, mark=ALLOCATOR_MARK):
 @pytest.fixture
 def binaries(tmp_path):
     """The binaries native/build.sh left, else fakes (enough to package, not to run)."""
-    real = {arch: default_binary(arch) for arch in ARCHES}
+    real = {arch: default_binary(arch) for arch in RELEASED}
     if all(path.is_file() for path in real.values()):
         return real
-    return {arch: fake_server(tmp_path / "bin" / arch, arch) for arch in ARCHES}
+    return {arch: fake_server(tmp_path / "bin" / arch, arch) for arch in RELEASED}
 
 
 def runnable(binaries):
@@ -144,7 +147,7 @@ def test_bad_version_refused(tmp_path, value):
         version(tmp_path)
 
 
-@pytest.mark.parametrize("arch", sorted(ARCHES))
+@pytest.mark.parametrize("arch", sorted(RELEASED))
 def test_package_contents_and_config_ownership(package, binaries, tmp_path, arch):
     package = package[0].parent / f"platmon_{version()}-1_{arch}.deb"
     metadata = run("dpkg-deb", "-f", str(package))
@@ -197,12 +200,12 @@ def test_package_smoke_outside_checkout(package, binaries, tmp_path):
 
 def test_checksums_and_repeated_builds_match(package, binaries, tmp_path):
     output = package[0].parent
-    assert [p.name for p in package] == [f"platmon_{version()}-1_{arch}.deb" for arch in sorted(ARCHES)]
+    assert [p.name for p in package] == [f"platmon_{version()}-1_{arch}.deb" for arch in sorted(RELEASED)]
     manifest = json.loads((output / "BUILD.json").read_text())
     assert manifest["version"] == version() and manifest["package_version"] == f"{version()}-1"
     assert manifest["source_date_epoch"] == packaging_epoch() > 0
     assert manifest["server_sha256"] == {arch: hashlib.sha256(binaries[arch].read_bytes()).hexdigest()
-                                         for arch in ARCHES}
+                                         for arch in RELEASED}
     for line in (output / "SHA256SUMS").read_text().splitlines():
         digest, name = line.split("  ")
         assert hashlib.sha256((output / name).read_bytes()).hexdigest() == digest
@@ -290,6 +293,18 @@ def test_server_binary_checked(tmp_path, case, message):
     with pytest.raises(ValueError, match=message):
         build(tmp_path / "dist", binaries={"amd64": path})
     assert not (tmp_path / "dist").exists() or not list((tmp_path / "dist").iterdir())
+
+
+def test_armhf_is_packaged_only_from_a_binary_given_for_it(tmp_path):
+    """armhf is kept buildable (native/build-armhf.sh), not released: no default build packages it."""
+    assert "armhf" not in RELEASED
+    with pytest.raises(ValueError, match="not a 32-bit little-endian ELF for armhf"):
+        check_binary("armhf", fake_server(tmp_path / "arm64", "arm64"))
+    if shutil.which("dpkg-deb") is None:
+        pytest.skip("dpkg-deb is required for distribution tests")
+    debs = build(tmp_path / "dist", binaries={"armhf": fake_server(tmp_path / "armhf", "armhf")})
+    assert [p.name for p in debs] == [f"platmon_{version()}-1_armhf.deb"]
+    assert "Architecture: armhf" in run("dpkg-deb", "-f", str(debs[0])).stdout
 
 
 @pytest.mark.parametrize("args, message", [

@@ -57,11 +57,11 @@ pub fn py_printable(c: char) -> bool {
 
 // Raw system calls: musl's open() adds an fcntl(F_SETFD) after every O_CLOEXEC open, and a fresh buffer per
 // file makes its allocator map and unmap pages every collection. Measured on x86 (strace -c): 4233 fcntl and
-// ~1500 mmap/munmap pairs in 23 collections before this; see native/README.md.
-// Bypassing std also bypasses its EINTR handling, so open and read retry an interrupted call here, as
-// Python and std::fs do; close is never retried (Linux releases the descriptor even when it reports EINTR).
+// ~1500 mmap/munmap pairs in 23 collections before this; see native/README.md. syscall() is variadic and reads
+// C longs: pass c_long, never i64 (on 32-bit ARM an i64 takes two registers and shifts the rest). Without std's
+// EINTR handling, open and read retry an interrupted call as Python and std::fs do; close never does (Linux frees it).
 
-fn retry(mut call: impl FnMut() -> i64) -> io::Result<i64> {
+fn retry(mut call: impl FnMut() -> libc::c_long) -> io::Result<libc::c_long> {
     loop {
         let n = call();
         if n >= 0 {
@@ -74,13 +74,13 @@ fn retry(mut call: impl FnMut() -> i64) -> io::Result<i64> {
     }
 }
 
-fn sys_open(path: &str, flags: i64) -> io::Result<i64> {
+fn sys_open(path: &str, flags: libc::c_long) -> io::Result<libc::c_long> {
     let c = std::ffi::CString::new(path).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
-    let flags = flags | libc::O_CLOEXEC as i64;
-    retry(|| unsafe { libc::syscall(libc::SYS_openat, libc::AT_FDCWD as i64, c.as_ptr(), flags, 0i64) as i64 })
+    let flags = flags | libc::O_CLOEXEC as libc::c_long;
+    retry(|| unsafe { libc::syscall(libc::SYS_openat, libc::AT_FDCWD as libc::c_long, c.as_ptr(), flags, 0 as libc::c_long) })
 }
 
-fn sys_close(fd: i64) {
+fn sys_close(fd: libc::c_long) {
     unsafe { libc::syscall(libc::SYS_close, fd) };
 }
 
@@ -100,7 +100,7 @@ fn with_file<T>(path: &str, f: impl FnOnce(&[u8]) -> T) -> io::Result<T> {
                 b.resize(n, 0);
             }
             let rest = &mut b[len..];
-            match retry(|| unsafe { libc::syscall(libc::SYS_read, fd, rest.as_mut_ptr(), rest.len()) as i64 }) {
+            match retry(|| unsafe { libc::syscall(libc::SYS_read, fd, rest.as_mut_ptr(), rest.len()) }) {
                 Ok(0) => break,
                 Ok(n) => len += n as usize,
                 Err(e) => {
@@ -232,10 +232,10 @@ pub fn hwmon_chips(root: &str, groups: &mut [&mut Group]) -> Vec<(String, String
 /// The absolute path the kernel resolved an existing path to (open without reading, then the
 /// /proc/self/fd link); None if it went away in between.
 fn kernel_path(path: &str) -> io::Result<Option<String>> {
-    let fd = sys_open(path, libc::O_PATH as i64)?;
+    let fd = sys_open(path, libc::O_PATH as libc::c_long)?;
     let link = format!("/proc/self/fd/{}\0", fd);
     let mut buf = [0u8; 4096];
-    let n = unsafe { libc::syscall(libc::SYS_readlinkat, libc::AT_FDCWD as i64, link.as_ptr(), buf.as_mut_ptr(), buf.len()) };
+    let n = unsafe { libc::syscall(libc::SYS_readlinkat, libc::AT_FDCWD as libc::c_long, link.as_ptr(), buf.as_mut_ptr(), buf.len()) };
     let n = if n < 0 { Err(io::Error::last_os_error()) } else { Ok(n) };
     sys_close(fd);
     let n = n?;

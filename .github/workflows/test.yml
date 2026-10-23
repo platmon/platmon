@@ -34,6 +34,9 @@ jobs:
           python-version: "3.13.5"
       - name: Build the server (Rust tests, amd64 and arm64, the system allocator)
         run: native/build.sh
+      # Kept ready, not released: built so it keeps compiling; these runners cannot run 32-bit code.
+      - name: Build the 32-bit ARM server (armhf)
+        run: native/build-armhf.sh
       - name: Compare with the Python service
         env:
           PYTHONPATH: ${{ github.workspace }}
