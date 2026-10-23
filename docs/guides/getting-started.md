@@ -22,11 +22,12 @@ sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://platmon.github.io/apt/platmon-archive-keyring.gpg \
   | sudo tee /etc/apt/keyrings/platmon.gpg > /dev/null
 gpg --show-keys /etc/apt/keyrings/platmon.gpg
-sudo tee /etc/apt/sources.list.d/platmon.sources > /dev/null <<'EOF'
+sudo tee /etc/apt/sources.list.d/platmon.sources > /dev/null <<EOF
 Types: deb
 URIs: https://platmon.github.io/apt
 Suites: stable
 Components: main
+Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/platmon.gpg
 EOF
 sudo apt update
@@ -37,6 +38,15 @@ platmon --once
 ```
 
 Later updates arrive with `sudo apt update && sudo apt upgrade`.
+
+`Architectures:` limits the source to the host's own architecture. Without it, a host with a foreign
+architecture enabled (for example i386 on a PC) gets the notice
+`Skipping acquire of configured file 'main/binary-i386/Packages' ... doesn't support architecture 'i386'`
+on every `apt update`; it is harmless. To add the line to an existing source:
+
+```sh
+echo "Architectures: $(dpkg --print-architecture)" | sudo tee -a /etc/apt/sources.list.d/platmon.sources
+```
 
 Without the repository, download a fixed release and its `SHA256SUMS` from
 [GitHub Releases](https://github.com/platmon/platmon/releases). In the directory
