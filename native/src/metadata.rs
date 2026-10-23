@@ -1,6 +1,8 @@
 //! collector/metadata.py: one optional group's diagnostics, timed reads, sensor sources and pointers.
 use crate::json::Value;
-use crate::{sha256, sysfs};
+use crate::sha256;
+#[cfg(target_os = "linux")]
+use crate::sysfs;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 pub const PROBLEMS: [&str; 6] = ["internal_error", "permission_denied", "io_error", "disappeared", "mount_changed", "invalid_data"];
@@ -121,6 +123,7 @@ impl Group {
         value
     }
 
+    #[cfg(target_os = "linux")]
     /// Group.read: parse(content of path), or None with the reason noted. found: what this collection
     /// discovered by listing; if that is gone too the file disappeared, else it is not exposed.
     pub fn read_with<T>(&mut self, path: &str, target: &str, found: Option<&str>, io_absent: bool,
@@ -156,10 +159,12 @@ impl Group {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub fn read_int(&mut self, path: &str, target: &str, found: Option<&str>) -> Option<i64> {
         self.read_with(path, target, found, false, py_int)
     }
 
+    #[cfg(target_os = "linux")]
     pub fn read_str(&mut self, path: &str, target: &str, found: Option<&str>) -> Option<String> {
         self.read_with(path, target, found, false, |t| Some(t.to_string()))
     }
