@@ -1077,9 +1077,13 @@ On `x86_64-pc-windows-msvc`:
 - Not shown: any Windows collector, a run on a Windows host outside CI.
 
 The Linux servers behave the same (unit tests, `config_fixture.py` 67/67, `runtime_fixture.py` 7/7,
-`fixture.sh` 11/11, `live_http.py` with no difference, `pytest`), but moved code changes their bytes:
-x86_64 `842a9d6eeb164753`, aarch64 `a05da99e69cbe394`, armhf `600bc910f8528d86`, no longer 1.4.0's. The
-next release verifies them again ([readiness](../docs/releases/readiness.md)).
+`fixture.sh` 11/11, `live_http.py` with no difference, `pytest`), but moved code changes their bytes, and
+the start line no longer ends in "(step 3 runtime)": x86_64 `d7b491c5ce844222`, aarch64 `0acd11a091ffe094`,
+armhf `3bef02ec30fff437`, no longer 1.4.0's. The aarch64 build before that line changed (`a05da99e69cbe394`)
+ran on the Jetson Orin Nano as the candidate unit of the [deployed form](#final-comparison-candidate-1) (2026-10-24): `checks` passed
+the native unit's start, restart (ready 0.1 s, 409), SIGKILL (back in 5.14 s), the held port and every
+stop; the Python unit's checks could not run, since 1.4.0 removed the Python server from the package. No
+soak. The next release verifies them again ([readiness](../docs/releases/readiness.md)).
 
 ### Earlier run (2026-10-18)
 
