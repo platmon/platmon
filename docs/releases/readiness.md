@@ -1,5 +1,34 @@
 # Release readiness
 
+## 1.5.0 release gate (2026-10-24)
+
+Changes since 1.4.0: the native server's OS calls behind `native/src/platform/` and a Windows build in CI
+that does not collect (#101), a flaky unit test fixed (#102), the candidate service checks on the native
+server alone (#103), the APT source's `Architectures` field in the guides (#99), the package checks' OS tools
+installed once in CI (#100) and the Python server's deprecation (removal in a later release). A minor release by the
+owner's choice: the HTTP API, `platmon.ini` keys and defaults, command options, status codes and schema
+versions are unchanged. The server's bytes change (code moved for the platform boundary, the start line no
+longer ends in "(step 3 runtime)"): x86_64 `d7b491c5ce844222`, aarch64 `0acd11a091ffe094`. armhf is still
+not released (planned with the Windows work).
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| native equivalence on the release tree (x86_64): fake trees, configurations, runtime, live HTTP | `fixture.sh` 11/11, `config_fixture.py` 67/67, `runtime_fixture.py` 7/7, `live_http.py` no difference |
+| `pytest`, Rust unit tests | 1007 passed, 2 skipped; 28/28 (60 suite runs without a failure after #102) |
+| `package.py` 1.5.0-1, `SHA256SUMS`, `check_package.py` (amd64, the PC), Lintian (Ubuntu 24.04, `--pedantic --fail-on error,warning`) | built, `sha256sum -c` OK, smoke passed, clean |
+| deployed form on the Jetson Orin Nano: the release aarch64 binary as the candidate unit beside the production 1.4.0 | `deploy_check.py checks` 9/9 (start, restart, SIGKILL, held port, every stop) |
+@@SOAK@@
+
+Not verified, and therefore open:
+
+- **No 24 h soak and no `hub_check.py`** at this version: the owner limited the check to about an hour. The
+  memory trend and the released Hub's handling rest on 1.4.0's runs, whose server logic this release keeps.
+- **No real device upgrade** from 1.4.0 to 1.5.0 under apt; CI's container checks cover the upgrade from
+  1.3.0 and the package lifecycle.
+- **No CPU or memory comparison with 1.4.0**: the change moves code and adds no work per collection.
+
 ## 1.4.0 release gate (2026-10-22)
 
 Changes since 1.3.0: the Debian package runs the static native server (Rust, `native/`) instead of the
