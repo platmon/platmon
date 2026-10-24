@@ -1,7 +1,8 @@
 //! Windows: the required data (CPU, memory, the system volume, identity) from the Win32 and NT system
-//! information calls, Network (network.rs) and the probe's connection; the other optional groups have no
-//! provider here yet (unsupported_platform). Rust only: the Python service has no Windows collector to
+//! information calls, Network (network.rs), Disk I/O (disk_io.rs) and the probe's connection; the other
+//! optional groups have no provider here yet (unsupported_platform). Rust only: the Python service has no Windows collector to
 //! compare with.
+pub mod disk_io;
 pub mod network;
 
 use super::{timed, Collected, CpuCounters, Required};
@@ -212,15 +213,17 @@ pub struct Collector {
     pub platform: &'static str,
     cpu: CpuCounters,
     network: Option<network::Network>,
+    disk_io: Option<disk_io::Disks>,
     logged: Vec<(String, Vec<String>)>,
 }
 
 impl Collector {
     /// max_gap: seconds, max(3 × interval, 5 s) in the service; passive: network, disk_io, pressure on.
-    /// Disk I/O and Pressure have no Windows reader yet and are left out, as when they are off.
+    /// Pressure has no Windows reader yet and is left out, as when it is off.
     pub fn new(max_gap: f64, passive: [bool; 3]) -> Collector {
         Collector { platform: "Windows", cpu: CpuCounters::new(Some(max_gap), "interval"),
-                    network: passive[0].then(|| network::Network::new(Some(max_gap))), logged: Vec::new() }
+                    network: passive[0].then(|| network::Network::new(Some(max_gap))),
+                    disk_io: passive[1].then(|| disk_io::Disks::new(Some(max_gap))), logged: Vec::new() }
     }
 
     /// The fields and order of a Linux collection, the optional groups unsupported_platform.
@@ -279,8 +282,16 @@ impl Collector {
             network = span;
             groups.push(g);
         }
+        let mut disk_io = None;
+        if let Some(d) = self.disk_io.as_mut() {
+            let mut g = Group::new("disk_io", true);
+            let (v, span) = d.sample(&mut g);
+            s.set("disk_io", v);
+            disk_io = span;
+            groups.push(g);
+        }
         s.set("collectors", metadata::summarize(&groups, &mut self.logged));
-        Ok(Collected { stats: s, sensors: Vec::new(), required, passive: [network, None, None] })
+        Ok(Collected { stats: s, sensors: Vec::new(), required, passive: [network, disk_io, None] })
     }
 }
 
@@ -343,7 +354,19 @@ mod tests {
                 other => panic!("reason {:?}", other),
             }
         }
-        assert!(matches!(col.passive[0], Some((a, b)) if a <= b) && col.passive[1..] == [None, None]);
+        let disk_io = s.get("disk_io").unwrap();
+        assert_eq!(disk_io.get("provider"), Some(&Value::Str("ioctl_disk_performance".into())));
+        let Some(Value::Arr(disks)) = disk_io.get("disks") else { panic!("no disks") };
+        assert!(!disks.is_empty(), "{:?}", collectors.get("disk_io"));
+        for d in disks {
+            assert_eq!(d.get("major"), Some(&Value::Null));
+            match d.get("reason") {
+                Some(Value::Null) => assert!(matches!(d.get("rates").and_then(|r| r.get("io_time_ratio")), Some(Value::Float(_)))),
+                Some(Value::Str(r)) => assert!(["warmup", "counter_regressed"].contains(&r.as_str()), "{:?}", d),
+                other => panic!("reason {:?}", other),
+            }
+        }
+        assert!(col.passive[..2].iter().all(|p| matches!(p, Some((a, b)) if a <= b)) && col.passive[2].is_none());
         let names: Vec<&str> = col.required.iter().map(|(n, _)| *n).collect();
         assert_eq!(names, ["cpu", "memory", "disk", "uptime"]);
         assert!(col.required.iter().all(|(_, span)| matches!(span, Some((a, b)) if a <= b)));

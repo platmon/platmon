@@ -4,7 +4,7 @@
 
 - build-info: the system allocator's mark;
 - collect: one recorded collection (src/collect/windows), with the required data, CPU usage, the elapsed
-  clock reported as "boottime", the network counters with rates, and the other optional groups
+  clock reported as "boottime", the network and disk counters with rates, and the other optional groups
   unsupported_platform;
 - script and loop exit 2 with the usage: they are Linux's (fake trees, rusage);
 - config-check without a file: the defaults, no error;
@@ -76,8 +76,18 @@ def main(binary):
           and interfaces and all(i.get("reason") in (None, "warmup", "counter_regressed") for i in interfaces)
           and any(i.get("rates") for i in interfaces) and collectors.get("network", {}).get("state") in ("ok", "partial")
           and out.get("passive", {}).get("network"), json.dumps(network))
+    disk_io = stats.get("disk_io", {})
+    disks = disk_io.get("disks", [])
+    check("collect: disk_io", disk_io.get("provider") == "ioctl_disk_performance"
+          and disk_io.get("scope") == {"kind": "host_block_devices"} and disks
+          and all(d.get("major") is None and d.get("read", {}).get("merges", 0) is None
+                  and d.get("reason") in (None, "warmup", "counter_regressed") for d in disks)
+          and any(isinstance((d.get("rates") or {}).get("io_time_ratio"), float) for d in disks)
+          and collectors.get("disk_io", {}).get("state") in ("ok", "partial")
+          and out.get("passive", {}).get("disk_io"), json.dumps(disk_io) + " " + json.dumps(collectors.get("disk_io")))
     print("      " + json.dumps({k: stats.get(k) for k in ("model", "system", "uptime", "memory", "disk", "cpu_sampling")}))
     print("      " + json.dumps([(i["name"], i["reason"], i["rates"]) for i in interfaces], ensure_ascii=False))
+    print("      " + json.dumps([(d["name"], d["in_flight"], d["reason"], d["rates"]) for d in disks]))
     for command in ("script", "loop"):
         r = run(binary, [command])
         check(command + " exits", r.returncode == 2 and not r.stdout and "usage:" in r.stderr, repr(r))
