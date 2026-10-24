@@ -22,6 +22,23 @@ pub fn timed<T>(req: &mut Required, name: &'static str, f: impl FnOnce() -> T) -
     v
 }
 
+/// A counter rate: round(delta * 1e9 / window_ns, 3) with Python's int to float conversions.
+pub fn rate(delta: u128, window_ns: i64) -> f64 {
+    round_to(delta as f64 * 1e9 / window_ns as f64, 3)
+}
+
+/// A counter group's window_ms: also given with gap and counter_regressed, null with other reasons.
+pub fn window_ms(window: Option<i64>, reason: Option<&str>) -> Value {
+    match (window, reason) {
+        (Some(w), None | Some("gap") | Some("counter_regressed")) => round_to(w as f64 / 1e6, 3).into(),
+        _ => Value::Null,
+    }
+}
+
+pub fn reason_value(reason: Option<&'static str>) -> Value {
+    reason.map_or(Value::Null, Into::into)
+}
+
 /// CPU usage between two readings of per-CPU counters: {id: [user, nice, system, idle, iowait, irq,
 /// softirq, steal, ...]} in any one unit, idle and iowait counted as idle (common.CpuCounters).
 pub struct CpuCounters {

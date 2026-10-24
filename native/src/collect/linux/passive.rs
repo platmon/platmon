@@ -4,6 +4,7 @@ use crate::json::{round_to, Value};
 use crate::metadata::{clock, Group, Span};
 use crate::pystr::{py_printable, py_space, py_split, py_strip};
 use super::sysfs::{self, ReadError};
+use crate::collect::{rate, reason_value, window_ms};
 use std::io;
 
 const MAX_COUNTER: u128 = u64::MAX as u128;
@@ -15,22 +16,6 @@ fn counter(text: &str) -> Option<u64> {
     }
     // more digits than u128 holds is beyond the limit too
     text.parse::<u128>().ok().filter(|v| *v <= MAX_COUNTER).map(|v| v as u64)
-}
-
-/// round(delta * 1e9 / window_ns, 3) with Python's int to float conversions.
-fn rate(delta: u128, window_ns: i64) -> f64 {
-    round_to(delta as f64 * 1e9 / window_ns as f64, 3)
-}
-
-fn window_ms(window: Option<i64>, reason: Option<&str>) -> Value {
-    match (window, reason) {
-        (Some(w), None | Some("gap") | Some("counter_regressed")) => round_to(w as f64 / 1e6, 3).into(),
-        _ => Value::Null,
-    }
-}
-
-fn reason_value(reason: Option<&'static str>) -> Value {
-    reason.map_or(Value::Null, Into::into)
 }
 
 /// The read's (start, end): the end only when the file was read and decoded, as in Python.
