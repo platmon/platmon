@@ -19,12 +19,14 @@ Verified for this release:
 | `pytest`, Rust unit tests | 1007 passed, 2 skipped; 28/28 (60 suite runs without a failure after #102) |
 | `package.py` 1.5.0-1, `SHA256SUMS`, `check_package.py` (amd64, the PC), Lintian (Ubuntu 24.04, `--pedantic --fail-on error,warning`) | built, `sha256sum -c` OK, smoke passed, clean |
 | deployed form on the Jetson Orin Nano: the release aarch64 binary as the candidate unit beside the production 1.4.0 | `deploy_check.py checks` 9/9 (start, restart, SIGKILL, held port, every stop) |
-@@SOAK@@
+| `check_package.py` arm64 on the Jetson Orin Nano (Python 3.10), unpacked in a temporary directory | smoke passed; the packaged server is `0acd11a091ffe094` |
+| `deploy_check.py soak --hours 1` on the Orin (the same candidate unit; the owner limited it to one hour): 40 min of Hub-like polling, 480 s away, the reconnect, one round of 4 concurrent pollers, 120 s settle | PASS: 3,701 requests, no error, loss or walk problem; 2,881 replayed collections, longest step 1.0 s, no gap; CPU 0.88 % of a core; settled PSS 10.6 MiB (budget 14; candidate 1's hour 0 was 10.5), round peak PSS 11.7 MiB (46); 5 threads, 4 descriptors, no automatic restart |
 
 Not verified, and therefore open:
 
-- **No 24 h soak and no `hub_check.py`** at this version: the owner limited the check to about an hour. The
-  memory trend and the released Hub's handling rest on 1.4.0's runs, whose server logic this release keeps.
+- **No 24 h soak and no `hub_check.py`** at this version: the owner limited the check to an hour. The
+  memory trend over a day and the released Hub's handling rest on 1.4.0's runs, whose server logic this
+  release keeps; raw: the Orin's `~/platmon-release-1.5.0/` (`checks-orin.jsonl`, `soak-orin.jsonl`).
 - **No real device upgrade** from 1.4.0 to 1.5.0 under apt; CI's container checks cover the upgrade from
   1.3.0 and the package lifecycle.
 - **No CPU or memory comparison with 1.4.0**: the change moves code and adds no work per collection.
