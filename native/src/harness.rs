@@ -257,7 +257,7 @@ pub fn observe_script(args: &[String]) {
     use std::io::BufRead;
     let targets = crate::config::parse_targets(args.first().map_or("", String::as_str)).unwrap_or_else(|e| { eprintln!("observe-script: {}", e); std::process::exit(2) });
     let timeout: f64 = args.get(1).and_then(|t| t.parse().ok()).unwrap_or(2.0);
-    let mut probe = observe::Probe::new(targets, timeout);
+    let mut probe = crate::collect::probe::Probe::new(targets, timeout);
     let mut logged: Vec<Vec<(String, Vec<String>)>> = vec![vec![]; 4];
     for _ in std::io::stdin().lock().lines() {
         let mut groups = Value::obj();

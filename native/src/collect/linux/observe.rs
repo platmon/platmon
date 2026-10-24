@@ -8,7 +8,6 @@ use super::passive::{if_indexes, is_physical, namespace_id, strerror, valid_ifna
 use crate::slow::Reader;
 use crate::pystr::{py_space, py_split};
 use super::sysfs::{self, ReadError};
-use std::collections::VecDeque;
 
 /// The slow groups in platmon.py's order.
 pub const GROUPS: [&str; 4] = ["storage", "wifi", "battery", "probe"];
@@ -20,7 +19,7 @@ pub fn reader(name: &str, cfg: &Config) -> Reader {
         "wifi" => Box::new(|g| Ok(wifi(g))),
         "battery" => Box::new(|g| Ok(battery(g))),
         _ => {
-            let mut p = Probe::new(cfg.targets.clone(), cfg.float("probe", "timeout"));
+            let mut p = crate::collect::probe::Probe::new(cfg.targets.clone(), cfg.float("probe", "timeout"));
             Box::new(move |g| Ok(p.observe(g)))
         }
     }
@@ -523,7 +522,7 @@ fn monotonic_ns() -> i64 {
 
 /// probe.connect_ms: (ms to complete the connection, None) or (None, reason). One socket, closed before
 /// returning.
-fn connect_ms(address: &str, port: u16, timeout: f64) -> (Option<f64>, Option<&'static str>) {
+pub fn connect_ms(address: &str, port: u16, timeout: f64) -> (Option<f64>, Option<&'static str>) {
     let Ok(ip) = address.parse::<std::net::IpAddr>() else { return (None, Some("error")) };
     unsafe {
         let family = if ip.is_ipv6() { libc::AF_INET6 } else { libc::AF_INET };
@@ -578,38 +577,5 @@ fn connect_ms(address: &str, port: u16, timeout: f64) -> (Option<f64>, Option<&'
         })();
         libc::close(fd);
         out
-    }
-}
-
-/// probe.Probe: one attempt per target per observation, one after another, with the last 10 results of
-/// each for its failure share.
-pub struct Probe {
-    targets: Vec<(String, u16)>,
-    timeout: f64,
-    recent: Vec<VecDeque<bool>>,
-}
-
-impl Probe {
-    pub fn new(targets: Vec<(String, u16)>, timeout: f64) -> Probe {
-        let recent = targets.iter().map(|_| VecDeque::new()).collect();
-        Probe { targets, timeout, recent }
-    }
-
-    pub fn observe(&mut self, g: &mut Group) -> Value {
-        let mut out = Vec::new();
-        for (i, (address, port)) in self.targets.iter().enumerate() {
-            let (ms, why) = connect_ms(address, *port, self.timeout);
-            let recent = &mut self.recent[i];
-            if recent.len() == 10 {
-                recent.pop_front();
-            }
-            recent.push_back(ms.is_some());
-            let failures = recent.iter().filter(|ok| !**ok).count();
-            g.got(());
-            out.push(obj(vec![("address", address.as_str().into()), ("port", (*port as i64).into()), ("connect_ms", ms.into()),
-                              ("reason", why.into()), ("attempts", (recent.len() as i64).into()), ("failures", (failures as i64).into()),
-                              ("failure_ratio", crate::json::round_to(failures as f64 / recent.len() as f64, 3).into())]));
-        }
-        obj(vec![("provider", "tcp_connect".into()), ("timeout_ms", (self.timeout * 1000.0).into()), ("targets", Value::Arr(out))])
     }
 }
