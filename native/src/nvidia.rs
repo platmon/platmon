@@ -306,8 +306,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("platmon-nvidia-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let fake = dir.join("nvidia-smi");
-        std::fs::write(&fake, "#!/bin/sh\necho 'GPU-review, 10, 1e40, 1980'\n").unwrap();
-        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        // written by a child: a write descriptor of this process could be inherited by another test's fork
+        // until its exec, and executing the script then fails with ETXTBSY
+        let script = "#!/bin/sh\necho 'GPU-review, 10, 1e40, 1980'\n";
+        let made = Command::new("/bin/sh").args(["-c", "printf '%s' \"$1\" > \"$2\" && chmod 755 \"$2\"", "sh", script])
+            .arg(&fake).status().unwrap();
+        assert!(made.success());
         let mut g = Group::new("gpu", true);
         let entry = sample(fake.to_str().unwrap(), &mut g).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
