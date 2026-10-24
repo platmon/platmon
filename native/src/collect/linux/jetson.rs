@@ -3,7 +3,7 @@ use super::common::{next_fan_id, Fan};
 use crate::json::Value;
 use crate::metadata::{source, Group, Slot};
 use super::sysfs::{self, entries, hwmon_chips};
-use crate::Groups;
+use super::Groups;
 
 const GPU_DEVFREQ: [&str; 5] = ["*.gpu", "*.ga10b", "*.gv11b", "*.gp10b", "*.gm20b"];
 const GPU_LOAD: [&str; 2] = ["devices/platform/gpu.0/load", "devices/gpu.0/load"];

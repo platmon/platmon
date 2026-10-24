@@ -2,7 +2,7 @@
 use crate::json::{round_to, Value};
 use crate::metadata::{self, clock, source, Group, Slot, Span};
 use super::sysfs::{self, entries, hwmon_chips, numbered};
-use crate::Groups;
+use super::Groups;
 use std::collections::BTreeMap;
 
 fn basename(path: &str) -> &str {
