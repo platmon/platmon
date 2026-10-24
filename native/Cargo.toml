@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 license = "Apache-2.0"
-description = "Experimental Rust port of the platmon collector (docs/performance/rust-feasibility.md); not part of the product"
+description = "The platmon server the Debian package runs (native/README.md)"
 
 [dependencies]
 # MIT OR Apache-2.0, no dependencies of its own: system call numbers, flags and struct layouts per target,

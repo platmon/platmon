@@ -13,7 +13,8 @@ API schema versions are independent of release versions.
 - Internal: the native server's OS calls outside the collectors are in `native/src/platform/`, and it
   builds and runs its unit tests on Windows (x86_64, in CI), where it does not collect yet: the commands
   that would exit (native/README.md, "Windows"). The Linux server's behavior, API and configuration do not
-  change, but its amd64 and arm64 binaries are no longer byte for byte 1.4.0's.
+  change, but its amd64 and arm64 binaries are no longer byte for byte 1.4.0's, and its start line no
+  longer ends in "(step 3 runtime)".
 
 ## 1.4.0 — 2026-10-23
 

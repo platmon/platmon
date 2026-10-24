@@ -1,5 +1,5 @@
-//! Experimental Rust port of collector.collect_recorded (docs/performance/rust-feasibility.md, next step 1).
-//! Not part of the product. Covers the core groups: CPU, clocks, thermal zones, hwmon, memory, disk,
+//! The platmon server the Debian package runs, a port of the Python service (native/README.md). Its collector
+//! covers the core groups: CPU, clocks, thermal zones, hwmon, memory, disk,
 //! identity, the Jetson extension, DRM GPU and accel NPU, collectors and sensor source ids, and the
 //! passive groups Network, Disk I/O and Pressure as the service enables them by default, and the nvidia-smi
 //! fallback.
@@ -636,7 +636,7 @@ fn serve(args: &[String]) {
     let interval = cfg.float("core", "interval");
     let mut c = Collector::new((3.0 * interval).max(5.0), [cfg.flag("network", "enabled"), cfg.flag("disk_io", "enabled"),
                                                             cfg.flag("pressure", "enabled")]);
-    println!("platmon-native: platform {}, version {} (step 3 runtime)", c.platform, version);
+    println!("platmon-native: platform {}, version {}", c.platform, version);
     let source = metadata::clock_source();
     let mut sampler = runtime::Sampler::new(interval, None, runtime::uuid4(), source);
     let slow_names: Vec<&str> = observe::GROUPS.iter().copied()
