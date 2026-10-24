@@ -1,6 +1,8 @@
 //! Windows: the required data (CPU, memory, the system volume, identity) from the Win32 and NT system
-//! information calls; the optional groups have no provider here yet (unsupported_platform). Rust only: the
-//! Python service has no Windows collector to compare with.
+//! information calls, and Network (network.rs); the other optional groups have no provider here yet
+//! (unsupported_platform). Rust only: the Python service has no Windows collector to compare with.
+pub mod network;
+
 use super::{timed, Collected, CpuCounters, Required};
 use crate::json::{round_to, Value};
 use crate::metadata::{self, Group};
@@ -186,14 +188,16 @@ fn system_info() -> Value {
 pub struct Collector {
     pub platform: &'static str,
     cpu: CpuCounters,
+    network: Option<network::Network>,
     logged: Vec<(String, Vec<String>)>,
 }
 
 impl Collector {
-    /// max_gap: seconds, max(3 × interval, 5 s) in the service. The passive groups (network, disk_io,
-    /// pressure) have no Windows reader yet and are left out, as when they are off.
-    pub fn new(max_gap: f64, _passive: [bool; 3]) -> Collector {
-        Collector { platform: "Windows", cpu: CpuCounters::new(Some(max_gap), "interval"), logged: Vec::new() }
+    /// max_gap: seconds, max(3 × interval, 5 s) in the service; passive: network, disk_io, pressure on.
+    /// Disk I/O and Pressure have no Windows reader yet and are left out, as when they are off.
+    pub fn new(max_gap: f64, passive: [bool; 3]) -> Collector {
+        Collector { platform: "Windows", cpu: CpuCounters::new(Some(max_gap), "interval"),
+                    network: passive[0].then(|| network::Network::new(Some(max_gap))), logged: Vec::new() }
     }
 
     /// The fields and order of a Linux collection, the optional groups unsupported_platform.
@@ -238,13 +242,22 @@ impl Collector {
         s.set("power", Value::obj());
         s.set("fans", Value::Arr(vec![]));
         s.set("npu", Value::Null);
-        let groups: Vec<Group> = OPTIONAL.iter().map(|name| {
+        let mut groups: Vec<Group> = OPTIONAL.iter().map(|name| {
             let mut g = Group::new(name, true);
             g.note(name, "unsupported_platform", None);
             g
         }).collect();
+        // after the required data: a failed collection never reaches it
+        let mut network = None;
+        if let Some(n) = self.network.as_mut() {
+            let mut g = Group::new("network", true);
+            let (v, span) = n.sample(&mut g);
+            s.set("network", v);
+            network = span;
+            groups.push(g);
+        }
         s.set("collectors", metadata::summarize(&groups, &mut self.logged));
-        Ok(Collected { stats: s, sensors: Vec::new(), required, passive: [None, None, None] })
+        Ok(Collected { stats: s, sensors: Vec::new(), required, passive: [network, None, None] })
     }
 }
 
@@ -283,6 +296,18 @@ mod tests {
             let state = collectors.get(name).and_then(|g| g.get("reason"));
             assert_eq!(state, Some(&Value::Str("unsupported_platform".into())), "{}", name);
         }
+        let network = s.get("network").unwrap();
+        assert_eq!(network.get("provider"), Some(&Value::Str("if_table2".into())));
+        let Some(Value::Arr(interfaces)) = network.get("interfaces") else { panic!("no interfaces") };
+        assert!(!interfaces.is_empty());
+        for i in interfaces {
+            match i.get("reason") {
+                Some(Value::Null) => assert!(matches!(i.get("rates").and_then(|r| r.get("rx_bytes_per_s")), Some(Value::Float(_)))),
+                Some(Value::Str(r)) => assert!(["warmup", "counter_regressed"].contains(&r.as_str()), "{:?}", i),
+                other => panic!("reason {:?}", other),
+            }
+        }
+        assert!(matches!(col.passive[0], Some((a, b)) if a <= b) && col.passive[1..] == [None, None]);
         let names: Vec<&str> = col.required.iter().map(|(n, _)| *n).collect();
         assert_eq!(names, ["cpu", "memory", "disk", "uptime"]);
         assert!(col.required.iter().all(|(_, span)| matches!(span, Some((a, b)) if a <= b)));

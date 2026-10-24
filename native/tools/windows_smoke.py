@@ -4,7 +4,8 @@
 
 - build-info: the system allocator's mark;
 - collect: one recorded collection (src/collect/windows), with the required data, CPU usage, the elapsed
-  clock reported as "boottime", and the optional groups unsupported_platform;
+  clock reported as "boottime", the network counters with rates, and the other optional groups
+  unsupported_platform;
 - script and loop exit 2 with the usage: they are Linux's (fake trees, rusage);
 - config-check without a file: the defaults, no error;
 - runtime-script: answers /api/status as starting, with the given instance id;
@@ -68,7 +69,14 @@ def main(binary):
     collectors = stats.get("collectors", {})
     check("collect: optional groups", all(collectors.get(g, {}).get("reason") == "unsupported_platform" for g in OPTIONAL),
           json.dumps(collectors))
+    network = stats.get("network", {})
+    interfaces = network.get("interfaces", [])
+    check("collect: network", network.get("provider") == "if_table2" and network.get("scope") == {"kind": "host", "id": None}
+          and interfaces and all(i.get("reason") in (None, "warmup", "counter_regressed") for i in interfaces)
+          and any(i.get("rates") for i in interfaces) and collectors.get("network", {}).get("state") in ("ok", "partial")
+          and out.get("passive", {}).get("network"), json.dumps(network))
     print("      " + json.dumps({k: stats.get(k) for k in ("model", "system", "uptime", "memory", "disk", "cpu_sampling")}))
+    print("      " + json.dumps([(i["name"], i["reason"], i["rates"]) for i in interfaces], ensure_ascii=False))
     for command in ("script", "loop"):
         r = run(binary, [command])
         check(command + " exits", r.returncode == 2 and not r.stdout and "usage:" in r.stderr, repr(r))

@@ -1095,9 +1095,11 @@ On `x86_64-pc-windows-msvc`:
     registry's `ProductName` (corrected to "Windows 11" from build 22000, which it still calls Windows 10)
     and `DisplayVersion`, `kernel` major.minor.build.UBR, `arch` the machine's (not the binary's) named as
     uname names it, `hostname` the DNS host name.
-  - The optional groups (CPU clocks, GPU, NPU, temperature, power, fans, power mode, board info) are
-    `unavailable` with `unsupported_platform`; `sensor_meta` is empty. Network, Disk I/O and Pressure are
-    left out, as when they are off, whatever `platmon.ini` says, and there are no slow groups.
+  - `network`: `GetIfTable2`, with Linux's rates and reasons, scope `host` and provider `if_table2`
+    ([network.md](../docs/reference/network.md#windows)).
+  - The other optional groups (CPU clocks, GPU, NPU, temperature, power, fans, power mode, board info)
+    are `unavailable` with `unsupported_platform`; `sensor_meta` is empty. Disk I/O and Pressure are left
+    out, as when they are off, whatever `platmon.ini` says, and there are no slow groups.
 - `platform/windows.rs`: `BCryptGenRandom` for the instance id; a WinSock listener with a backlog of 5,
   not inherited by child processes, and `SO_EXCLUSIVEADDRUSE` instead of Linux's `SO_REUSEADDR`, which on
   Windows lets another socket bind the same port.

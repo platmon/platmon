@@ -106,6 +106,20 @@ collection, another clock); in that last case, with interfaces present, the snap
 back to `cycle_start_upper_bound`. A failed reading without interfaces never moves the other values to
 the fallback.
 
+## Windows
+
+The Windows build of the native server (not released; native/README.md, Windows) reads the counters
+from `GetIfTable2` instead of `/proc/self/net/dev`, with the same fields, rates, reasons and baselines:
+
+- `scope` is `{"kind": "host", "id": null}`: Windows has no network namespace, so `namespace_changed`
+  and `identity_unavailable` do not occur, and an interface is matched by `ifindex` and name.
+- `provider` is `if_table2`. `name` is the interface's alias (e.g. `Ethernet`, `Wi-Fi`), which can
+  contain spaces and non-ASCII characters. The filter drivers' layers over an interface are left out;
+  every other interface Windows lists is kept, including the loopback and virtual adapters.
+- `packets` is unicast plus non-unicast; `errors` and `dropped` are Windows's errors and discards.
+- A table that cannot be read gives `interfaces: []` and state `error`; an empty table is `unavailable`
+  (`not_detected`). A name on several rows is left out (`invalid_data`).
+
 ## Docker scope
 
 The shipped Compose configuration uses host networking on native Linux Docker Engine, so its
