@@ -108,8 +108,8 @@ The Windows build of the native server (not released; native/README.md, Windows)
   truncated from 100 ns units; `in_flight` its queue depth.
 - `io_time_ratio` is the window less the time the disk was idle (no request outstanding, Windows's
   cumulative idle time), divided by the window: the complement of Linux's "at least one request in
-  flight". The idle time is the driver's clock and the window platmon's, so it can be slightly below 0
-  or above 1; it is reported as computed.
+  flight". The idle time is the driver's clock and the window platmon's: an idle time a little longer
+  than the window (an idle disk, seen on CI's runner) gives `0.0`, not a negative share.
 - `ios` are 32-bit on Windows: at 100,000 requests a second they wrap in about 12 hours, which shows as
   `counter_regressed` for one reading, as on 32-bit Linux kernels.
 - A disk that cannot be opened or queried is left out and reported under its name: `permission_denied`,

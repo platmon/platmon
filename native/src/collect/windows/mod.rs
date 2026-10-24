@@ -361,7 +361,7 @@ mod tests {
         for d in disks {
             assert_eq!(d.get("major"), Some(&Value::Null));
             match d.get("reason") {
-                Some(Value::Null) => assert!(matches!(d.get("rates").and_then(|r| r.get("io_time_ratio")), Some(Value::Float(_)))),
+                Some(Value::Null) => assert!(matches!(d.get("rates").and_then(|r| r.get("io_time_ratio")), Some(Value::Float(x)) if x.is_sign_positive())),
                 Some(Value::Str(r)) => assert!(["warmup", "counter_regressed"].contains(&r.as_str()), "{:?}", d),
                 other => panic!("reason {:?}", other),
             }

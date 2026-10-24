@@ -133,8 +133,10 @@ impl Disks {
                     r.set("write_bytes_per_s", rate(d(4), w).into());
                     r.set("reads_per_s", rate(d(0), w).into());
                     r.set("writes_per_s", rate(d(3), w).into());
-                    // the window less the idle time; Windows's and platmon's clocks differ, so it can leave [0, 1]
-                    r.set("io_time_ratio", round_to((w as f64 - d(7) as f64 * 100.0) / w as f64, 4).into());
+                    // the window less the idle time; Windows's and platmon's clocks differ, and an idle time
+                    // a little longer than the window gives 0, never a negative share (or -0.0)
+                    let busy = round_to((w as f64 - d(7) as f64 * 100.0) / w as f64, 4);
+                    r.set("io_time_ratio", (if busy > 0.0 { busy } else { 0.0 }).into());
                     rates = r;
                     None
                 }
