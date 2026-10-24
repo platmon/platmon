@@ -1,16 +1,24 @@
-//! Windows: BCryptGenRandom and a WinSock socket. Nothing here collects; the commands that do exit on
-//! Windows (main.rs, collect_command), so the clocks and the stop request are not chosen yet.
+//! Windows: the interrupt time, BCryptGenRandom, a WinSock socket and the console's stop events.
 use std::net::{Ipv4Addr, TcpListener};
 use std::os::windows::io::FromRawSocket;
 use windows_sys::Win32::Networking::WinSock as ws;
 use windows_sys::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
+use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+use windows_sys::Win32::System::WindowsProgramming::{QueryInterruptTimePrecise, QueryUnbiasedInterruptTimePrecise};
 
+/// The interrupt time in nanoseconds (100 ns units): keeps counting through sleep and hibernation, as
+/// CLOCK_BOOTTIME, so the service reports its clock as "boottime" here too.
 pub fn boottime_ns() -> Option<i64> {
-    unimplemented!("no elapsed clock is chosen for Windows yet")
+    let mut t = 0u64;
+    unsafe { QueryInterruptTimePrecise(&mut t) };
+    i64::try_from(t).ok()?.checked_mul(100)
 }
 
+/// The unbiased interrupt time in nanoseconds: stops while asleep, as CLOCK_MONOTONIC.
 pub fn monotonic_ns() -> Option<i64> {
-    unimplemented!("no elapsed clock is chosen for Windows yet")
+    let mut t = 0u64;
+    unsafe { QueryUnbiasedInterruptTimePrecise(&mut t) };
+    i64::try_from(t).ok()?.checked_mul(100)
 }
 
 /// Fills b from the system's preferred random generator; false if it could not.
@@ -51,6 +59,12 @@ pub fn listen(ip: Ipv4Addr, port: u16, backlog: i32) -> std::io::Result<TcpListe
     }
 }
 
+unsafe extern "system" fn on_stop(_: u32) -> windows_sys::core::BOOL {
+    std::process::exit(0) // Ctrl+C, Ctrl+Break, the console closed, logoff or shutdown: as SIGTERM on Linux
+}
+
+/// Exits at once, with status 0, when the console asks the process to stop. A Windows service's stop
+/// request (the service control manager) is not handled: the server does not run as a service yet.
 pub fn exit_on_terminate() {
-    unimplemented!("no stop request is handled on Windows yet")
+    unsafe { SetConsoleCtrlHandler(Some(on_stop), 1) };
 }

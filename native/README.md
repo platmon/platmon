@@ -51,7 +51,7 @@ Behaviour kept from Python where bypassing std made it explicit:
 
 Dependencies: `libc` (MIT or Apache-2.0, no dependencies of its own) for system call numbers, flags and
 struct layouts per target. On Windows only, `windows-sys` (MIT or Apache-2.0, with `windows-link`, the
-same, its only dependency) for the WinSock and `BCryptGenRandom` declarations of `src/platform/windows.rs`;
+same, its only dependency) for the WinSock, `BCryptGenRandom`, interrupt time and console declarations of `src/platform/windows.rs`;
 the Linux builds do not compile it, so the packaged binaries contain neither. JSON output and SHA-256 are implemented here, because the output has to match
 Python's float repr and key order exactly, and both are tested against Python. Builds target `x86_64` and
 `aarch64-unknown-linux-musl` as static binaries.
@@ -1080,9 +1080,13 @@ On `x86_64-pc-windows-msvc`:
 - `platform/windows.rs`: `BCryptGenRandom` for the instance id; a WinSock listener with a backlog of 5,
   not inherited by child processes, and `SO_EXCLUSIVEADDRUSE` instead of Linux's `SO_REUSEADDR`, which on
   Windows lets another socket bind the same port.
-- Not chosen yet, so `unimplemented!`: the elapsed clock (whether it counts through sleep, as
-  `CLOCK_BOOTTIME` does, decides the age of data after a resume) and the stop request (console, service
-  control manager). The six unit tests that need the clock are ignored off Linux.
+- The elapsed clock: the interrupt time (`QueryInterruptTimePrecise`, 100 ns units), which counts through
+  sleep and hibernation as `CLOCK_BOOTTIME` does, so the age of data after a resume is the time that passed,
+  and `/api/status` reports `clock_source` `"boottime"` as on Linux (the Hub's contract unchanged); the
+  unbiased interrupt time, which stops while asleep, stands for `CLOCK_MONOTONIC`. Chosen 2026-10-24.
+- The stop request: Ctrl+C, Ctrl+Break, the console closed, logoff and shutdown exit with status 0, as
+  SIGTERM does on Linux (`SetConsoleCtrlHandler`). The service control manager's stop is not handled: the
+  server does not run as a Windows service.
 - Not shown: any Windows collector, a run on a Windows host outside CI.
 
 The Linux servers behave the same (unit tests, `config_fixture.py` 67/67, `runtime_fixture.py` 7/7,
