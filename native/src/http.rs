@@ -14,7 +14,6 @@ use crate::runtime::Sampler;
 use crate::slow::Observations;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::os::fd::FromRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,28 +53,10 @@ pub struct Server {
     active: AtomicUsize,
 }
 
-/// An IPv4 listening socket as Python's HTTPServer makes it: SO_REUSEADDR, a backlog of 5.
+/// An IPv4 listening socket as Python's HTTPServer makes it: a backlog of 5 (and SO_REUSEADDR on Linux).
 pub fn bind(addr: &str, port: u16) -> std::io::Result<TcpListener> {
     let ip: std::net::Ipv4Addr = addr.parse().map_err(|_| std::io::Error::other(format!("not an IPv4 address: {}", addr)))?;
-    unsafe {
-        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let listener = TcpListener::from_raw_fd(fd); // closes fd on the error paths below
-        let one: libc::c_int = 1;
-        let mut sa: libc::sockaddr_in = std::mem::zeroed();
-        sa.sin_family = libc::AF_INET as libc::sa_family_t;
-        sa.sin_port = port.to_be();
-        sa.sin_addr.s_addr = u32::from(ip).to_be();
-        if libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_REUSEADDR, (&one as *const libc::c_int).cast(),
-                            std::mem::size_of::<libc::c_int>() as libc::socklen_t) != 0
-            || libc::bind(fd, (&sa as *const libc::sockaddr_in).cast(), std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t) != 0
-            || libc::listen(fd, 5) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(listener)
-    }
+    crate::platform::listen(ip, port, 5)
 }
 
 /// RFC 7231 date of now, as the Date header.

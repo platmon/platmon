@@ -505,8 +505,7 @@ fn check(stats: &mut Value, sensors: &Value, required: &Value, passive: &Value, 
 /// A random (version 4) UUID, as uuid.uuid4(): the service's instance id.
 pub fn uuid4() -> String {
     let mut b = [0u8; 16];
-    let n = unsafe { libc::getrandom(b.as_mut_ptr().cast(), b.len(), 0) };
-    if n != b.len() as isize {
+    if !crate::platform::random_bytes(&mut b) {
         eprintln!("platmon-native: getrandom failed");
         std::process::exit(1);
     }

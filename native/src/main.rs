@@ -35,6 +35,7 @@ mod nvidia;
 mod observe;
 #[cfg(target_os = "linux")]
 mod passive;
+mod platform;
 mod pystr;
 mod render;
 mod replay;
@@ -556,11 +557,6 @@ fn collect_command(args: &[String]) {
 }
 
 #[cfg(target_os = "linux")]
-extern "C" fn on_term(_: libc::c_int) {
-    unsafe { libc::_exit(0) } // as platmon.py: a clean exit on SIGTERM (systemd stop, docker stop)
-}
-
-#[cfg(target_os = "linux")]
 /// observe-script TARGETS TIMEOUT (tools/fixture.py, the slow groups): for each stdin line, one observation
 /// of storage, wifi, battery and probe (with those [probe] targets and timeout), printed as one JSON line
 /// {"observations": {group: {"collector", "data"}}}.
@@ -634,7 +630,7 @@ fn serve(args: &[String]) {
     }
     let names = config::frontends(frontends.as_deref());
     let cfg = config::load(path.as_deref(), names.as_deref()).unwrap_or_else(|e| { eprintln!("platmon-native serve: error: {}", e); std::process::exit(2) });
-    unsafe { libc::signal(libc::SIGTERM, on_term as extern "C" fn(libc::c_int) as libc::sighandler_t) };
+    platform::exit_on_terminate();
     let interval = cfg.float("core", "interval");
     let mut c = Collector::new((3.0 * interval).max(5.0), [cfg.flag("network", "enabled"), cfg.flag("disk_io", "enabled"),
                                                             cfg.flag("pressure", "enabled")]);
