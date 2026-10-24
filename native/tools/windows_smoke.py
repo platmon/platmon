@@ -9,8 +9,9 @@
 - script and loop exit 2 with the usage: they are Linux's (fake trees, rusage);
 - config-check without a file: the defaults, no error;
 - runtime-script: answers /api/status as starting, with the given instance id;
-- serve on a free local port: /api/status ready with the clock {"source": "boottime"} and /api/stats 200 with a
-  snapshot, then stopped by its own handle."""
+- serve on a free local port: /api/status ready with the clock {"source": "boottime"}, /api/stats 200 with a
+  snapshot, and /api/observations with the probe connecting to the server itself (the only slow group
+  there), then stopped by its own handle."""
 import json
 import socket
 import subprocess
@@ -96,8 +97,9 @@ def main(binary):
           repr(r))
 
     port = free_port()
-    with open("platmon-smoke.ini", "w") as f:
-        f.write(f"[http]\nbind = 127.0.0.1\nport = {port}\n")
+    with open("platmon-smoke.ini", "w") as f:  # the probe connects to the server itself
+        f.write(f"[http]\nbind = 127.0.0.1\nport = {port}\n[probe]\ninterval = 1\ntimeout = 0.5\n"
+                f"targets = 127.0.0.1:{port}\n")
     server = subprocess.Popen([binary, "serve", "platmon-smoke.ini"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               text=True)
     try:
@@ -113,6 +115,17 @@ def main(binary):
         code, stats = get(port, "/api/stats")
         check("serve /api/stats", code == 200 and stats.get("platform") == "Windows"
               and stats.get("sample", {}).get("data_age_basis") == "oldest_current_read_start", f"{code} {json.dumps(stats)}")
+        deadline, probe = time.monotonic() + TIMEOUT, {}
+        while time.monotonic() < deadline:
+            code, observations = get(port, "/api/observations")
+            probe = (observations or {}).get("groups", {}).get("probe", {})
+            if probe.get("state") not in (None, "starting"):
+                break
+            time.sleep(0.5)
+        targets = (probe.get("data") or {}).get("targets", [])
+        check("serve /api/observations probe", sorted((observations or {}).get("groups", {})) == ["probe"]
+              and probe.get("state") == "ok" and len(targets) == 1 and isinstance(targets[0].get("connect_ms"), float)
+              and targets[0].get("reason") is None, json.dumps(probe))
     finally:
         server.kill()
         output = server.communicate(timeout=TIMEOUT)[0]

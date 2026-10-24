@@ -1,6 +1,7 @@
 //! Windows: the required data (CPU, memory, the system volume, identity) from the Win32 and NT system
-//! information calls, and Network (network.rs); the other optional groups have no provider here yet
-//! (unsupported_platform). Rust only: the Python service has no Windows collector to compare with.
+//! information calls, Network (network.rs) and the probe's connection; the other optional groups have no
+//! provider here yet (unsupported_platform). Rust only: the Python service has no Windows collector to
+//! compare with.
 pub mod network;
 
 use super::{timed, Collected, CpuCounters, Required};
@@ -13,12 +14,34 @@ use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF
 use windows_sys::Win32::System::SystemInformation as si;
 use windows_sys::Win32::System::WindowsProgramming::SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION;
 
-/// The slow groups this platform has readers for: none yet.
+/// The slow groups this platform has readers for: probe (src/collect/probe.rs). Storage, Wi-Fi and
+/// battery have no Windows reader yet; they are left out, as when they are off.
 pub mod observe {
-    pub const GROUPS: [&str; 0] = [];
+    pub const GROUPS: [&str; 1] = ["probe"];
 
-    pub fn reader(name: &str, _: &crate::config::Config) -> crate::slow::Reader {
-        unreachable!("no {} reader on this platform", name)
+    pub fn reader(name: &str, cfg: &crate::config::Config) -> crate::slow::Reader {
+        assert_eq!(name, "probe", "no {} reader on this platform", name);
+        let mut p = crate::collect::probe::Probe::new(cfg.targets.clone(), cfg.float("probe", "timeout"));
+        Box::new(move |g| Ok(p.observe(g)))
+    }
+}
+
+/// probe.connect_ms with std's connect_timeout: (ms to complete the connection, None) or (None, reason).
+/// Windows retries a refused connection attempt before it reports it, so a closed port can take longer
+/// than on Linux, and a timeout shorter than that reads as timeout.
+pub fn connect_ms(address: &str, port: u16, timeout: f64) -> (Option<f64>, Option<&'static str>) {
+    use std::io::ErrorKind;
+    let Ok(ip) = address.parse::<std::net::IpAddr>() else { return (None, Some("error")) };
+    let Ok(limit) = std::time::Duration::try_from_secs_f64(timeout) else { return (None, Some("error")) };
+    let start = std::time::Instant::now();
+    match std::net::TcpStream::connect_timeout(&std::net::SocketAddr::new(ip, port), limit) {
+        Ok(_) => (Some(round_to(start.elapsed().as_secs_f64() * 1e3, 3)), None),
+        Err(e) => (None, Some(match e.kind() {
+            ErrorKind::ConnectionRefused => "refused",
+            ErrorKind::TimedOut | ErrorKind::WouldBlock => "timeout",
+            ErrorKind::HostUnreachable | ErrorKind::NetworkUnreachable => "unreachable",
+            _ => "error",
+        })),
     }
 }
 
@@ -264,6 +287,19 @@ impl Collector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connect_ms_times_a_connection_and_names_failures() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (ms, why) = connect_ms("127.0.0.1", port, 2.0);
+        assert!(matches!(ms, Some(m) if m >= 0.0) && why.is_none(), "{:?} {:?}", ms, why);
+        assert_eq!(connect_ms("not an address", port, 2.0), (None, Some("error")));
+        drop(listener);
+        // nothing listens there now: refused, or timeout where Windows's retries outlast it
+        let (ms, why) = connect_ms("127.0.0.1", port, 5.0);
+        assert!(ms.is_none() && ["refused", "timeout"].contains(&why.unwrap()), "{:?}", why);
+    }
 
     #[test]
     fn a_second_collection_has_the_required_data_and_cpu_usage() {
