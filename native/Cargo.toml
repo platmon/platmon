@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 license = "Apache-2.0"
-description = "Experimental Rust port of the platmon collector (docs/performance/rust-feasibility.md); not part of the product"
+description = "The platmon server the Debian package runs (native/README.md)"
 
 [dependencies]
 # MIT OR Apache-2.0, no dependencies of its own: system call numbers, flags and struct layouts per target,
@@ -13,6 +13,11 @@ libc = "=0.2.172"
 # MIT (mimalloc 3.3.2's C, built by its sys crate with cc; Cargo.lock pins every version): the outside
 # allocator compared with the system one (README, System against mimalloc); off by default
 mimalloc = { version = "=0.1.52", optional = true, default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+# MIT OR Apache-2.0, with windows-link (MIT OR Apache-2.0) its only dependency: the Win32 declarations
+# platform/windows.rs calls (WinSock, BCryptGenRandom)
+windows-sys = { version = "=0.61.2", features = ["Win32_Networking_WinSock", "Win32_Security_Cryptography"] }
 
 [features]
 # the experimental size-class cache in front of the system allocator (src/alloc.rs); off by default

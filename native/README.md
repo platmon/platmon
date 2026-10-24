@@ -50,7 +50,9 @@ Behaviour kept from Python where bypassing std made it explicit:
   [Not covered](#equivalence-on-fake-trees)).
 
 Dependencies: `libc` (MIT or Apache-2.0, no dependencies of its own) for system call numbers, flags and
-struct layouts per target. JSON output and SHA-256 are implemented here, because the output has to match
+struct layouts per target. On Windows only, `windows-sys` (MIT or Apache-2.0, with `windows-link`, the
+same, its only dependency) for the WinSock and `BCryptGenRandom` declarations of `src/platform/windows.rs`;
+the Linux builds do not compile it, so the packaged binaries contain neither. JSON output and SHA-256 are implemented here, because the output has to match
 Python's float repr and key order exactly, and both are tested against Python. Builds target `x86_64` and
 `aarch64-unknown-linux-musl` as static binaries.
 
@@ -271,7 +273,7 @@ Python service on fixtures), **verified on hardware** (also run live on a host b
 
 | area | implemented and compared | verified on hardware | unverified / unsupported |
 | --- | --- | --- | --- |
-| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM built by `build-armhf.sh` and checked on the Raspberry Pi 4 in 32-bit mode ([below](#32-bit-arm-kept-ready)) but not released, so unsupported; other architectures unsupported |
+| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM built by `build-armhf.sh` and checked on the Raspberry Pi 4 in 32-bit mode ([below](#32-bit-arm-kept-ready)) but not released, so unsupported; `x86_64-pc-windows-msvc` builds and passes its unit tests in CI but does not collect ([below](#windows-builds-does-not-collect)), so unsupported; other architectures unsupported |
 | core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`) | the fixtures' "not covered" lists below |
 | GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first; **the fallback on a real NVIDIA GPU under WSL2** (GeForce RTX 4070 Ti, Windows driver 610.88, `/usr/lib/wsl/lib/nvidia-smi`; [results](#nvidia-smi-on-an-nvidia-gpu-wsl2)) | the nvidia-smi fallback with a native Linux NVIDIA driver on a PC or server: **not verified on such hardware** (WSL2 and the fixtures only; NVIDIA does not promise a stable nvidia-smi output); amdgpu fixture only; NVML unsupported; clocks of 2^128 Hz and more refused (below) |
 | slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
@@ -1051,6 +1053,37 @@ Python 3.13.5) against this tree's Python service:
 Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d085a30`, unit tests
 `bce4eb0a3e8886e8`; `sha256.txt`, `unit.txt`, ten `compare-*.json`, `config.txt`, `runtime.txt`, `live.json`,
 `smoke.txt`).
+
+### Windows (builds, does not collect)
+
+2026-10-24. Not released, not in the support scope; the first step towards a Windows agent. `src/platform/`
+holds what the service needs from the OS outside the collectors: the elapsed clocks, random bytes for the
+instance id, the listening socket and the exit on a stop request, one module per OS with the same
+functions. `platform/linux.rs` is the code `main.rs`, `metadata.rs`, `runtime.rs` and `http.rs` had,
+unchanged. The collectors (`sysfs.rs`, `common.rs`, `passive.rs`, `observe.rs`, the device readers) and the
+commands that use them (`collect`, `script`, `loop`, `serve`, `observe-script`) build on Linux only.
+
+On `x86_64-pc-windows-msvc`:
+- CI (`native-windows`, `windows-latest`) builds it with Rust 1.88 and MSVC, runs the unit tests and
+  `tools/windows_smoke.py`: 10 unit tests passed and 6 ignored, the smoke test passed (run 40056161915).
+- The commands that collect exit 1 with "no collector for this platform"; `config-check`,
+  `runtime-script`, `replay-cost` and `build-info` run.
+- `platform/windows.rs`: `BCryptGenRandom` for the instance id; a WinSock listener with a backlog of 5,
+  not inherited by child processes, and `SO_EXCLUSIVEADDRUSE` instead of Linux's `SO_REUSEADDR`, which on
+  Windows lets another socket bind the same port.
+- Not chosen yet, so `unimplemented!`: the elapsed clock (whether it counts through sleep, as
+  `CLOCK_BOOTTIME` does, decides the age of data after a resume) and the stop request (console, service
+  control manager). The six unit tests that need the clock are ignored off Linux.
+- Not shown: any Windows collector, a run on a Windows host outside CI.
+
+The Linux servers behave the same (unit tests, `config_fixture.py` 67/67, `runtime_fixture.py` 7/7,
+`fixture.sh` 11/11, `live_http.py` with no difference, `pytest`), but moved code changes their bytes, and
+the start line no longer ends in "(step 3 runtime)": x86_64 `d7b491c5ce844222`, aarch64 `0acd11a091ffe094`,
+armhf `3bef02ec30fff437`, no longer 1.4.0's. The aarch64 build before that line changed (`a05da99e69cbe394`)
+ran on the Jetson Orin Nano as the candidate unit of the [deployed form](#final-comparison-candidate-1) (2026-10-24): `checks` passed
+the native unit's start, restart (ready 0.1 s, 409), SIGKILL (back in 5.14 s), the held port and every
+stop; the Python unit's checks could not run, since 1.4.0 removed the Python server from the package. No
+soak. The next release verifies them again ([readiness](../docs/releases/readiness.md)).
 
 ### Earlier run (2026-10-18)
 

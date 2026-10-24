@@ -1,6 +1,8 @@
 //! collector/metadata.py: one optional group's diagnostics, timed reads, sensor sources and pointers.
 use crate::json::Value;
-use crate::{sha256, sysfs};
+use crate::{platform, sha256};
+#[cfg(target_os = "linux")]
+use crate::sysfs;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 pub const PROBLEMS: [&str; 6] = ["internal_error", "permission_denied", "io_error", "disappeared", "mount_changed", "invalid_data"];
@@ -11,15 +13,11 @@ const MAX_TARGET: usize = 64;
 // sampler.pick_clock: CLOCK_BOOTTIME, which keeps counting through suspend, so a window across a suspend
 // is as long as it really was (and a gap); CLOCK_MONOTONIC where it is not available. std's Instant is
 // CLOCK_MONOTONIC on Linux and stops while suspended, so it is not used for collection times.
-fn os_clock(id: libc::clockid_t) -> Option<i64> {
-    let mut t = libc::timespec { tv_sec: 0, tv_nsec: 0 };
-    (unsafe { libc::clock_gettime(id, &mut t) } == 0).then(|| t.tv_sec as i64 * 1_000_000_000 + t.tv_nsec as i64)
-}
 
 /// The clock this process uses, chosen once like pick_clock: "boottime" or "monotonic".
 pub fn clock_source() -> &'static str {
     static SOURCE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-    SOURCE.get_or_init(|| if os_clock(libc::CLOCK_BOOTTIME).is_some() { "boottime" } else { "monotonic" })
+    SOURCE.get_or_init(|| if platform::boottime_ns().is_some() { "boottime" } else { "monotonic" })
 }
 
 const UNSET: i64 = i64::MIN;
@@ -43,8 +41,8 @@ pub fn clock() -> i64 {
     if base != UNSET {
         return base + FAKE_TICK * FAKE_CALLS.fetch_add(1, Ordering::Relaxed);
     }
-    let id = if clock_source() == "boottime" { libc::CLOCK_BOOTTIME } else { libc::CLOCK_MONOTONIC };
-    os_clock(id).unwrap_or(0)
+    let ns = if clock_source() == "boottime" { platform::boottime_ns() } else { platform::monotonic_ns() };
+    ns.unwrap_or(0)
 }
 
 /// Unix time in seconds (time.time()).
@@ -121,6 +119,7 @@ impl Group {
         value
     }
 
+    #[cfg(target_os = "linux")]
     /// Group.read: parse(content of path), or None with the reason noted. found: what this collection
     /// discovered by listing; if that is gone too the file disappeared, else it is not exposed.
     pub fn read_with<T>(&mut self, path: &str, target: &str, found: Option<&str>, io_absent: bool,
@@ -156,10 +155,12 @@ impl Group {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub fn read_int(&mut self, path: &str, target: &str, found: Option<&str>) -> Option<i64> {
         self.read_with(path, target, found, false, py_int)
     }
 
+    #[cfg(target_os = "linux")]
     pub fn read_str(&mut self, path: &str, target: &str, found: Option<&str>) -> Option<String> {
         self.read_with(path, target, found, false, |t| Some(t.to_string()))
     }

@@ -6,7 +6,8 @@ use crate::json::Value;
 use crate::metadata::{py_int, Group};
 use crate::passive::{if_indexes, is_physical, namespace_id, strerror, valid_ifname};
 use crate::slow::Reader;
-use crate::sysfs::{self, py_space, ReadError};
+use crate::pystr::{py_space, py_split};
+use crate::sysfs::{self, ReadError};
 use std::collections::VecDeque;
 
 /// The slow groups in platmon.py's order.
@@ -103,7 +104,7 @@ fn parse_mountinfo(text: &str) -> (Vec<Mount>, Vec<String>) {
 fn parse_partitions(text: &str) -> Vec<((i64, i64), (String, i64))> {
     let mut out: Vec<((i64, i64), (String, i64))> = Vec::new();
     for line in text.split('\n').skip(2) {
-        let f = sysfs::py_split(line);
+        let f = py_split(line);
         if f.len() == 4 && f[..3].iter().all(|x| !x.is_empty() && x.bytes().all(|b| b.is_ascii_digit())) {
             let (Ok(major), Ok(minor), Ok(blocks)) = (f[0].parse::<i64>(), f[1].parse::<i64>(), f[2].parse::<i64>()) else { continue };
             let entry = ((major, minor), (f[3].to_string(), blocks * 1024));
@@ -275,7 +276,7 @@ fn parse_wireless(text: &str) -> Result<(Vec<Value>, Vec<(String, &'static str)>
             continue;
         }
         let n = i + 3;
-        let t = sysfs::py_split(line);
+        let t = py_split(line);
         let row = (t.len() == 11).then_some(()).and_then(|_| {
             let name = t[0].strip_suffix(':').filter(|n| !n.is_empty())?;
             if t[1].len() != 4 || !t[1].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {

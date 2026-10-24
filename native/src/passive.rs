@@ -2,7 +2,8 @@
 //! after the required data, and gives its output and the (start, end) of its read.
 use crate::json::{round_to, Value};
 use crate::metadata::{clock, Group, Span};
-use crate::sysfs::{self, py_printable, py_space, py_split, py_strip, ReadError};
+use crate::pystr::{py_printable, py_space, py_split, py_strip};
+use crate::sysfs::{self, ReadError};
 use std::io;
 
 const MAX_COUNTER: u128 = u64::MAX as u128;

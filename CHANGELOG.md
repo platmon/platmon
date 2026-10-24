@@ -9,7 +9,12 @@ API schema versions are independent of release versions.
 - armhf (32-bit ARM) is still not released: 1.4.0 has no armhf package, so armhf hosts stay on 1.3.0.
   The server is kept ready for it: `native/build-armhf.sh` builds it, `package.py --binary armhf=PATH`
   packages it, CI builds it, and its raw system calls now pass C longs, which 32-bit ARM needs (every
-  sysfs read failed there before). The amd64 and arm64 servers are byte for byte the same as 1.4.0's.
+  sysfs read failed there before).
+- Internal: the native server's OS calls outside the collectors are in `native/src/platform/`, and it
+  builds and runs its unit tests on Windows (x86_64, in CI), where it does not collect yet: the commands
+  that would exit (native/README.md, "Windows"). The Linux server's behavior, API and configuration do not
+  change, but its amd64 and arm64 binaries are no longer byte for byte 1.4.0's, and its start line no
+  longer ends in "(step 3 runtime)".
 
 ## 1.4.0 — 2026-10-23
 

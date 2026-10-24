@@ -52,6 +52,26 @@ jobs:
           path: native/target/*-unknown-linux-musl/release/platmon-native
           if-no-files-found: error
 
+  # Windows: the server builds with the MSVC toolchain and its tests pass; nothing collects there yet, so the
+  # smoke test checks that the commands that would collect refuse, and that the HTTP listener answers.
+  native-windows:
+    runs-on: windows-latest
+    env:
+      RUSTUP_TOOLCHAIN: "1.88"   # native/build.sh's image
+    defaults:
+      run:
+        shell: bash
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.88 --profile minimal
+      - name: Rust tests
+        run: cargo test --release --locked --no-default-features
+      - name: Build
+        run: cargo build --release --locked --no-default-features
+      - name: Smoke test
+        run: python tools/windows_smoke.py target/release/platmon-native.exe
+
   package:
     needs: [test, native]
     runs-on: ubuntu-latest

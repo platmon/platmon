@@ -14,7 +14,6 @@ use crate::runtime::Sampler;
 use crate::slow::Observations;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::os::fd::FromRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,28 +53,10 @@ pub struct Server {
     active: AtomicUsize,
 }
 
-/// An IPv4 listening socket as Python's HTTPServer makes it: SO_REUSEADDR, a backlog of 5.
+/// An IPv4 listening socket as Python's HTTPServer makes it: a backlog of 5 (and SO_REUSEADDR on Linux).
 pub fn bind(addr: &str, port: u16) -> std::io::Result<TcpListener> {
     let ip: std::net::Ipv4Addr = addr.parse().map_err(|_| std::io::Error::other(format!("not an IPv4 address: {}", addr)))?;
-    unsafe {
-        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let listener = TcpListener::from_raw_fd(fd); // closes fd on the error paths below
-        let one: libc::c_int = 1;
-        let mut sa: libc::sockaddr_in = std::mem::zeroed();
-        sa.sin_family = libc::AF_INET as libc::sa_family_t;
-        sa.sin_port = port.to_be();
-        sa.sin_addr.s_addr = u32::from(ip).to_be();
-        if libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_REUSEADDR, (&one as *const libc::c_int).cast(),
-                            std::mem::size_of::<libc::c_int>() as libc::socklen_t) != 0
-            || libc::bind(fd, (&sa as *const libc::sockaddr_in).cast(), std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t) != 0
-            || libc::listen(fd, 5) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(listener)
-    }
+    crate::platform::listen(ip, port, 5)
 }
 
 /// RFC 7231 date of now, as the Date header.
@@ -501,6 +482,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn concurrent_reads_never_collect() {
         let (addr, calls) = server(|_| {});
         std::thread::sleep(Duration::from_millis(100));
@@ -526,6 +508,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn excess_connections_are_closed() {
         let (addr, _) = server(|s| s.max_connections = 4);
         let held: Vec<TcpStream> = (0..4).map(|_| TcpStream::connect(addr).unwrap()).collect();
@@ -552,6 +535,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn answers_like_the_python_server() {
         let (addr, _) = server(|_| {});
         let status = |r: &str| r.lines().next().unwrap_or("").to_string();
@@ -583,6 +567,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn a_reader_that_stops_is_dropped() {
         // an answer far larger than the socket buffers, a client that never reads it: the write stops making
         // progress, times out, and the one connection slot is free again while the core keeps collecting
@@ -615,6 +600,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn no_snapshot_is_503() {
         let sampler = Arc::new(Sampler::new(1.0, None, "x".into(), "boottime"));
         let obs = Arc::new(Observations { groups: vec![], instance_id: "x".into(), clock_source: "boottime" });

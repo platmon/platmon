@@ -1,5 +1,5 @@
-//! Experimental Rust port of collector.collect_recorded (docs/performance/rust-feasibility.md, next step 1).
-//! Not part of the product. Covers the core groups: CPU, clocks, thermal zones, hwmon, memory, disk,
+//! The platmon server the Debian package runs, a port of the Python service (native/README.md). Its collector
+//! covers the core groups: CPU, clocks, thermal zones, hwmon, memory, disk,
 //! identity, the Jetson extension, DRM GPU and accel NPU, collectors and sensor source ids, and the
 //! passive groups Network, Disk I/O and Pressure as the service enables them by default, and the nvidia-smi
 //! fallback.
@@ -16,28 +16,41 @@
 //!                                     groups, history, replay and the HTTP API (src/runtime.rs, src/http.rs)
 //!   platmon-native runtime-script     tools/runtime_fixture.py: Sampler and slow-group operations with
 //!                                     given times and collections, one JSON line per stdin line
+// Elsewhere the shared helpers the Linux collectors call have no caller yet.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg(target_os = "linux")]
 mod accel;
 #[cfg(feature = "cache-alloc")]
 mod alloc;
+#[cfg(target_os = "linux")]
 mod common;
 mod config;
 mod history;
 mod http;
+#[cfg(target_os = "linux")]
 mod jetson;
 mod json;
 mod metadata;
+#[cfg(target_os = "linux")]
 mod nvidia;
+#[cfg(target_os = "linux")]
 mod observe;
+#[cfg(target_os = "linux")]
 mod passive;
+mod platform;
+mod pystr;
 mod render;
 mod replay;
 mod runtime;
 mod sha256;
 mod slow;
+#[cfg(target_os = "linux")]
 mod sysfs;
 
+#[cfg(target_os = "linux")]
 use common::{CpuCounters, Fan};
 use json::Value;
+#[cfg(target_os = "linux")]
 use metadata::{pointer, Group, Slot};
 
 #[cfg(feature = "cache-alloc")]
@@ -59,6 +72,7 @@ pub const ALLOCATOR: &str = if cfg!(feature = "cache-alloc") { "cache-alloc" } e
 pub const ALLOCATOR_MARK: &str = if cfg!(feature = "cache-alloc") { "platmon-native-allocator=cache-alloc;" }
     else if cfg!(feature = "mimalloc") { "platmon-native-allocator=mimalloc;" } else { "platmon-native-allocator=system;" };
 
+#[cfg(target_os = "linux")]
 pub struct Groups {
     pub cpu_frequency: Group,
     pub gpu: Group,
@@ -73,6 +87,7 @@ pub struct Groups {
     pub pressure: Group,
 }
 
+#[cfg(target_os = "linux")]
 impl Groups {
     fn new(trace: bool) -> Groups {
         let g = |n| Group::new(n, trace);
@@ -94,9 +109,11 @@ impl Groups {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, PartialEq)]
 enum Board { Jetson, None }
 
+#[cfg(target_os = "linux")]
 /// core.detect: (platform, board module) from the device tree's compatible string.
 fn detect() -> (&'static str, Board) {
     // not UTF-8: Python's import of collector.core fails, so the service does not start either
@@ -111,6 +128,7 @@ fn detect() -> (&'static str, Board) {
     (if sysfs::is_dir("/sys/class/dmi/id") { "PC" } else { "Linux" }, Board::None)
 }
 
+#[cfg(target_os = "linux")]
 struct Collector {
     platform: &'static str,
     board: Board,
@@ -123,6 +141,7 @@ struct Collector {
     logged: Vec<(String, Vec<String>)>,
 }
 
+#[cfg(target_os = "linux")]
 struct Collected {
     stats: Value,
     sensors: Vec<(String, Value)>,
@@ -131,6 +150,7 @@ struct Collected {
     passive: [metadata::Span; 3],
 }
 
+#[cfg(target_os = "linux")]
 impl Collected {
     /// {"stats", "sensors", "required", "passive"}: Collected's fields as the Python harnesses print them.
     fn to_value(self) -> Value {
@@ -152,10 +172,12 @@ impl Collected {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn span_value(span: metadata::Span) -> Value {
     span.map_or(Value::Null, |(a, b)| Value::Arr(vec![a.into(), b.into()]))
 }
 
+#[cfg(target_os = "linux")]
 impl Collector {
     /// max_gap: seconds, max(3 × interval, 5 s) in the service; passive: network, disk_io, pressure on
     fn new(max_gap: f64, passive: [bool; 3]) -> Collector {
@@ -217,6 +239,7 @@ impl Collector {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn fans_value(fans: &[Fan]) -> Value {
     Value::Arr(fans.iter().map(|f| {
         let mut v = Value::obj();
@@ -227,6 +250,7 @@ fn fans_value(fans: &[Fan]) -> Value {
     }).collect())
 }
 
+#[cfg(target_os = "linux")]
 /// core.sensor_entries: {JSON Pointer: metadata} for the sensor values in the final stats.
 fn sensor_entries(stats: &Value, fans: &[Fan], g: &Groups) -> Vec<(String, Value)> {
     let mut out = Vec::new();
@@ -271,6 +295,7 @@ fn sensor_entries(stats: &Value, fans: &[Fan], g: &Groups) -> Vec<(String, Value
     out
 }
 
+#[cfg(target_os = "linux")]
 /// (user s, system s) of this process.
 fn usage() -> (f64, f64) {
     let mut r: libc::rusage = unsafe { std::mem::zeroed() };
@@ -279,6 +304,7 @@ fn usage() -> (f64, f64) {
     (s(&r.ru_utime), s(&r.ru_stime))
 }
 
+#[cfg(target_os = "linux")]
 /// (VmRSS, VmHWM) in KiB from /proc/self/status.
 fn rss_kib() -> (i64, i64) {
     let text = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
@@ -287,6 +313,7 @@ fn rss_kib() -> (i64, i64) {
     (field("VmRSS:"), field("VmHWM:"))
 }
 
+#[cfg(target_os = "linux")]
 /// What the loop reports besides CPU, the same as tools/pyloop.py: collection times, missed 1 s deadlines,
 /// RSS over the run, per group how often each state came up, the number of source ids of the last
 /// collection, and how many different read scopes (read_scope) came up, with the last one.
@@ -301,6 +328,7 @@ struct Stats {
     scope: Value,
 }
 
+#[cfg(target_os = "linux")]
 /// pyloop.read_scope: the SHA-256 (16 hex digits) of the sorted source ids, and the names of the interfaces,
 /// disks and pressure resources read.
 fn read_scope(col: &Collected) -> Value {
@@ -322,6 +350,7 @@ fn read_scope(col: &Collected) -> Value {
     v
 }
 
+#[cfg(target_os = "linux")]
 impl Stats {
     fn add(&mut self, col: &Collected) {
         if let Some(Value::Obj(groups)) = col.stats.get("collectors") {
@@ -429,14 +458,28 @@ fn replay_cost(args: &[String]) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        #[cfg(target_os = "linux")]
         Some("serve") => return serve(&args[2..]),
         Some("runtime-script") => return runtime_script(),
         Some("config-check") => return config_check(&args[2..]),
+        #[cfg(target_os = "linux")]
         Some("observe-script") => return observe_script(&args[2..]),
         Some("replay-cost") => return replay_cost(&args[2..]),
         Some("build-info") => return println!("{}", ALLOCATOR_MARK),
         _ => {}
     }
+    collect_command(&args);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn collect_command(_: &[String]) {
+    eprintln!("platmon-native: no collector for this platform");
+    std::process::exit(1);
+}
+
+/// collect, script and loop: the commands that collect on this host.
+#[cfg(target_os = "linux")]
+fn collect_command(args: &[String]) {
     let mut c = Collector::new(5.0, [true; 3]); // the service's at its default 1 s interval
     match args.get(1).map(String::as_str) {
         Some("collect") => {
@@ -515,10 +558,7 @@ fn main() {
     }
 }
 
-extern "C" fn on_term(_: libc::c_int) {
-    unsafe { libc::_exit(0) } // as platmon.py: a clean exit on SIGTERM (systemd stop, docker stop)
-}
-
+#[cfg(target_os = "linux")]
 /// observe-script TARGETS TIMEOUT (tools/fixture.py, the slow groups): for each stdin line, one observation
 /// of storage, wifi, battery and probe (with those [probe] targets and timeout), printed as one JSON line
 /// {"observations": {group: {"collector", "data"}}}.
@@ -569,6 +609,7 @@ fn config_check(args: &[String]) {
     println!("{}", out.to_string(false));
 }
 
+#[cfg(target_os = "linux")]
 /// platmon.py: serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]. The configuration as
 /// platmon.py reads it; the slow groups are on as configured, with their readers (src/observe.rs).
 fn serve(args: &[String]) {
@@ -591,11 +632,11 @@ fn serve(args: &[String]) {
     }
     let names = config::frontends(frontends.as_deref());
     let cfg = config::load(path.as_deref(), names.as_deref()).unwrap_or_else(|e| { eprintln!("platmon-native serve: error: {}", e); std::process::exit(2) });
-    unsafe { libc::signal(libc::SIGTERM, on_term as extern "C" fn(libc::c_int) as libc::sighandler_t) };
+    platform::exit_on_terminate();
     let interval = cfg.float("core", "interval");
     let mut c = Collector::new((3.0 * interval).max(5.0), [cfg.flag("network", "enabled"), cfg.flag("disk_io", "enabled"),
                                                             cfg.flag("pressure", "enabled")]);
-    println!("platmon-native: platform {}, version {} (step 3 runtime)", c.platform, version);
+    println!("platmon-native: platform {}, version {}", c.platform, version);
     let source = metadata::clock_source();
     let mut sampler = runtime::Sampler::new(interval, None, runtime::uuid4(), source);
     let slow_names: Vec<&str> = observe::GROUPS.iter().copied()
