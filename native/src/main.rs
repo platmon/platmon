@@ -16,6 +16,8 @@
 //!                                     groups, history, replay and the HTTP API (src/runtime.rs, src/http.rs)
 //!   platmon-native runtime-script     tools/runtime_fixture.py: Sampler and slow-group operations with
 //!                                     given times and collections, one JSON line per stdin line
+// Elsewhere the shared helpers the Linux collectors call have no caller yet.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 #[cfg(target_os = "linux")]
 mod accel;
 #[cfg(feature = "cache-alloc")]

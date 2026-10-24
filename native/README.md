@@ -50,7 +50,9 @@ Behaviour kept from Python where bypassing std made it explicit:
   [Not covered](#equivalence-on-fake-trees)).
 
 Dependencies: `libc` (MIT or Apache-2.0, no dependencies of its own) for system call numbers, flags and
-struct layouts per target. JSON output and SHA-256 are implemented here, because the output has to match
+struct layouts per target. On Windows only, `windows-sys` (MIT or Apache-2.0, with `windows-link`, the
+same, its only dependency) for the WinSock and `BCryptGenRandom` declarations of `src/platform/windows.rs`;
+the Linux builds do not compile it, so the packaged binaries contain neither. JSON output and SHA-256 are implemented here, because the output has to match
 Python's float repr and key order exactly, and both are tested against Python. Builds target `x86_64` and
 `aarch64-unknown-linux-musl` as static binaries.
 
