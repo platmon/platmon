@@ -7,7 +7,7 @@ published data. Collection is not triggered by requests.
 ## Requirements and installation
 
 The primary distribution is a `.deb` package for Ubuntu and Debian-derived Linux hosts
-(including suitable Jetson and Raspberry Pi systems), built for **amd64** and **arm64**.
+(including suitable Jetson and Raspberry Pi systems), built for **amd64**, **arm64** and **armhf** (32-bit ARM).
 It requires **systemd** and, for the `platmon` command, **Python 3.9+** on the host.
 The service is one static native binary; the command uses only the Python standard library.
 A package for an architecture does not imply that every OS or kernel on it has been validated.

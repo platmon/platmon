@@ -108,7 +108,7 @@ def fake_server(path, arch, mark=ALLOCATOR_MARK):
 
 @pytest.fixture
 def binaries(tmp_path):
-    """The binaries native/build.sh left, else fakes (enough to package, not to run)."""
+    """The binaries native/build.sh and build-armhf.sh left, else fakes (enough to package, not to run)."""
     real = {arch: default_binary(arch) for arch in RELEASED}
     if all(path.is_file() for path in real.values()):
         return real
@@ -295,9 +295,9 @@ def test_server_binary_checked(tmp_path, case, message):
     assert not (tmp_path / "dist").exists() or not list((tmp_path / "dist").iterdir())
 
 
-def test_armhf_is_packaged_only_from_a_binary_given_for_it(tmp_path):
-    """armhf is kept buildable (native/build-armhf.sh), not released: no default build packages it."""
-    assert "armhf" not in RELEASED
+def test_armhf_is_released_as_a_32_bit_package(tmp_path):
+    """armhf is released (native/build-armhf.sh), and only a 32-bit ARM binary packages it."""
+    assert "armhf" in RELEASED
     with pytest.raises(ValueError, match="not a 32-bit little-endian ELF for armhf"):
         check_binary("armhf", fake_server(tmp_path / "arm64", "arm64"))
     if shutil.which("dpkg-deb") is None:

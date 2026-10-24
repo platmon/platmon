@@ -20,7 +20,7 @@ flowchart LR
 
 ## Highlights
 
-- **Dependency-free runtime:** the Debian package's server is one static native binary (amd64, arm64);
+- **Dependency-free runtime:** the Debian package's server is one static native binary (amd64, arm64, armhf);
   the `platmon` command, the source installation and the container use the Python 3.9+ standard library
   only. No Python packages to install on the device.
 - **Hardware-aware monitoring:** CPU, available GPU/NPU, memory, network and disk I/O, storage,
@@ -34,7 +34,7 @@ flowchart LR
 
 ## Quick start
 
-On Ubuntu/Debian-derived Linux (amd64 or arm64) with Python 3.9+ and systemd, install from the signed
+On Ubuntu/Debian-derived Linux (amd64, arm64 or armhf) with Python 3.9+ and systemd, install from the signed
 [APT repository](https://platmon.github.io/apt/) (see [getting started](docs/guides/getting-started.md)),
 download a verified package from [GitHub Releases](https://github.com/platmon/platmon/releases),
 or build one from this checkout (Linux with `dpkg-deb` and Docker for the server's build required):

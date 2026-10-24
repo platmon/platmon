@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The 32-bit ARM build, kept ready but not released: no package, no APT entry, not in the support scope
-# (native/README.md). Same image, flags and system allocator as build.sh, for arm-unknown-linux-musleabihf
-# (ARMv6 with VFP, so Raspberry Pi OS's armhf and Debian's ARMv7 armhf both run it):
+# The 32-bit ARM build, released as armhf (native/README.md, 32-bit ARM). Same image, flags and system
+# allocator as build.sh, for arm-unknown-linux-musleabihf (ARMv6 with VFP, so Raspberry Pi OS's armhf and
+# Debian's ARMv7 armhf both run it):
 #   native/build-armhf.sh   -> native/target/arm-unknown-linux-musleabihf/release/platmon-native
 #                              and platmon-native-tests next to it (the unit tests, not run here)
 # An x86 machine cannot run either; a 32-bit ARM host or a 64-bit ARM kernel with 32-bit support can (the

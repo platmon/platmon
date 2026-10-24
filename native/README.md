@@ -273,7 +273,7 @@ Python service on fixtures), **verified on hardware** (also run live on a host b
 
 | area | implemented and compared | verified on hardware | unverified / unsupported |
 | --- | --- | --- | --- |
-| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM built by `build-armhf.sh` and checked on the Raspberry Pi 4 in 32-bit mode ([below](#32-bit-arm-kept-ready)) but not released, so unsupported; `x86_64-pc-windows-msvc` builds, passes its unit tests and serves the required data in CI but is not released ([below](#windows-collects-the-required-data-not-released)), so unsupported; other architectures unsupported |
+| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM (`arm-unknown-linux-musleabihf`, released as armhf) built by `build-armhf.sh`, checked on the Raspberry Pi 4 in 32-bit mode and its package under QEMU in CI ([below](#32-bit-arm)), no 32-bit kernel or ARMv6/ARMv7 board verified; `x86_64-pc-windows-msvc` builds, passes its unit tests and serves the required data in CI but is not released ([below](#windows-collects-the-required-data-not-released)), so unsupported; other architectures unsupported |
 | core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`) | the fixtures' "not covered" lists below |
 | GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first; **the fallback on a real NVIDIA GPU under WSL2** (GeForce RTX 4070 Ti, Windows driver 610.88, `/usr/lib/wsl/lib/nvidia-smi`; [results](#nvidia-smi-on-an-nvidia-gpu-wsl2)) | the nvidia-smi fallback with a native Linux NVIDIA driver on a PC or server: **not verified on such hardware** (WSL2 and the fixtures only; NVIDIA does not promise a stable nvidia-smi output); amdgpu fixture only; NVML unsupported; clocks of 2^128 Hz and more refused (below) |
 | slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
@@ -319,7 +319,7 @@ its source, build, binaries, running conditions and comparison, is fixed in [CAN
 ```sh
 native/build.sh                     # in a rust:1.88 container; unit tests, then the system allocator build for both targets
 native/build-cache-alloc.sh         # the cache-alloc build (a record, for bench.sh's C), into target/cache-alloc
-native/build-armhf.sh               # the 32-bit ARM build and its unit tests (kept ready, not released)
+native/build-armhf.sh               # the 32-bit ARM build (armhf) and its unit tests, not run here
 native/tools/fixture.sh             # deterministic equivalence on fake trees, in a container
 PYTHONPATH=. python3 native/tools/compare.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 PYTHONPATH=. native/tools/bench.sh native/target/x86_64-unknown-linux-musl/release/platmon-native out.jsonl \
@@ -1037,12 +1037,18 @@ set up by the owner.
 Raw: `~/.local/state/platmon-measure/native-20261021-deploy/wsl/` (`live.json` `c4013bc96a7d6b50`,
 `compare-1.json` `c9c5e81d10b0f5d2`, ten `compare-*.json`). The copies on the WSL host were removed.
 
-### 32-bit ARM (kept ready)
+### 32-bit ARM
 
-2026-10-23. Not released, not in the support scope; the build is kept ready. `build-armhf.sh` builds
+Released as armhf from the release after 1.5.0 (decided 2026-10-24, with no 32-bit test device: CI's QEMU
+check below and the 2026-10-23 run on the Raspberry Pi 4 are the evidence). 2026-10-23: `build-armhf.sh` builds
 `arm-unknown-linux-musleabihf` (ARMv6 with VFP, which runs on both Raspberry Pi OS's and Debian's armhf)
-with build.sh's image, flags and system allocator. CI builds it and does not run it: GitHub's arm64 runners
-cannot run 32-bit code. It ran on the Raspberry Pi 4 (Debian 13, arm64 kernel 6.18 running 32-bit programs,
+with build.sh's image, flags and system allocator. GitHub's arm64 runners cannot run 32-bit code, so CI's
+`armhf-userspace` runs the package in Debian 13 and Ubuntu 24.04 armhf userspaces under QEMU: the extracted
+package's smoke check (its server answers) and the dpkg lifecycle. The service check that `ubuntu-userspace`
+runs on amd64 and arm64 (the upgrade from 1.3.0 under a booted systemd) does not work under QEMU user
+emulation: the unit's sandbox does not start, even 1.3.0's Python unit on Debian, and the service's
+executable reads as `qemu-arm` (first CI run, 2026-10-24). So the armhf service under systemd is not
+verified. It ran on the Raspberry Pi 4 (Debian 13, arm64 kernel 6.18 running 32-bit programs,
 Python 3.13.5) against this tree's Python service:
 - First build: 27 of 28 unit tests passed. The failure was real. `libc::syscall` is variadic and
   `sysfs.rs` passed its arguments as `i64`. On 32-bit ARM a 64-bit vararg takes an aligned register
@@ -1056,8 +1062,9 @@ Python 3.13.5) against this tree's Python service:
   override. The package smoke check passed on the Pi with its host check off, because the Pi's dpkg
   architecture is arm64.
 - What it does not show: `fixture.sh` (needs Docker; the Pi has none), a 32-bit kernel, an ARMv6 or
-  ARMv7 board, install and upgrade under apt, a service run, CPU or memory, and the APT repository
-  (`apt/tools/update.sh` takes `_all` or exactly amd64 and arm64).
+  ARMv7 board, install and upgrade through apt on a device, the service under systemd, CPU or memory. The
+  package's smoke check and dpkg lifecycle run only under QEMU in CI (`armhf-userspace`). The APT repository takes
+  an armhf package once its `apt/tools/update.sh` accepts the three packages (platmon.github.io).
 
 Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d085a30`, unit tests
 `bce4eb0a3e8886e8`; `sha256.txt`, `unit.txt`, ten `compare-*.json`, `config.txt`, `runtime.txt`, `live.json`,
