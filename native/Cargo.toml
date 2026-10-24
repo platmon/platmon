@@ -17,7 +17,7 @@ mimalloc = { version = "=0.1.52", optional = true, default-features = false }
 [target.'cfg(windows)'.dependencies]
 # MIT OR Apache-2.0, with windows-link (MIT OR Apache-2.0) its only dependency: the Win32 declarations
 # platform/windows.rs calls (WinSock, BCryptGenRandom)
-windows-sys = { version = "=0.61.2", features = ["Win32_Networking_WinSock", "Win32_Security_Cryptography"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Networking_WinSock", "Win32_Security_Cryptography", "Win32_System_Console", "Win32_System_WindowsProgramming"] }
 
 [features]
 # the experimental size-class cache in front of the system allocator (src/alloc.rs); off by default

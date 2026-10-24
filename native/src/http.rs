@@ -482,7 +482,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn concurrent_reads_never_collect() {
         let (addr, calls) = server(|_| {});
         std::thread::sleep(Duration::from_millis(100));
@@ -508,7 +507,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn excess_connections_are_closed() {
         let (addr, _) = server(|s| s.max_connections = 4);
         let held: Vec<TcpStream> = (0..4).map(|_| TcpStream::connect(addr).unwrap()).collect();
@@ -535,7 +533,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn answers_like_the_python_server() {
         let (addr, _) = server(|_| {});
         let status = |r: &str| r.lines().next().unwrap_or("").to_string();
@@ -567,7 +564,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn a_reader_that_stops_is_dropped() {
         // an answer far larger than the socket buffers, a client that never reads it: the write stops making
         // progress, times out, and the one connection slot is free again while the core keeps collecting
@@ -600,7 +596,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn no_snapshot_is_503() {
         let sampler = Arc::new(Sampler::new(1.0, None, "x".into(), "boottime"));
         let obs = Arc::new(Observations { groups: vec![], instance_id: "x".into(), clock_source: "boottime" });

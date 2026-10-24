@@ -181,7 +181,6 @@ mod tests {
     use std::sync::mpsc;
 
     #[test]
-    #[cfg_attr(not(target_os = "linux"), ignore = "no elapsed clock on this platform yet (src/platform)")]
     fn a_blocked_read_stalls_only_its_group() {
         let (release, wait) = mpsc::channel::<()>();
         let calls = Arc::new(Mutex::new(0));
