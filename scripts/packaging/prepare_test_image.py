@@ -2,8 +2,9 @@
 """Build the local image the package checks run in, so that they do not use the network themselves.
 
   python3 scripts/packaging/prepare_test_image.py ubuntu:24.04 platmon-package-test:local
+  python3 scripts/packaging/prepare_test_image.py --platform linux/arm/v7 debian:13 platmon-package-test:local
 
-An Ubuntu userspace with the OS tools the checks need (PACKAGES), installed once per job instead of in
+An Ubuntu (or Debian) userspace, of another architecture under QEMU with --platform, with the OS tools the checks need (PACKAGES), installed once per job instead of in
 each check's fresh container. A mirror in the middle of a sync answers with indexes of an unexpected
 size or hash, which apt does not retry, and a stalled mirror can hang an install: so the update and
 install run up to ATTEMPTS times, each within ATTEMPT_TIMEOUT seconds and PAUSE seconds apart, and a
@@ -32,10 +33,12 @@ def dockerfile(base):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("base", help="the Ubuntu image, e.g. ubuntu:24.04")
+    parser.add_argument("base", help="the base image, e.g. ubuntu:24.04")
     parser.add_argument("tag", help="the local tag to build")
+    parser.add_argument("--platform", help="the image's platform, e.g. linux/arm/v7 (default: the host's)")
     args = parser.parse_args()
-    subprocess.run(["docker", "build", "-t", args.tag, "-"], input=dockerfile(args.base), text=True,
+    platform = ["--platform", args.platform] if args.platform else []
+    subprocess.run(["docker", "build", *platform, "-t", args.tag, "-"], input=dockerfile(args.base), text=True,
                    check=True)
 
 

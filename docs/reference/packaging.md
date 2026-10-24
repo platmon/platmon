@@ -1,15 +1,17 @@
 # Packaging and releases
 
 The primary distribution is a Debian package for Ubuntu and Debian-derived Linux hosts
-(including supported Jetson and Raspberry Pi systems), one per architecture: `amd64` and `arm64`.
+(including supported Jetson and Raspberry Pi systems), one per architecture: `amd64`, `arm64` and `armhf`.
 The service is a static native server built from `native/` (Rust, musl, the system allocator); the
 `platmon` command is one Python file that uses the host's Python 3.9+ standard library only. The package
 uses the host's systemd; it bundles neither Python nor OS/NVIDIA binaries. A package for an architecture
 does not mean that every OS/kernel on it has been validated. A device whose Python is older than 3.9
 needs a supported OS/interpreter before installation. Releases up to 1.3.0 are one `Architecture: all`
 package with the Python server; the source installation and the container still run that server.
-`armhf` (32-bit ARM) is not released, so armhf hosts stay on 1.3.0. Its build is kept ready but
-unsupported: `native/build-armhf.sh` builds the server, and `package.py --binary armhf=PATH` packages it
+`armhf` (32-bit ARM, ARMv6 with VFP and later, e.g. Raspberry Pi OS 32-bit) is built by
+`native/build-armhf.sh`; releases 1.4.0 and 1.5.0 had no armhf package, so armhf hosts upgrade from 1.3.0.
+No GitHub runner runs 32-bit ARM code: CI checks the armhf package in Debian 13 and Ubuntu 24.04 armhf
+userspaces under QEMU, which shows the package, binary and service work, not a real board's kernel or speed
 (native/README.md, 32-bit ARM).
 
 Python 3.8 and Ubuntu 20.04 are CI observation targets under
@@ -67,6 +69,7 @@ lintian --no-cfg --info --pedantic --fail-on error,warning "$platmon_dist"/*.deb
 ```
 
 The fresh output directory contains `platmon_<version>-1_amd64.deb`, `platmon_<version>-1_arm64.deb`,
+`platmon_<version>-1_armhf.deb`,
 `platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the servers' SHA-256 and versions) and
 `SHA256SUMS`. The builder takes the servers from `native/target/` by default, or one per
 `--binary ARCH=PATH`; it refuses a file that is not an ELF for that architecture or lacks the
@@ -257,10 +260,10 @@ directories are never automatically deleted by subsequent updates or uninstall.
 ## Release procedure
 
 1. Update VERSION in `runtime/__init__.py` (and its copy in `frontends/cli.py`) and the changelog. Review the scoped change and run
-   `git diff --check`, `pytest -v`, `native/build.sh`, the build, package checker and Lintian.
+   `git diff --check`, `pytest -v`, `native/build.sh`, `native/build-armhf.sh`, the build, package checker and Lintian.
 2. Test fresh install, upgrade with an edited INI, downgrade, remove/purge and existing
    installation migration. CI uses isolated containers for the dpkg lifecycle and, with systemd
-   booted in the container, the service check (below), on amd64 and arm64 runners; device
+   booted in the container, the service check (below), on amd64 and arm64 runners and armhf under QEMU; device
    readings, a real reboot and a real Hub require real-device acceptance.
 3. Merge the reviewed change into `main` using the repository's signing/hooks policy.
    Tag the verified commit included in `main` as `v<version>` matching VERSION; use `v<version>-2` for packaging

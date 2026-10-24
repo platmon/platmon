@@ -34,7 +34,7 @@ jobs:
           python-version: "3.13.5"
       - name: Build the server (Rust tests, amd64 and arm64, the system allocator)
         run: native/build.sh
-      # Kept ready, not released: built so it keeps compiling; these runners cannot run 32-bit code.
+      # Released; these runners cannot run 32-bit code, so armhf-userspace runs its package under QEMU.
       - name: Build the 32-bit ARM server (armhf)
         run: native/build-armhf.sh
       - name: Compare with the Python service
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server
-          path: native/target/*-unknown-linux-musl/release/platmon-native
+          path: native/target/*-unknown-linux-musl*/release/platmon-native
           if-no-files-found: error
 
   # Windows: the server builds with the MSVC toolchain and its tests pass; nothing collects there yet, so the
@@ -153,3 +153,51 @@ jobs:
       - name: Check the service under systemd (upgrade, failed start, recovery, boot)
         if: matrix.ubuntu != '20.04'
         run: python3 scripts/packaging/check_package_service.py previous/platmon_1.3.0-1_all.deb dist/second/*_${{ matrix.arch }}.deb --image platmon-package-test:local
+
+  # armhf has no GitHub runner (the arm64 ones are AArch64 only): its package in a 32-bit ARM userspace
+  # under QEMU, on Debian 13 (Raspberry Pi OS's base) and Ubuntu 24.04. Emulation shows the package, the
+  # binary and the service work there, not their speed or a real board's kernel (native/README.md).
+  armhf-userspace:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        base: ["debian:13", "ubuntu:24.04"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-package
+          path: dist/first
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-upgrade-fixture
+          path: dist/second
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      - name: Prepare the test image (python3, systemd)
+        timeout-minutes: 30
+        run: python3 scripts/packaging/prepare_test_image.py --platform linux/arm/v7 ${{ matrix.base }} platmon-package-test:local
+      - name: Check extracted package with the OS default Python
+        run: |
+          docker run --rm --security-opt=no-new-privileges \
+            --mount "type=bind,src=$PWD,dst=/checkout,readonly" \
+            platmon-package-test:local sh -ec '
+              python3 --version
+              dpkg --print-architecture
+              python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/*_armhf.deb
+            '
+      - name: Check package lifecycle
+        run: python3 scripts/packaging/check_package_install.py dist/first/*_armhf.deb dist/second/*_armhf.deb --image platmon-package-test:local
+      # armhf hosts stayed on 1.3.0, the last Architecture: all release: the package they upgrade from.
+      - name: Fetch the previous release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.3.0 --repo "$GITHUB_REPOSITORY" --dir previous \
+            --pattern platmon_1.3.0-1_all.deb --pattern SHA256SUMS
+          (cd previous && grep ' platmon_1.3.0-1_all.deb$' SHA256SUMS | sha256sum -c)
+      - name: Check the service under systemd (upgrade, failed start, recovery, boot)
+        run: python3 scripts/packaging/check_package_service.py previous/platmon_1.3.0-1_all.deb dist/second/*_armhf.deb --image platmon-package-test:local

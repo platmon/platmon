@@ -28,9 +28,8 @@ SOURCE_DIRS = ("collector", "runtime", "frontends", "native", "scripts", "packag
 # Debian architecture: the Rust target native/build.sh builds for it, its ELF e_machine and class (bits).
 ARCHES = {"amd64": ("x86_64-unknown-linux-musl", 62, 64), "arm64": ("aarch64-unknown-linux-musl", 183, 64),
           "armhf": ("arm-unknown-linux-musleabihf", 40, 32)}
-# What a release packages. armhf is kept buildable (native/build-armhf.sh) and packaged only when its binary
-# is passed (--binary armhf=PATH); it is not released (native/README.md, support scope).
-RELEASED = ("amd64", "arm64")
+# What a release packages: build.sh's two binaries and build-armhf.sh's.
+RELEASED = ("amd64", "arm64", "armhf")
 ALLOCATOR_MARK = b"platmon-native-allocator=system;"
 
 
@@ -232,8 +231,8 @@ def main():
     parser.add_argument("--output", default=str(ROOT / "dist"), help="fresh output directory (default dist)")
     parser.add_argument("--revision", default="1", help="Debian packaging revision (default 1)")
     parser.add_argument("--binary", action="append", metavar="ARCH=PATH",
-                        help="a server binary for one architecture (repeat; default: amd64 and arm64 from "
-                             "native/target, built by native/build.sh; armhf only when given)")
+                        help="a server binary for one architecture (repeat; default: amd64, arm64 and armhf "
+                             "from native/target, built by native/build.sh and native/build-armhf.sh)")
     parser.add_argument("--version", action="version", version=version())
     args = parser.parse_args()
     try:
