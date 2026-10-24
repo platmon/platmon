@@ -2,6 +2,7 @@
 # platmon candidate check: removes everything install.sh put in place (sudo bash uninstall.sh).
 set -uo pipefail
 [ "$(id -u)" = 0 ] || { echo "run it with sudo" >&2; exit 1; }
+# and the Python unit an install before 1.5.0 put in place (1.4.0 removed the Python server it ran)
 units="platmon-native-candidate.service platmon-native-candidate-fakesmi.service platmon-python-candidate.service"
 systemctl stop $units
 rm -f /etc/sudoers.d/platmon-candidate

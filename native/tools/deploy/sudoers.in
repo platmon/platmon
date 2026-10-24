@@ -1,4 +1,4 @@
-# platmon candidate check: the login user may start, stop, restart and kill the three candidate units and
+# platmon candidate check: the login user may start, stop, restart and kill the two candidate units and
 # read their resources; nothing else. Removed by uninstall.sh. platmon.service is not named here.
 @USER@ ALL=(root) NOPASSWD: \
   /usr/bin/systemctl start platmon-native-candidate.service, \
@@ -8,9 +8,5 @@
   /usr/bin/systemctl start platmon-native-candidate-fakesmi.service, \
   /usr/bin/systemctl stop platmon-native-candidate-fakesmi.service, \
   /usr/bin/systemctl restart platmon-native-candidate-fakesmi.service, \
-  /usr/bin/systemctl start platmon-python-candidate.service, \
-  /usr/bin/systemctl stop platmon-python-candidate.service, \
-  /usr/bin/systemctl restart platmon-python-candidate.service, \
-  /usr/bin/systemctl kill --signal=SIGKILL platmon-python-candidate.service, \
-  /usr/bin/systemctl reset-failed platmon-native-candidate.service platmon-native-candidate-fakesmi.service platmon-python-candidate.service, \
+  /usr/bin/systemctl reset-failed platmon-native-candidate.service platmon-native-candidate-fakesmi.service, \
   /usr/lib/platmon-candidate/measure ""

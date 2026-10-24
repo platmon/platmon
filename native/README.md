@@ -330,10 +330,19 @@ PYTHONPATH=. python3 native/tools/live_http.py native/target/x86_64-unknown-linu
 python3 native/tools/service_ab.py --tree PYTHON_TREE --binary BINARY --out ab.jsonl   # about 2.5 h; --quick to try it
 python3 native/tools/ab_report.py ab.jsonl
 BINARY replay-cost core.jsonl 20; python3 native/tools/replay_cost_py.py core.jsonl PYTHON_TREE 20
-python3 native/tools/hub_check.py native|python --hub HUB_EXECUTABLE --hosts pc,orin=USER@HOST --out DIR   # 13 min
+sudo bash native/tools/deploy/install.sh   # on a host, once, from a staged copy with the binary: the candidate units
+python3 native/tools/deploy_check.py checks --out checks.jsonl   # about 15 min; soak --hours N, report
+python3 native/tools/hub_check.py --hub HUB_EXECUTABLE --hosts pc,orin=USER@HOST --out DIR   # 13 min
 ```
 
-On a board, use the installed collector as the reference: `PYTHONPATH=/usr/share/platmon`.
+On a board, use a source tree of the same version as the reference (`PYTHONPATH=TREE`): since 1.4.0 the
+package installs no Python collector under `/usr/share/platmon`.
+
+The candidate units (`native/tools/deploy/`) run a build beside `platmon.service` on 127.0.0.1:19797:
+`platmon-native-candidate` and `platmon-native-candidate-fakesmi` (the same with a slow fake nvidia-smi).
+Since 1.4.0 the checks are the native server's alone: `start` on the INI, then restart, SIGKILL, the held
+port and the stops. The Python unit and its swap and rollback checks, used for candidate 1 below, are gone
+with the package's Python server; `uninstall.sh` still removes that unit where an earlier install left it.
 
 - `fixture.sh` / `fixture.py`: **the equivalence test.** Fake `/sys` and `/proc` trees are mounted over the
   real ones in a throwaway container (a local Debian 13 image with python3, built on first use and never
