@@ -1,7 +1,7 @@
-//! collector/gpu.py (DRM class, then nvidia-smi: src/nvidia.rs) and collector/npu.py (accel class).
+//! collector/gpu.py (DRM class, then nvidia-smi: nvidia.rs) and collector/npu.py (accel class).
 use crate::json::{round_to, Value};
 use crate::metadata::{clock, source, Group, Slot};
-use crate::sysfs::{self, driver_of, entries};
+use super::sysfs::{self, driver_of, entries};
 
 fn numbered_name(n: &str, prefix: &str) -> bool {
     n.strip_prefix(prefix).map_or(false, |d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
@@ -42,7 +42,7 @@ pub struct Accel {
 
 impl Accel {
     /// max_gap: nanoseconds, round(max_gap * 1e9) of the Python Gpu/Npu
-    pub fn gpu(max_gap: i64) -> Accel { Accel { kind: "gpu", max_gap, last: Vec::new(), nvidia_smi: crate::nvidia::find() } }
+    pub fn gpu(max_gap: i64) -> Accel { Accel { kind: "gpu", max_gap, last: Vec::new(), nvidia_smi: super::nvidia::find() } }
     pub fn npu(max_gap: i64) -> Accel { Accel { kind: "npu", max_gap, last: Vec::new(), nvidia_smi: None } }
 
     fn share(&mut self, path: &str, counter: i64, ns_per_unit: i64, busy: bool) -> Option<f64> {
@@ -69,7 +69,7 @@ impl Accel {
         let names: Vec<String> = entries(class, &mut [g], false).into_iter().filter(|n| numbered_name(n, prefix)).collect();
         if names.is_empty() {
             if let Some(path) = &self.nvidia_smi {
-                return crate::nvidia::sample(path, g);
+                return super::nvidia::sample(path, g);
             }
             g.note(self.kind, "not_detected", None);
             return None;
@@ -109,7 +109,7 @@ impl Accel {
                 Some(entry(usage, f, m, driver, Some("npu_busy_time")))
             }
             _ => {
-                if let Some(v) = self.nvidia_smi.as_ref().and_then(|path| crate::nvidia::sample(path, g)) {
+                if let Some(v) = self.nvidia_smi.as_ref().and_then(|path| super::nvidia::sample(path, g)) {
                     return Some(v);
                 }
                 let target = driver.clone().unwrap_or_else(|| name.clone());

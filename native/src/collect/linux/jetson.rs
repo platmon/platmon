@@ -1,8 +1,8 @@
 //! collector/jetson.py: Tegra GPU load and clock, nvpmodel power mode, pwm_tach fans, L4T release.
-use crate::common::{next_fan_id, Fan};
+use super::common::{next_fan_id, Fan};
 use crate::json::Value;
 use crate::metadata::{source, Group, Slot};
-use crate::sysfs::{self, entries, hwmon_chips};
+use super::sysfs::{self, entries, hwmon_chips};
 use crate::Groups;
 
 const GPU_DEVFREQ: [&str; 5] = ["*.gpu", "*.ga10b", "*.gv11b", "*.gp10b", "*.gm20b"];

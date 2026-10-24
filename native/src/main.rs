@@ -18,25 +18,14 @@
 //!                                     given times and collections, one JSON line per stdin line
 // Elsewhere the shared helpers the Linux collectors call have no caller yet.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
-#[cfg(target_os = "linux")]
-mod accel;
 #[cfg(feature = "cache-alloc")]
 mod alloc;
-#[cfg(target_os = "linux")]
-mod common;
+mod collect;
 mod config;
 mod history;
 mod http;
-#[cfg(target_os = "linux")]
-mod jetson;
 mod json;
 mod metadata;
-#[cfg(target_os = "linux")]
-mod nvidia;
-#[cfg(target_os = "linux")]
-mod observe;
-#[cfg(target_os = "linux")]
-mod passive;
 mod platform;
 mod pystr;
 mod render;
@@ -44,9 +33,9 @@ mod replay;
 mod runtime;
 mod sha256;
 mod slow;
-#[cfg(target_os = "linux")]
-mod sysfs;
 
+#[cfg(target_os = "linux")]
+use collect::linux::{accel, common, jetson, observe, passive, sysfs};
 #[cfg(target_os = "linux")]
 use common::{CpuCounters, Fan};
 use json::Value;
@@ -611,7 +600,7 @@ fn config_check(args: &[String]) {
 
 #[cfg(target_os = "linux")]
 /// platmon.py: serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]. The configuration as
-/// platmon.py reads it; the slow groups are on as configured, with their readers (src/observe.rs).
+/// platmon.py reads it; the slow groups are on as configured, with their readers (src/collect/linux/observe.rs).
 fn serve(args: &[String]) {
     let (mut path, mut web_dir, mut version, mut frontends) = (None, None, "0.0.0".to_string(), None);
     let mut it = args.iter();

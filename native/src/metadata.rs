@@ -2,7 +2,7 @@
 use crate::json::Value;
 use crate::{platform, sha256};
 #[cfg(target_os = "linux")]
-use crate::sysfs;
+use crate::collect::linux::sysfs;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 pub const PROBLEMS: [&str; 6] = ["internal_error", "permission_denied", "io_error", "disappeared", "mount_changed", "invalid_data"];
