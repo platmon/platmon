@@ -155,8 +155,9 @@ jobs:
         run: python3 scripts/packaging/check_package_service.py previous/platmon_1.3.0-1_all.deb dist/second/*_${{ matrix.arch }}.deb --image platmon-package-test:local
 
   # armhf has no GitHub runner (the arm64 ones are AArch64 only): its package in a 32-bit ARM userspace
-  # under QEMU, on Debian 13 (Raspberry Pi OS's base) and Ubuntu 24.04. Emulation shows the package, the
-  # binary and the service work there, not their speed or a real board's kernel (native/README.md).
+  # under QEMU, on Debian 13 (Raspberry Pi OS's base) and Ubuntu 24.04: the smoke check and the dpkg
+  # lifecycle. Not the service under systemd: under QEMU user emulation the unit's sandbox does not start
+  # (even 1.3.0's on Debian) and a process's executable is qemu-arm (native/README.md, 32-bit ARM).
   armhf-userspace:
     needs: package
     strategy:
@@ -191,13 +192,3 @@ jobs:
             '
       - name: Check package lifecycle
         run: python3 scripts/packaging/check_package_install.py dist/first/*_armhf.deb dist/second/*_armhf.deb --image platmon-package-test:local
-      # armhf hosts stayed on 1.3.0, the last Architecture: all release: the package they upgrade from.
-      - name: Fetch the previous release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download v1.3.0 --repo "$GITHUB_REPOSITORY" --dir previous \
-            --pattern platmon_1.3.0-1_all.deb --pattern SHA256SUMS
-          (cd previous && grep ' platmon_1.3.0-1_all.deb$' SHA256SUMS | sha256sum -c)
-      - name: Check the service under systemd (upgrade, failed start, recovery, boot)
-        run: python3 scripts/packaging/check_package_service.py previous/platmon_1.3.0-1_all.deb dist/second/*_armhf.deb --image platmon-package-test:local

@@ -1044,8 +1044,11 @@ check below and the 2026-10-23 run on the Raspberry Pi 4 are the evidence). 2026
 `arm-unknown-linux-musleabihf` (ARMv6 with VFP, which runs on both Raspberry Pi OS's and Debian's armhf)
 with build.sh's image, flags and system allocator. GitHub's arm64 runners cannot run 32-bit code, so CI's
 `armhf-userspace` runs the package in Debian 13 and Ubuntu 24.04 armhf userspaces under QEMU: the extracted
-package's smoke check, the dpkg lifecycle, and the upgrade from 1.3.0 under a booted systemd (failed start,
-recovery, boot), as `ubuntu-userspace` does on amd64 and arm64. It ran on the Raspberry Pi 4 (Debian 13, arm64 kernel 6.18 running 32-bit programs,
+package's smoke check (its server answers) and the dpkg lifecycle. The service check that `ubuntu-userspace`
+runs on amd64 and arm64 (the upgrade from 1.3.0 under a booted systemd) does not work under QEMU user
+emulation: the unit's sandbox does not start, even 1.3.0's Python unit on Debian, and the service's
+executable reads as `qemu-arm` (first CI run, 2026-10-24). So the armhf service under systemd is not
+verified. It ran on the Raspberry Pi 4 (Debian 13, arm64 kernel 6.18 running 32-bit programs,
 Python 3.13.5) against this tree's Python service:
 - First build: 27 of 28 unit tests passed. The failure was real. `libc::syscall` is variadic and
   `sysfs.rs` passed its arguments as `i64`. On 32-bit ARM a 64-bit vararg takes an aligned register
@@ -1059,8 +1062,8 @@ Python 3.13.5) against this tree's Python service:
   override. The package smoke check passed on the Pi with its host check off, because the Pi's dpkg
   architecture is arm64.
 - What it does not show: `fixture.sh` (needs Docker; the Pi has none), a 32-bit kernel, an ARMv6 or
-  ARMv7 board, install and upgrade through apt on a device, CPU or memory. The package's dpkg lifecycle
-  and its service under systemd run only under QEMU in CI (`armhf-userspace`). The APT repository takes
+  ARMv7 board, install and upgrade through apt on a device, the service under systemd, CPU or memory. The
+  package's smoke check and dpkg lifecycle run only under QEMU in CI (`armhf-userspace`). The APT repository takes
   an armhf package once its `apt/tools/update.sh` accepts the three packages (platmon.github.io).
 
 Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d085a30`, unit tests

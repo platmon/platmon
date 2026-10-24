@@ -11,8 +11,8 @@ package with the Python server; the source installation and the container still 
 `armhf` (32-bit ARM, ARMv6 with VFP and later, e.g. Raspberry Pi OS 32-bit) is built by
 `native/build-armhf.sh`; releases 1.4.0 and 1.5.0 had no armhf package, so armhf hosts upgrade from 1.3.0.
 No GitHub runner runs 32-bit ARM code: CI checks the armhf package in Debian 13 and Ubuntu 24.04 armhf
-userspaces under QEMU, which shows the package, binary and service work, not a real board's kernel or speed
-(native/README.md, 32-bit ARM).
+userspaces under QEMU (the smoke check and the dpkg lifecycle). The service under systemd, a real board's
+kernel and speed are not verified there (native/README.md, 32-bit ARM).
 
 Python 3.8 and Ubuntu 20.04 are CI observation targets under
 [ADR 0001](../development/adr/0001-ubuntu-lts-python-support.md), outside official support and
@@ -263,7 +263,7 @@ directories are never automatically deleted by subsequent updates or uninstall.
    `git diff --check`, `pytest -v`, `native/build.sh`, `native/build-armhf.sh`, the build, package checker and Lintian.
 2. Test fresh install, upgrade with an edited INI, downgrade, remove/purge and existing
    installation migration. CI uses isolated containers for the dpkg lifecycle and, with systemd
-   booted in the container, the service check (below), on amd64 and arm64 runners and armhf under QEMU; device
+   booted in the container, the service check (below), on amd64 and arm64 runners (armhf: the lifecycle only, under QEMU); device
    readings, a real reboot and a real Hub require real-device acceptance.
 3. Merge the reviewed change into `main` using the repository's signing/hooks policy.
    Tag the verified commit included in `main` as `v<version>` matching VERSION; use `v<version>-2` for packaging
