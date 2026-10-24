@@ -3,6 +3,10 @@
 pub mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{observe, Collector};
+#[cfg(windows)]
+pub mod windows;
+#[cfg(windows)]
+pub use windows::{observe, Collector};
 
 use crate::json::{round_to, Value};
 use crate::metadata::{self, clock, Span};
