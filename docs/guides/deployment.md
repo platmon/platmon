@@ -44,6 +44,9 @@ and the authoritative
 
 ## Source installation with systemd
 
+This runs the Python server, which is deprecated and will be removed in a later release
+([changelog](../../CHANGELOG.md)); the Debian package runs the native server.
+
 From a checkout, on a Linux device with systemd and Python 3.9+:
 
 ```sh
@@ -71,6 +74,9 @@ Do not use these scripts to overwrite a package-managed installation:
 use APT for packages.
 
 ## Docker on native Linux
+
+This runs the Python server, which is deprecated and will be removed in a later release
+([changelog](../../CHANGELOG.md)); the Debian package runs the native server.
 
 No ready-made image is published. Build locally from the repository
 (see [Container image licensing](#container-image-licensing)):

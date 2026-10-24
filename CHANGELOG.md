@@ -4,9 +4,13 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `runtime/__init__.py` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.5.0 — 2026-10-24
 
-- armhf (32-bit ARM) is still not released: 1.4.0 has no armhf package, so armhf hosts stay on 1.3.0.
+- Deprecated: the Python server (`platmon.py`, `collector/`, `runtime/`), which the source installation
+  and the container run, will be removed in a later release. The Debian package already runs the native
+  server; the source installation and the container will move to it, or be replaced, in that release.
+  The HTTP API, `platmon.ini`, the `platmon` command and the web page do not change.
+- armhf (32-bit ARM) is still not released: 1.5.0 has no armhf package, so armhf hosts stay on 1.3.0.
   The server is kept ready for it: `native/build-armhf.sh` builds it, `package.py --binary armhf=PATH`
   packages it, CI builds it, and its raw system calls now pass C longs, which 32-bit ARM needs (every
   sysfs read failed there before).
@@ -15,6 +19,13 @@ API schema versions are independent of release versions.
   that would exit (native/README.md, "Windows"). The Linux server's behavior, API and configuration do not
   change, but its amd64 and arm64 binaries are no longer byte for byte 1.4.0's, and its start line no
   longer ends in "(step 3 runtime)".
+- The APT source in the guides sets `Architectures` to the host's (`dpkg --print-architecture`), so a
+  host with a foreign architecture enabled (i386 on a PC) no longer warns on every `apt update`; getting
+  started shows how to add it to an existing source (#99).
+- Internal: the package checks' OS tools are installed once per CI cell, with retries (#100); a native
+  unit test no longer fails at random with ETXTBSY (#102); the candidate service checks
+  (`native/tools/deploy_check.py`, `hub_check.py`) run the native server alone, without the Python unit
+  the 1.4.0 package can no longer start (#103).
 
 ## 1.4.0 — 2026-10-23
 

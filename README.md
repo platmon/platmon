@@ -29,6 +29,8 @@ flowchart LR
 - **History and integration:** recent in-memory trends plus
   [bounded full-sample replay](docs/reference/replay.md) for external consumers.
 - **Deployment choices:** Debian package with systemd, source installation or a locally built Docker image.
+  The source installation and the container run the Python server, which is deprecated and will be
+  removed in a later release (see the [changelog](CHANGELOG.md)).
 
 ## Quick start
 
