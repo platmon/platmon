@@ -40,7 +40,7 @@ collection started (elapsed clock, as of the answer; wall-clock steps do not cha
 | `temperature/<source id>` (or `temperature/name:<key>` without an id) | °C | `sensor_meta` source id ([api.md](api.md#sensor-sources-and-read-times)) |
 | `power/<source id>` (or `power/name:<key>` without an id) | W | the same, for the power rails: a rail is a named sensor value like a temperature channel |
 | `network/<namespace id>/<ifindex>/<name>/rx_bytes_per_s`, `…/tx_bytes_per_s` | bytes/s | namespace, index and name together ([network.md](network.md#scope-and-identity)); interfaces without a known index are not kept |
-| `disk_io/<major>:<minor>/<name>/read_bytes_per_s`, `…/write_bytes_per_s` | bytes/s | device number and name ([disk-io.md](disk-io.md)) |
+| `disk_io/<major>:<minor>/<name>/read_bytes_per_s`, `…/write_bytes_per_s` | bytes/s | device number and name ([disk-io.md](disk-io.md)); disks without a device number (Windows) are not kept |
 
 A replaced device, another namespace or index, or a new source id starts a **new** series instead of
 continuing an old one. Rates are the server's own, never recomputed from the counters.

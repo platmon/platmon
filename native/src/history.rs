@@ -129,6 +129,9 @@ pub fn points_of(stats: &Value, meta: &Value) -> Result<Points, ()> {
         let Value::Obj(_) = dio else { return Err(()) };
         for d in list(dio.get("disks"))? {
             if !matches!(d, Value::Obj(_)) { return Err(()); }
+            if matches!(d.get("major"), Some(Value::Null)) {
+                continue; // no device number (Windows): nothing ties points of one disk together
+            }
             for k in ["read_bytes_per_s", "write_bytes_per_s"] {
                 let id = format!("disk_io/{}:{}/{}/{}", field(d, "major")?, field(d, "minor")?, field(d, "name")?, k);
                 put(&mut out, id, get_or_null(truthy(d.get("rates")), k));
@@ -376,5 +379,21 @@ impl History {
             out.push((sid, Value::Arr(ps.into_iter().map(|(seq, t, v)| Value::Arr(vec![seq.into(), ms(now - t).into(), v])).collect())));
         }
         (Value::Obj(out), dropped)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_disk_without_a_device_number_has_no_series() {
+        let disk = |name: &str, number: &str| format!(
+            r#"{{"name": "{}", "major": {}, "minor": {}, "rates": {{"read_bytes_per_s": 1.0, "write_bytes_per_s": 2.0}}}}"#,
+            name, number, number);
+        let stats = crate::json::parse(&format!(r#"{{"disk_io": {{"disks": [{}, {}]}}}}"#, disk("PhysicalDrive0", "null"),
+                                                disk("sda", "8"))).unwrap();
+        let ids: Vec<String> = points_of(&stats, &Value::Null).unwrap().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(ids, ["disk_io/8:8/sda/read_bytes_per_s", "disk_io/8:8/sda/write_bytes_per_s"]);
     }
 }

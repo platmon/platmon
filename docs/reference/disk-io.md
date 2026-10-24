@@ -91,6 +91,33 @@ lookup fail, reported per disk); in a virtual machine the "physical" disks are t
 virtual SCSI disks the same way. A container deployment of this feature has not been benchmarked. On 32-bit kernels some counters are 32-bit and
 wrap; a wrap shows as `counter_regressed` for one reading.
 
+## Windows
+
+The Windows build of the native server (not released; native/README.md, Windows) reads each
+`\\.\PhysicalDriveN` that Windows lists (`QueryDosDeviceW`) with `IOCTL_DISK_PERFORMANCE` instead of
+`/proc/diskstats`, with the same rates, reasons and baselines. Not every field has a Windows counter:
+
+- `provider` is `ioctl_disk_performance`; `scope` stays `host_block_devices`. `name` is `PhysicalDrive0`,
+  `PhysicalDrive1`, …; every disk Windows lists is kept (Windows has no `devices/virtual/` to tell virtual
+  ones apart; Storage Spaces' member disks are not listed, their virtual disk is).
+- `major` and `minor` are `null`: Windows has no device numbers. A disk is matched by its name, whose
+  number Windows can give to another disk after a removal; a counter regression still resets rates. Such
+  disks have no history series ([history.md](history.md)).
+- `merges` is `null` (Windows counts split requests, not merged ones) and so is `io_time_ms` (no
+  cumulative busy time). `bytes` are Windows's own byte counts; `time_ms` is its read and write time,
+  truncated from 100 ns units; `in_flight` its queue depth.
+- `io_time_ratio` is the window less the time the disk was idle (no request outstanding, Windows's
+  cumulative idle time), divided by the window: the complement of Linux's "at least one request in
+  flight". The idle time is the driver's clock and the window platmon's: an idle time a little longer
+  than the window (an idle disk, seen on CI's runner) gives `0.0`, not a negative share.
+- `ios` are 32-bit on Windows: at 100,000 requests a second they wrap in about 12 hours, which shows as
+  `counter_regressed` for one reading, as on 32-bit Linux kernels.
+- A disk that cannot be opened or queried is left out and reported under its name: `permission_denied`,
+  `disappeared` (gone between the listing and the query), `not_exposed` (a disk without performance
+  counters) or `io_error`. A listing that fails gives `disks: []` and state `error`; no disk is
+  `unavailable` (`not_detected`). The query needs no access rights; this was checked only on CI's runner,
+  which runs as an administrator.
+
 ## Diagnostics and freshness
 
 `collectors.disk_io` follows the optional-group rules ([api.md](api.md#optional-metrics)), as network does:

@@ -1104,9 +1104,12 @@ On `x86_64-pc-windows-msvc`:
     uname names it, `hostname` the DNS host name.
   - `network`: `GetIfTable2`, with Linux's rates and reasons, scope `host` and provider `if_table2`
     ([network.md](../docs/reference/network.md#windows)).
+  - `disk_io`: `IOCTL_DISK_PERFORMANCE` on each `PhysicalDriveN`, with Linux's rates and reasons, provider
+    `ioctl_disk_performance`; `major`, `minor`, `merges` and `io_time_ms` are `null` and `io_time_ratio`
+    comes from the idle time ([disk-io.md](../docs/reference/disk-io.md#windows)).
   - The other optional groups (CPU clocks, GPU, NPU, temperature, power, fans, power mode, board info)
-    are `unavailable` with `unsupported_platform`; `sensor_meta` is empty. Disk I/O and Pressure are left
-    out, as when they are off, whatever `platmon.ini` says.
+    are `unavailable` with `unsupported_platform`; `sensor_meta` is empty. Pressure is left out, as when
+    it is off, whatever `platmon.ini` says.
   - Slow groups: the probe, with `collect/probe.rs` shared by both platforms and std's `connect_timeout`
     for the connection ([probe.md](../docs/reference/probe.md#windows)). Storage, Wi-Fi and battery are
     left out, as when they are off.
@@ -1121,7 +1124,8 @@ On `x86_64-pc-windows-msvc`:
 - The stop request: Ctrl+C, Ctrl+Break, the console closed, logoff and shutdown exit with status 0, as
   SIGTERM does on Linux (`SetConsoleCtrlHandler`). The service control manager's stop is not handled: the
   server does not run as a Windows service.
-- Not shown: a run on a Windows host outside CI, Windows on ARM, more than 64 CPUs, a sleep and resume.
+- Not shown: a run on a Windows host outside CI, Windows on ARM, more than 64 CPUs, a sleep and resume,
+  the disk query without administrator rights.
 
 The Linux servers behave the same (unit tests, `config_fixture.py` 67/67, `runtime_fixture.py` 7/7,
 `fixture.sh` 11/11, `live_http.py` with no difference, `pytest`), but moved code changes their bytes, and
