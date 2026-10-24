@@ -36,7 +36,7 @@ mod sha256;
 mod slow;
 
 #[cfg(target_os = "linux")]
-use collect::linux::{observe, Collected, Collector};
+use collect::{observe, Collected, Collector};
 use json::Value;
 
 #[cfg(feature = "cache-alloc")]

@@ -4,7 +4,7 @@
 use crate::json::{self, Value};
 use crate::{history, http, metadata, replay, runtime, slow};
 #[cfg(target_os = "linux")]
-use crate::collect::linux::{observe, Collected, Collector};
+use crate::collect::{observe, Collected, Collector};
 
 #[cfg(target_os = "linux")]
 /// (user s, system s) of this process.
