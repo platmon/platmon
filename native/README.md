@@ -51,7 +51,7 @@ Behaviour kept from Python where bypassing std made it explicit:
 
 Dependencies: `libc` (MIT or Apache-2.0, no dependencies of its own) for system call numbers, flags and
 struct layouts per target. On Windows only, `windows-sys` (MIT or Apache-2.0, with `windows-link`, the
-same, its only dependency) for the WinSock, `BCryptGenRandom`, interrupt time and console declarations of `src/platform/windows.rs`;
+same, its only dependency) for the Win32 declarations of `src/platform/windows.rs` and `src/collect/windows/`;
 the Linux builds do not compile it, so the packaged binaries contain neither. JSON output and SHA-256 are implemented here, because the output has to match
 Python's float repr and key order exactly, and both are tested against Python. Builds target `x86_64` and
 `aarch64-unknown-linux-musl` as static binaries.
@@ -273,7 +273,7 @@ Python service on fixtures), **verified on hardware** (also run live on a host b
 
 | area | implemented and compared | verified on hardware | unverified / unsupported |
 | --- | --- | --- | --- |
-| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM built by `build-armhf.sh` and checked on the Raspberry Pi 4 in 32-bit mode ([below](#32-bit-arm-kept-ready)) but not released, so unsupported; `x86_64-pc-windows-msvc` builds and passes its unit tests in CI but does not collect ([below](#windows-builds-does-not-collect)), so unsupported; other architectures unsupported |
+| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM built by `build-armhf.sh` and checked on the Raspberry Pi 4 in 32-bit mode ([below](#32-bit-arm-kept-ready)) but not released, so unsupported; `x86_64-pc-windows-msvc` builds, passes its unit tests and serves the required data in CI but is not released ([below](#windows-collects-the-required-data-not-released)), so unsupported; other architectures unsupported |
 | core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`) | the fixtures' "not covered" lists below |
 | GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first; **the fallback on a real NVIDIA GPU under WSL2** (GeForce RTX 4070 Ti, Windows driver 610.88, `/usr/lib/wsl/lib/nvidia-smi`; [results](#nvidia-smi-on-an-nvidia-gpu-wsl2)) | the nvidia-smi fallback with a native Linux NVIDIA driver on a PC or server: **not verified on such hardware** (WSL2 and the fixtures only; NVIDIA does not promise a stable nvidia-smi output); amdgpu fixture only; NVML unsupported; clocks of 2^128 Hz and more refused (below) |
 | slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
@@ -1063,31 +1063,53 @@ Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d
 `bce4eb0a3e8886e8`; `sha256.txt`, `unit.txt`, ten `compare-*.json`, `config.txt`, `runtime.txt`, `live.json`,
 `smoke.txt`).
 
-### Windows (builds, does not collect)
+### Windows (collects the required data, not released)
 
-2026-10-24. Not released, not in the support scope; the first step towards a Windows agent. `src/platform/`
+2026-10-24. Not released, not in the support scope; the first steps towards a Windows agent. `src/platform/`
 holds what the service needs from the OS outside the collectors: the elapsed clocks, random bytes for the
 instance id, the listening socket and the exit on a stop request, one module per OS with the same
 functions. `platform/linux.rs` is the code `main.rs`, `metadata.rs`, `runtime.rs` and `http.rs` had,
-unchanged. The collectors (`src/collect/linux/`: `sysfs.rs`, `common.rs`, `passive.rs`, `observe.rs`, the device readers) and the
-commands that use them (`collect`, `script`, `loop`, `serve`, `observe-script`) build on Linux only.
+unchanged. `src/collect/mod.rs` keeps what both collectors use (the CPU counters' windows and reasons, the
+required reads' spans, `Collected`); `src/collect/linux/` (`sysfs.rs`, `common.rs`, `passive.rs`,
+`observe.rs`, the device readers) and the commands only it serves (`script`, `loop`, `observe-script`) build
+on Linux only.
 
 On `x86_64-pc-windows-msvc`:
 - CI (`native-windows`, `windows-latest`) builds it with Rust 1.88 and MSVC, runs the unit tests and
-  `tools/windows_smoke.py`: 10 unit tests passed and 6 ignored, the smoke test passed (run 40056161915).
-- The commands that collect exit 1 with "no collector for this platform"; `config-check`,
-  `runtime-script`, `replay-cost` and `build-info` run.
+  `tools/windows_smoke.py`, which runs `collect` and `serve` on the runner.
+- `serve` and `collect` run; `config-check`, `runtime-script`, `replay-cost` and `build-info` too. `script`,
+  `loop` and `observe-script` print the usage (they drive Linux's fake trees and `rusage`).
+- `src/collect/windows/`, Rust only (the Python service has no Windows collector to compare with): the
+  required data in the fields, types and key order of a Linux collection, `platform` `"Windows"`.
+  - `cpu`: per-CPU usage from `NtQuerySystemInformation` (`SystemProcessorPerformanceInformation`, 100 ns
+    units) through the same `CpuCounters` as Linux: user, kernel time without idle as system (it includes
+    DPCs and interrupts), idle; the counters Windows does not have are 0. Only the CPUs of the process's
+    processor group, so at most 64. `freq` is `null`.
+  - `memory`: `GlobalMemoryStatusEx` (used = total − available); swap is the paging files' size and use
+    (`SystemPageFileInformation`, which `winternl.h` leaves out; its layout has not changed since Windows
+    NT).
+  - `disk`: the volume Windows is on (`GetDiskFreeSpaceExW` on the Windows directory), as Linux's root
+    filesystem.
+  - `uptime`: the interrupt time, the same clock as the data age, two decimals as `/proc/uptime`.
+  - `model`: the firmware's `SystemProductName` (registry), else the host name; `system`: `os` from the
+    registry's `ProductName` (corrected to "Windows 11" from build 22000, which it still calls Windows 10)
+    and `DisplayVersion`, `kernel` major.minor.build.UBR, `arch` the machine's (not the binary's) named as
+    uname names it, `hostname` the DNS host name.
+  - The optional groups (CPU clocks, GPU, NPU, temperature, power, fans, power mode, board info) are
+    `unavailable` with `unsupported_platform`; `sensor_meta` is empty. Network, Disk I/O and Pressure are
+    left out, as when they are off, whatever `platmon.ini` says, and there are no slow groups.
 - `platform/windows.rs`: `BCryptGenRandom` for the instance id; a WinSock listener with a backlog of 5,
   not inherited by child processes, and `SO_EXCLUSIVEADDRUSE` instead of Linux's `SO_REUSEADDR`, which on
   Windows lets another socket bind the same port.
 - The elapsed clock: the interrupt time (`QueryInterruptTimePrecise`, 100 ns units), which counts through
   sleep and hibernation as `CLOCK_BOOTTIME` does, so the age of data after a resume is the time that passed,
-  and `/api/status` reports `clock_source` `"boottime"` as on Linux (the Hub's contract unchanged); the
-  unbiased interrupt time, which stops while asleep, stands for `CLOCK_MONOTONIC`. Chosen 2026-10-24.
+  and `/api/status` reports `"clock": {"source": "boottime", "suspend_aware": true}` as on Linux (the Hub's
+  contract unchanged); the unbiased interrupt time, which stops while asleep, stands for `CLOCK_MONOTONIC`.
+  Chosen 2026-10-24.
 - The stop request: Ctrl+C, Ctrl+Break, the console closed, logoff and shutdown exit with status 0, as
   SIGTERM does on Linux (`SetConsoleCtrlHandler`). The service control manager's stop is not handled: the
   server does not run as a Windows service.
-- Not shown: any Windows collector, a run on a Windows host outside CI.
+- Not shown: a run on a Windows host outside CI, Windows on ARM, more than 64 CPUs, a sleep and resume.
 
 The Linux servers behave the same (unit tests, `config_fixture.py` 67/67, `runtime_fixture.py` 7/7,
 `fixture.sh` 11/11, `live_http.py` with no difference, `pytest`), but moved code changes their bytes, and

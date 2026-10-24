@@ -10,7 +10,8 @@ pub mod sysfs;
 use crate::json::Value;
 use crate::metadata::{self, pointer, Group, Slot};
 use crate::runtime;
-use common::{CpuCounters, Fan};
+use super::{Collected, CpuCounters};
+use common::Fan;
 
 pub struct Groups {
     pub cpu_frequency: Group,
@@ -74,39 +75,6 @@ pub struct Collector {
     disks: Option<passive::Disks>,
     pressure: bool,
     logged: Vec<(String, Vec<String>)>,
-}
-
-pub struct Collected {
-    pub stats: Value,
-    pub sensors: Vec<(String, Value)>,
-    pub required: common::Required,
-    /// the reads of network, disk_io and pressure (Collected.network, .disk_io, .pressure)
-    pub passive: [metadata::Span; 3],
-}
-
-impl Collected {
-    /// {"stats", "sensors", "required", "passive"}: Collected's fields as the Python harnesses print them.
-    pub fn to_value(self) -> Value {
-        let mut required = Value::obj();
-        for name in ["cpu", "memory", "disk", "uptime"] { // record.REQUIRED_READS
-            let span = self.required.iter().find(|(n, _)| *n == name).and_then(|(_, s)| *s);
-            required.set(name, span_value(span));
-        }
-        let mut out = Value::obj();
-        out.set("stats", self.stats);
-        out.set("sensors", Value::Obj(self.sensors));
-        out.set("required", required);
-        let mut spans = Value::obj();
-        for (name, span) in ["network", "disk_io", "pressure"].iter().zip(self.passive) {
-            spans.set(name, span_value(span));
-        }
-        out.set("passive", spans);
-        out
-    }
-}
-
-fn span_value(span: metadata::Span) -> Value {
-    span.map_or(Value::Null, |(a, b)| Value::Arr(vec![a.into(), b.into()]))
 }
 
 impl Collector {

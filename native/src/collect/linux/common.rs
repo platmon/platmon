@@ -1,8 +1,9 @@
 //! collector/common.py: fields every Linux host has (CPU, clocks, thermal zones, hwmon, memory, disk, identity).
 use crate::json::{round_to, Value};
-use crate::metadata::{self, clock, source, Group, Slot, Span};
+use crate::metadata::{self, source, Group, Slot, Span};
 use super::sysfs::{self, entries, hwmon_chips, numbered};
 use super::Groups;
+use crate::collect::{timed, CpuCounters, Required};
 use std::collections::BTreeMap;
 
 fn basename(path: &str) -> &str {
@@ -202,64 +203,6 @@ pub fn cpu_times() -> Result<BTreeMap<i64, Vec<i64>>, String> {
     Ok(times)
 }
 
-pub struct CpuCounters {
-    max_gap: Option<i64>,
-    mode: &'static str,
-    last: Option<(i64, BTreeMap<i64, Vec<i64>>)>,
-    pub span: Span,
-}
-
-impl CpuCounters {
-    pub fn new(max_gap_s: Option<f64>, mode: &'static str) -> CpuCounters {
-        CpuCounters { max_gap: max_gap_s.map(|s| (s * 1e9).round() as i64), mode, last: None, span: None }
-    }
-
-    /// ({id: usage}, cpu_sampling); see CpuCounters.sample.
-    pub fn sample(&mut self) -> Result<(Vec<(i64, f64)>, Value), String> {
-        let now = clock();
-        let times = match cpu_times() {
-            Ok(t) => t,
-            Err(e) => { self.last = None; return Err(e); }
-        };
-        self.span = Some((now, clock()));
-        let mut window = self.last.as_ref().map(|l| now - l.0);
-        let (usage, unavailable): (Vec<(i64, f64)>, Vec<(i64, &str)>) = match (&self.last, window) {
-            (None, _) => (vec![], times.keys().map(|n| (*n, "warmup")).collect()),
-            (Some(_), Some(w)) if w <= 0 => { window = None; (vec![], times.keys().map(|n| (*n, "invalid_interval")).collect()) }
-            (Some(_), Some(w)) if self.max_gap.map_or(false, |m| w > m) => (vec![], times.keys().map(|n| (*n, "gap")).collect()),
-            (Some((_, before)), _) => {
-                let (mut u, mut un) = (vec![], vec![]);
-                for (n, after) in &times {
-                    let Some(b) = before.get(n) else { un.push((*n, "warmup")); continue };
-                    let (a, b) = (&after[..8], &b[..8]);
-                    let delta: Vec<i64> = a.iter().zip(b).map(|(x, y)| x - y).collect();
-                    let total: i64 = delta.iter().sum();
-                    let idle = delta[3] + delta[4];
-                    if delta.iter().any(|d| *d < 0) {
-                        un.push((*n, "counter_regressed"));
-                    } else if total == 0 {
-                        un.push((*n, "no_ticks"));
-                    } else {
-                        u.push((*n, round_to(100.0 * (total - idle) as f64 / total as f64, 1)));
-                    }
-                }
-                (u, un)
-            }
-        };
-        self.last = Some((now, times));
-        let mut s = Value::obj();
-        s.set("mode", self.mode.into());
-        s.set("window_ms", window.map(|w| round_to(w as f64 / 1e6, 3)).into());
-        s.set("unavailable", Value::Arr(unavailable.into_iter().map(|(n, r)| {
-            let mut e = Value::obj();
-            e.set("id", n.into());
-            e.set("reason", r.into());
-            e
-        }).collect()));
-        Ok((usage, s))
-    }
-}
-
 pub fn meminfo() -> Result<Vec<(String, i64)>, String> {
     let text = std::fs::read_to_string("/proc/meminfo").map_err(|e| e.to_string())?;
     text.lines().map(|l| {
@@ -322,19 +265,9 @@ pub fn system_info() -> Result<Value, String> {
     Ok(v)
 }
 
-/// The required reads' spans, by name (Trace.required).
-pub type Required = Vec<(&'static str, Span)>;
-
-fn timed<T>(req: &mut Required, name: &'static str, f: impl FnOnce() -> T) -> T {
-    let start = clock();
-    let v = f();
-    req.push((name, Some((start, clock()))));
-    v
-}
-
 /// common.collect with the service's CpuCounters and groups; Err fails the collection.
 pub fn collect(cpu: &mut CpuCounters, g: &mut Groups, req: &mut Required) -> Result<(Value, Vec<Fan>), String> {
-    let (usage, sampling) = cpu.sample()?;
+    let (usage, sampling) = cpu.sample(cpu_times)?;
     req.push(("cpu", cpu.span));
     let mut freqs: Vec<(i64, Option<i64>)> = Vec::new();
     if usage.is_empty() {

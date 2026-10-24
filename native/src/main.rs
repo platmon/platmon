@@ -35,8 +35,7 @@ mod runtime;
 mod sha256;
 mod slow;
 
-#[cfg(target_os = "linux")]
-use collect::linux::{observe, Collected, Collector};
+use collect::{observe, Collected, Collector};
 use json::Value;
 
 #[cfg(feature = "cache-alloc")]
@@ -61,7 +60,6 @@ pub const ALLOCATOR_MARK: &str = if cfg!(feature = "cache-alloc") { "platmon-nat
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        #[cfg(target_os = "linux")]
         Some("serve") => return serve(&args[2..]),
         Some("runtime-script") => return harness::runtime_script(),
         Some("config-check") => return config_check(&args[2..]),
@@ -93,7 +91,6 @@ fn config_check(args: &[String]) {
     println!("{}", out.to_string(false));
 }
 
-#[cfg(target_os = "linux")]
 /// platmon.py: serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]. The configuration as
 /// platmon.py reads it; the slow groups are on as configured, with their readers (src/collect/linux/observe.rs).
 fn serve(args: &[String]) {

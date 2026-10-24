@@ -3,8 +3,9 @@
 //! on given times (runtime-script) and a replay answer's cost (replay-cost). The service is serve, in main.rs.
 use crate::json::{self, Value};
 use crate::{history, http, metadata, replay, runtime, slow};
+use crate::collect::Collector;
 #[cfg(target_os = "linux")]
-use crate::collect::linux::{observe, Collected, Collector};
+use crate::collect::{observe, Collected};
 
 #[cfg(target_os = "linux")]
 /// (user s, system s) of this process.
@@ -166,14 +167,7 @@ pub fn replay_cost(args: &[String]) {
     println!("{}", out.to_string(false));
 }
 
-#[cfg(not(target_os = "linux"))]
-pub fn collect_command(_: &[String]) {
-    eprintln!("platmon-native: no collector for this platform");
-    std::process::exit(1);
-}
-
-/// collect, script and loop: the commands that collect on this host.
-#[cfg(target_os = "linux")]
+/// collect, script and loop: the commands that collect on this host (collect only, elsewhere).
 pub fn collect_command(args: &[String]) {
     let mut c = Collector::new(5.0, [true; 3]); // the service's at its default 1 s interval
     match args.get(1).map(String::as_str) {
@@ -185,6 +179,7 @@ pub fn collect_command(args: &[String]) {
             out.set("clock", metadata::clock_source().into());
             println!("{}", out.to_string(false));
         }
+        #[cfg(target_os = "linux")]
         Some("script") => {
             use std::io::BufRead;
             for line in std::io::stdin().lock().lines() {
@@ -202,6 +197,7 @@ pub fn collect_command(args: &[String]) {
                 println!("{}", out.to_string(false));
             }
         }
+        #[cfg(target_os = "linux")]
         Some("loop") => {
             let seconds: f64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(60.0);
             let warmup: f64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(3.0);
