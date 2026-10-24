@@ -1,9 +1,13 @@
-//! Windows: the interrupt time, BCryptGenRandom, a WinSock socket and the console's stop events.
+//! Windows: the interrupt time, BCryptGenRandom, a WinSock socket, the console's stop events and the service
+//! control manager's.
 use std::net::{Ipv4Addr, TcpListener};
 use std::os::windows::io::FromRawSocket;
 use windows_sys::Win32::Networking::WinSock as ws;
 use windows_sys::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
-use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::OnceLock;
+use windows_sys::Win32::System::Console::{SetConsoleCtrlHandler, CTRL_LOGOFF_EVENT};
+use windows_sys::Win32::System::Services as svc;
 use windows_sys::Win32::System::WindowsProgramming::{QueryInterruptTimePrecise, QueryUnbiasedInterruptTimePrecise};
 
 /// The interrupt time in nanoseconds (100 ns units): keeps counting through sleep and hibernation, as
@@ -59,12 +63,65 @@ pub fn listen(ip: Ipv4Addr, port: u16, backlog: i32) -> std::io::Result<TcpListe
     }
 }
 
-unsafe extern "system" fn on_stop(_: u32) -> windows_sys::core::BOOL {
+unsafe extern "system" fn on_stop(event: u32) -> windows_sys::core::BOOL {
+    if event == CTRL_LOGOFF_EVENT && !STATUS.load(Ordering::Acquire).is_null() {
+        return 1; // a user logging off does not stop a service
+    }
     std::process::exit(0) // Ctrl+C, Ctrl+Break, the console closed, logoff or shutdown: as SIGTERM on Linux
 }
 
-/// Exits at once, with status 0, when the console asks the process to stop. A Windows service's stop
-/// request (the service control manager) is not handled: the server does not run as a service yet.
+/// Exits at once, with status 0, when the console asks the process to stop (a service: at shutdown, not at
+/// a user's logoff). The service control manager's stop: run_service.
 pub fn exit_on_terminate() {
     unsafe { SetConsoleCtrlHandler(Some(on_stop), 1) };
+}
+
+/// The service's status handle, null outside run_service.
+static STATUS: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+static SERVE: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+fn report(state: u32) {
+    let accepted = if state == svc::SERVICE_RUNNING { svc::SERVICE_ACCEPT_STOP | svc::SERVICE_ACCEPT_SHUTDOWN } else { 0 };
+    let status = svc::SERVICE_STATUS { dwServiceType: svc::SERVICE_WIN32_OWN_PROCESS, dwCurrentState: state,
+                                       dwControlsAccepted: accepted, dwWin32ExitCode: 0, dwServiceSpecificExitCode: 0,
+                                       dwCheckPoint: 0, dwWaitHint: 0 };
+    unsafe { svc::SetServiceStatus(STATUS.load(Ordering::Acquire), &status) };
+}
+
+unsafe extern "system" fn on_control(control: u32, _: u32, _: *mut core::ffi::c_void, _: *mut core::ffi::c_void) -> u32 {
+    match control {
+        // stopped, then the exit as on SIGTERM: nothing to flush, the history is in memory
+        svc::SERVICE_CONTROL_STOP | svc::SERVICE_CONTROL_SHUTDOWN => {
+            report(svc::SERVICE_STOPPED);
+            std::process::exit(0)
+        }
+        svc::SERVICE_CONTROL_INTERROGATE => 0,
+        _ => 120, // ERROR_CALL_NOT_IMPLEMENTED
+    }
+}
+
+unsafe extern "system" fn service_main(_: u32, _: *mut windows_sys::core::PWSTR) {
+    let name = [0u16]; // not checked for a service in its own process
+    let handle = svc::RegisterServiceCtrlHandlerExW(name.as_ptr(), Some(on_control), std::ptr::null());
+    if handle.is_null() {
+        std::process::exit(1);
+    }
+    STATUS.store(handle, Ordering::Release);
+    report(svc::SERVICE_RUNNING);
+    SERVE.get().expect("run_service sets it")();
+}
+
+/// Runs serve as a Windows service in its own process (SERVICE_WIN32_OWN_PROCESS): running once it has
+/// connected to the service control manager, stopped (status 0) on its stop or shutdown request. Exits
+/// with status 2 when the process was not started by the service control manager.
+pub fn run_service(serve: impl Fn() + Send + Sync + 'static) {
+    let _ = SERVE.set(Box::new(serve));
+    let mut name = [0u16];
+    let table = [svc::SERVICE_TABLE_ENTRYW { lpServiceName: name.as_mut_ptr(), lpServiceProc: Some(service_main) },
+                 svc::SERVICE_TABLE_ENTRYW::default()];
+    if unsafe { svc::StartServiceCtrlDispatcherW(table.as_ptr()) } == 0 {
+        eprintln!("platmon-native service: {} (the service control manager starts it; serve runs in a console)",
+                  std::io::Error::last_os_error());
+        std::process::exit(2);
+    }
 }
