@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # platmon candidate check, once per board, by the owner: sudo bash install.sh (in the staged directory).
-# Installs the candidate binary, its INI (/etc/platmon/platmon.ini with bind 127.0.0.1 and port 19797), three
+# Installs the candidate binary, its INI (/etc/platmon/platmon.ini with bind 127.0.0.1 and port 19797), two
 # units that are not enabled or started, and a sudoers file for the login user. platmon.service, /etc/platmon
 # and /usr/share/platmon are read, never changed. Refuses if anything of a previous install is there.
 set -euo pipefail
 cd "$(dirname "$0")"
 [ "$(id -u)" = 0 ] || { echo "run it with sudo" >&2; exit 1; }
 user=${SUDO_USER:?run it with sudo from the login user}
-units="platmon-native-candidate.service platmon-native-candidate-fakesmi.service platmon-python-candidate.service"
+units="platmon-native-candidate.service platmon-native-candidate-fakesmi.service"
 for p in /usr/lib/platmon-candidate /etc/platmon-candidate /etc/sudoers.d/platmon-candidate; do
   [ ! -e "$p" ] || { echo "$p exists: run uninstall.sh first" >&2; exit 1; }
 done

@@ -1,8 +1,8 @@
-"""The released Hub against the deployed candidate services: one run per server, the same events.
+"""The released Hub against the deployed candidate service: the same events on every host.
 
-  hub_check.py native|python --hub PATH/TO/platmon-hub [--hosts pc,orin=user@host,...] --out DIR
+  hub_check.py --hub PATH/TO/platmon-hub [--hosts pc,orin=user@host,...] --out DIR
 
-Starts the candidate unit (platmon-<server>-candidate.service, 127.0.0.1:19797) on every host, a
+Starts the candidate unit (platmon-native-candidate.service, 127.0.0.1:19797) on every host, a
 temporary Hub (the given platmon-hub executable, raw capture on, a new database, its own port; boards
 through an SSH tunnel), then, at fixed times: a restart of every agent (180 s), a SIGKILL of every agent
 (systemd restarts it, 300 s), the Hub stopped for 60 s (420 s) and started again on the same database,
@@ -50,8 +50,8 @@ def free_port():
 
 
 class Host:
-    def __init__(self, name, ssh, server):
-        self.name, self.ssh, self.unit = name, ssh, f"platmon-{server}-candidate.service"
+    def __init__(self, name, ssh):
+        self.name, self.ssh, self.unit = name, ssh, "platmon-native-candidate.service"
         self.node_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"platmon-hub-check/{name}"))
         self.port, self.tunnel, self.instances = AGENT_PORT, None, []
 
@@ -232,14 +232,12 @@ def judge(hosts, timeline, final, db, log):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("server", choices=("native", "python"))
     parser.add_argument("--hub", required=True, help="the platmon-hub executable")
     parser.add_argument("--hosts", default="pc", help="NAME (this host) or NAME=SSH-TARGET, comma separated")
     parser.add_argument("--out", required=True, help="a new directory for the database, logs and report")
     parser.add_argument("--scale", type=float, default=1.0, help=argparse.SUPPRESS)  # a shorter trial of the tool
     args = parser.parse_args()
-    hosts = [Host(*(item.split("=", 1) if "=" in item else (item, None)), args.server)
-             for item in args.hosts.split(",")]
+    hosts = [Host(*(item.split("=", 1) if "=" in item else (item, None))) for item in args.hosts.split(",")]
     out = Path(args.out).resolve()
     try:
         for h in hosts:
@@ -252,7 +250,7 @@ def main():
         for h in hosts:
             stop(h.tunnel)
     report, problems = judge(hosts, timeline, final, out / "history.db", out / "hub.log")
-    result = {"server": args.server, "timeline": timeline, "hosts": report, "problems": problems,
+    result = {"unit": hosts[0].unit, "timeline": timeline, "hosts": report, "problems": problems,
               "passed": not problems}
     (out / "report.json").write_text(json.dumps(result, indent=1) + "\n")
     print(json.dumps(result, indent=1))

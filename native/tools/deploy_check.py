@@ -1,27 +1,22 @@
-"""The deployed form of candidate 1 (native/CANDIDATE.md) on a host where native/tools/deploy/install.sh ran:
-three units with the product unit's hardening (DynamicUser, ProtectSystem=strict, ProtectHome, NoNewPrivileges,
+"""A native server build as a candidate service, on a host where native/tools/deploy/install.sh ran: two
+units with the product unit's hardening (DynamicUser, ProtectSystem=strict, ProtectHome, NoNewPrivileges,
 Restart=on-failure), one INI (/etc/platmon/platmon.ini with bind 127.0.0.1 and port 19797), one port. Only those
 units are started, stopped or killed, through the sudo rules install.sh wrote; platmon.service is only read
 (is-active, an answer on 9797). Memory and descriptors of a DynamicUser process come from the root `measure`
 script; CPU, VmRSS and threads from /proc, which anyone may read. One JSON line per check or hour.
 
-  python3 deploy_check.py checks --out OUT.jsonl            # install, swap, recovery, stopping (about 15 min)
+  python3 deploy_check.py checks --out OUT.jsonl            # start, recovery, stopping (about 15 min)
   python3 deploy_check.py soak --out OUT.jsonl [--hours 24]  # the long run, platmon-native-candidate
   python3 deploy_check.py report OUT.jsonl [--settled-mib N]  # the judgement, set before the runs
 
 checks, in order; a check passes with no problem in its line:
-  ready         the three candidate units inactive, the port free, platmon.service active and answering
-  python        the Python unit starts on the INI and becomes ready
-  swap          starting the native unit stops the Python one (Conflicts=); ready on the same port; a new
-                instance_id; the Python instance's cursor gets 409; /api/status the same but for its
-                moment (the same INI); the INI unchanged
+  ready         the candidate units inactive, the port free, platmon.service active and answering
+  start         the native unit starts on the INI and becomes ready as its own DynamicUser; the INI unchanged
   restart       systemctl restart: ready, a new instance_id, 409 for the previous one
   crash         SIGKILL: Restart=on-failure brings it back (NRestarts + 1), a new instance_id, the old
                 process gone
   failed_start  the port held by this tool: the unit cannot serve and keeps restarting; released, it serves
                 again without anyone starting it
-  rollback      starting the Python unit stops the native one; ready; 409 for the native instance; the INI
-                unchanged
   stop_collect  stop at 7 offsets from a collection's start (0 to 750 ms): each stop within 2 s, Result
                 success, no process of the unit left, the port free
   stop_replay   stop while 4 clients fetch replay pages: a page answers whole or the client sees an error,
@@ -59,12 +54,10 @@ import walk
 import worker
 
 PORT = 19797
-NATIVE, FAKE, PYTHON = ("platmon-native-candidate.service", "platmon-native-candidate-fakesmi.service",
-                        "platmon-python-candidate.service")
-UNITS = (NATIVE, FAKE, PYTHON)
+NATIVE, FAKE = "platmon-native-candidate.service", "platmon-native-candidate-fakesmi.service"
+UNITS = (NATIVE, FAKE)
 INI = "/etc/platmon-candidate/platmon.ini"
 SYSTEMCTL = "/usr/bin/systemctl"
-MOMENT = ("instance_id", "state", "ready", "sample", "last_attempt", "collecting_for_ms")  # /api/status, per answer
 SOAK = {"hour": 3600, "poll": 2400, "disconnect": 480, "expire": 720, "settle": 120, "restart_at": 12,
         "concurrent_rounds": 1, "concurrent_pollers": 4, "reconnect_limit": 300}
 # Accelerated: the same reconnects and expiries with almost no polling between them, and 3 concurrent rounds
@@ -220,12 +213,6 @@ def ini_sha():
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def same_status(a, b):
-    """The keys of /api/status that differ between two services on the same INI, but for the moment's."""
-    keys = (set(a) | set(b)) - set(MOMENT)
-    return sorted(k for k in keys if a.get(k) != b.get(k))
-
-
 def stopped(unit, uid, took, limit=2.0):
     """What a stop must leave: the unit inactive with Result success, no process, the port free."""
     p = []
@@ -275,27 +262,15 @@ def checks(args):
         p += [] if prod == {"active": "active", "answer": 200} else [f"platmon.service {prod}"]
         return {"ini_sha256": sha0, "production": prod, "problems": p}
 
-    def python():
-        r, s = start(PYTHON)
-        res["python"] = s
-        p = [] if s else ["not ready"]
-        time.sleep(20)  # some records to keep a cursor in
-        return {**r, "instance": s and s["instance_id"], "problems": p}
-
-    def swap():
-        old = res["python"]
-        r, s = start(NATIVE, other_than=old["instance_id"])
+    def start_check():
+        r, s = start(NATIVE)
         res["native"] = s
         p = [] if s else ["not ready"]
-        if show(PYTHON, "ActiveState")["ActiveState"] != "inactive":
-            p.append("the Python unit still active")
-        code = old_cursor(old["instance_id"])
-        p += [] if code == 409 else [f"the Python instance's cursor: {code}, not 409"]
-        diff = same_status(old, s) if s else ["?"]
-        p += [f"/api/status differs: {diff}"] if diff else []
+        uid = uid_of(r["pid"])
+        p += [] if uid != 0 else ["runs as root"]
         p += [] if ini_sha() == sha0 else ["the INI changed"]
-        return {**r, "instance": s and s["instance_id"], "old_cursor": code, "status_keys": sorted(s or {}),
-                "uid": uid_of(r["pid"]), "problems": p}
+        time.sleep(20)  # some records to keep a cursor in
+        return {**r, "instance": s and s["instance_id"], "status_keys": sorted(s or {}), "uid": uid, "problems": p}
 
     def restart():
         old, n0 = res["native"], show(NATIVE, "NRestarts")["NRestarts"]
@@ -346,19 +321,6 @@ def checks(args):
         p += [] if s else ["not serving 20 s after the port was released"]
         return {"start": [code, outp, took], "while_held": during, "journal": log, "serving_after_s": secs,
                 "problems": p}
-
-    def rollback():
-        old = res["native"]
-        r, s = start(PYTHON, other_than=old["instance_id"])
-        p = [] if s else ["not ready"]
-        if show(NATIVE, "ActiveState")["ActiveState"] != "inactive":
-            p.append("the native unit still active")
-        oc = old_cursor(old["instance_id"])
-        p += [] if oc == 409 else [f"the native instance's cursor: {oc}, not 409"]
-        diff = same_status(old, s) if s else ["?"]
-        p += [f"/api/status differs: {diff}"] if diff else []
-        p += [] if ini_sha() == sha0 else ["the INI changed"]
-        return {**r, "old_cursor": oc, "problems": p}
 
     def stop_collect():
         p, runs = [], []
@@ -478,8 +440,8 @@ def checks(args):
     first = step("ready", ready_check)
     if first["problems"]:
         return
-    for name, fn in (("python", python), ("swap", swap), ("restart", restart), ("crash", crash),
-                     ("failed_start", failed_start), ("rollback", rollback), ("stop_collect", stop_collect),
+    for name, fn in (("start", start_check), ("restart", restart), ("crash", crash),
+                     ("failed_start", failed_start), ("stop_collect", stop_collect),
                      ("stop_replay", stop_replay), ("stop_nvsmi", stop_nvsmi)):
         step(name, fn)
     step("end", end)
@@ -500,9 +462,8 @@ def soak(args):
             f.write(json.dumps(rec) + "\n")
 
     write({"setup": setup("soak"), "phases": ph, "hours": args.hours})
-    for u in (PYTHON, FAKE):
-        if show(u, "ActiveState")["ActiveState"] != "inactive":
-            ctl("stop", u)
+    if show(FAKE, "ActiveState")["ActiveState"] != "inactive":
+        ctl("stop", FAKE)
     r, s = start(NATIVE)
     if not s:
         write({"failed": "not ready", **r})
