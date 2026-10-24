@@ -260,7 +260,7 @@ run is judged on its own, each host on its own; no averaging hides one run.
 - `platmon.ini` (`src/config.rs`): configparser's syntax (sections, `=`/`:`, comments, continuation lines,
   DEFAULT, duplicate and parsing errors with its messages), `check()`, `levels()`, the probe targets, the
   same refusals; groups, history, replay and the web page on and off as configured.
-- The slow readers (`src/observe.rs`): storage (partitions of physical disks, local filesystems by device
+- The slow readers (`src/collect/linux/observe.rs`): storage (partitions of physical disks, local filesystems by device
   number, statvfs through a pinned descriptor), Wi-Fi (`/proc/net/wireless`, the namespace and ifindex,
   the carrier), battery (`/sys/class/power_supply`), the TCP connect probe.
 
@@ -1069,7 +1069,7 @@ Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d
 holds what the service needs from the OS outside the collectors: the elapsed clocks, random bytes for the
 instance id, the listening socket and the exit on a stop request, one module per OS with the same
 functions. `platform/linux.rs` is the code `main.rs`, `metadata.rs`, `runtime.rs` and `http.rs` had,
-unchanged. The collectors (`sysfs.rs`, `common.rs`, `passive.rs`, `observe.rs`, the device readers) and the
+unchanged. The collectors (`src/collect/linux/`: `sysfs.rs`, `common.rs`, `passive.rs`, `observe.rs`, the device readers) and the
 commands that use them (`collect`, `script`, `loop`, `serve`, `observe-script`) build on Linux only.
 
 On `x86_64-pc-windows-msvc`:

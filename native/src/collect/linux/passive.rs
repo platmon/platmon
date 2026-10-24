@@ -3,7 +3,7 @@
 use crate::json::{round_to, Value};
 use crate::metadata::{clock, Group, Span};
 use crate::pystr::{py_printable, py_space, py_split, py_strip};
-use crate::sysfs::{self, ReadError};
+use super::sysfs::{self, ReadError};
 use std::io;
 
 const MAX_COUNTER: u128 = u64::MAX as u128;

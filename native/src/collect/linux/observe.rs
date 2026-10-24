@@ -4,10 +4,10 @@
 use crate::config::Config;
 use crate::json::Value;
 use crate::metadata::{py_int, Group};
-use crate::passive::{if_indexes, is_physical, namespace_id, strerror, valid_ifname};
+use super::passive::{if_indexes, is_physical, namespace_id, strerror, valid_ifname};
 use crate::slow::Reader;
 use crate::pystr::{py_space, py_split};
-use crate::sysfs::{self, ReadError};
+use super::sysfs::{self, ReadError};
 use std::collections::VecDeque;
 
 /// The slow groups in platmon.py's order.

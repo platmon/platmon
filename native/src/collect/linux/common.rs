@@ -1,8 +1,8 @@
 //! collector/common.py: fields every Linux host has (CPU, clocks, thermal zones, hwmon, memory, disk, identity).
 use crate::json::{round_to, Value};
 use crate::metadata::{self, clock, source, Group, Slot, Span};
-use crate::sysfs::{self, entries, hwmon_chips, numbered};
-use crate::Groups;
+use super::sysfs::{self, entries, hwmon_chips, numbered};
+use super::Groups;
 use std::collections::BTreeMap;
 
 fn basename(path: &str) -> &str {
