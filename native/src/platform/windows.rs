@@ -79,6 +79,8 @@ pub fn exit_on_terminate() {
 /// The service's status handle, null outside run_service.
 static STATUS: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
 static SERVE: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+/// The stop request, from the control handler to service_main.
+static STOP: OnceLock<std::sync::mpsc::Sender<()>> = OnceLock::new();
 
 fn report(state: u32) {
     let accepted = if state == svc::SERVICE_RUNNING { svc::SERVICE_ACCEPT_STOP | svc::SERVICE_ACCEPT_SHUTDOWN } else { 0 };
@@ -90,10 +92,13 @@ fn report(state: u32) {
 
 unsafe extern "system" fn on_control(control: u32, _: u32, _: *mut core::ffi::c_void, _: *mut core::ffi::c_void) -> u32 {
     match control {
-        // stopped, then the exit as on SIGTERM: nothing to flush, the history is in memory
+        // service_main reports stopped: exiting here would leave the request unanswered (ERROR_BROKEN_PIPE)
         svc::SERVICE_CONTROL_STOP | svc::SERVICE_CONTROL_SHUTDOWN => {
-            report(svc::SERVICE_STOPPED);
-            std::process::exit(0)
+            report(svc::SERVICE_STOP_PENDING);
+            if let Some(stop) = STOP.get() {
+                let _ = stop.send(());
+            }
+            0
         }
         svc::SERVICE_CONTROL_INTERROGATE => 0,
         _ => 120, // ERROR_CALL_NOT_IMPLEMENTED
@@ -107,13 +112,18 @@ unsafe extern "system" fn service_main(_: u32, _: *mut windows_sys::core::PWSTR)
         std::process::exit(1);
     }
     STATUS.store(handle, Ordering::Release);
+    let (stop, stopped) = std::sync::mpsc::channel();
+    let _ = STOP.set(stop);
+    std::thread::spawn(|| SERVE.get().expect("run_service sets it")());
     report(svc::SERVICE_RUNNING);
-    SERVE.get().expect("run_service sets it")();
+    let _ = stopped.recv();
+    report(svc::SERVICE_STOPPED); // then the dispatcher returns and run_service exits
 }
 
 /// Runs serve as a Windows service in its own process (SERVICE_WIN32_OWN_PROCESS): running once it has
-/// connected to the service control manager, stopped (status 0) on its stop or shutdown request. Exits
-/// with status 2 when the process was not started by the service control manager.
+/// connected to the service control manager, stopped on its stop or shutdown request, then the exit with
+/// status 0 as on SIGTERM (nothing to flush: the history is in memory). Exits with status 2 when the
+/// process was not started by the service control manager.
 pub fn run_service(serve: impl Fn() + Send + Sync + 'static) {
     let _ = SERVE.set(Box::new(serve));
     let mut name = [0u16];
@@ -124,4 +134,5 @@ pub fn run_service(serve: impl Fn() + Send + Sync + 'static) {
                   std::io::Error::last_os_error());
         std::process::exit(2);
     }
+    std::process::exit(0)
 }
