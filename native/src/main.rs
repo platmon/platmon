@@ -14,6 +14,9 @@
 //!   platmon-native serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]
 //!                                     the service as platmon.py runs it: platmon.ini, the Sampler, slow
 //!                                     groups, history, replay and the HTTP API (src/runtime.rs, src/http.rs)
+//!   platmon-native service [CONFIG] [serve's options]
+//!                                     Windows only: serve as a service the service control manager runs
+//!                                     (platform/windows.rs, run_service)
 //!   platmon-native runtime-script     tools/runtime_fixture.py: Sampler and slow-group operations with
 //!                                     given times and collections, one JSON line per stdin line
 // Elsewhere the shared helpers the Linux collectors call have no caller yet.
@@ -61,6 +64,11 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("serve") => return serve(&args[2..]),
+        #[cfg(windows)]
+        Some("service") => {
+            let rest = args[2..].to_vec();
+            return platform::run_service(move || serve(&rest));
+        }
         Some("runtime-script") => return harness::runtime_script(),
         Some("config-check") => return config_check(&args[2..]),
         #[cfg(target_os = "linux")]

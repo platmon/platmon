@@ -11,8 +11,12 @@
 - runtime-script: answers /api/status as starting, with the given instance id;
 - serve on a free local port: /api/status ready with the clock {"source": "boottime"}, /api/stats 200 with a
   snapshot, and /api/observations with the probe connecting to the server itself (the only slow group
-  there), then stopped by its own handle."""
+  there), then stopped by its own handle;
+- service: outside the service control manager it exits 2; as a service (sc.exe create, start) it serves
+  /api/status ready, and sc.exe stop leaves it stopped with exit code 0 and the port free."""
 import json
+import os
+import re
 import socket
 import subprocess
 import sys
@@ -140,6 +144,42 @@ def main(binary):
         server.kill()
         output = server.communicate(timeout=TIMEOUT)[0]
     print("      " + output.strip().replace("\n", "\n      "))
+
+    r = run(binary, ["service"])
+    check("service outside the service control manager", r.returncode == 2 and "service control manager" in r.stderr,
+          repr(r))
+    port, name = free_port(), "platmon-smoke"
+    ini = os.path.abspath("platmon-service.ini")
+    with open(ini, "w") as f:
+        f.write(f"[http]\nbind = 127.0.0.1\nport = {port}\n")
+
+    def sc(*args):
+        return subprocess.run(["sc.exe", *args], capture_output=True, text=True, timeout=TIMEOUT)
+
+    created = sc("create", name, "binPath=", f'"{os.path.abspath(binary)}" service "{ini}"')
+    try:
+        started = sc("start", name)
+        deadline, status = time.monotonic() + TIMEOUT, None
+        while time.monotonic() < deadline:
+            code, status = get(port, "/api/status")
+            if code == 200 and status.get("ready"):
+                break
+            time.sleep(0.5)
+        check("service start", created.returncode == 0 and started.returncode == 0 and bool(status)
+              and status.get("ready") is True, created.stdout + started.stdout + json.dumps(status))
+        stopped = sc("stop", name)
+        deadline, query = time.monotonic() + TIMEOUT, ""
+        while time.monotonic() < deadline:
+            query = sc("query", name).stdout
+            if "STOPPED" in query:
+                break
+            time.sleep(0.5)
+        check("service stop", stopped.returncode == 0 and "STOPPED" in query
+              and re.search(r"WIN32_EXIT_CODE\s*:\s*0\s", query) is not None and get(port, "/api/status") == (None, None),
+              stopped.stdout + query)
+    finally:
+        sc("stop", name)
+        sc("delete", name)
     if failures:
         sys.exit(f"{len(failures)} failed: {', '.join(failures)}")
     print("all passed")

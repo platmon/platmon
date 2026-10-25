@@ -1122,8 +1122,14 @@ On `x86_64-pc-windows-msvc`:
   contract unchanged); the unbiased interrupt time, which stops while asleep, stands for `CLOCK_MONOTONIC`.
   Chosen 2026-10-24.
 - The stop request: Ctrl+C, Ctrl+Break, the console closed, logoff and shutdown exit with status 0, as
-  SIGTERM does on Linux (`SetConsoleCtrlHandler`). The service control manager's stop is not handled: the
-  server does not run as a Windows service.
+  SIGTERM does on Linux (`SetConsoleCtrlHandler`).
+- `service [CONFIG] [serve's options]`: `serve` as a Windows service in its own process, for the service
+  control manager (`sc.exe create platmon binPath= "C:\path\platmon-native.exe service C:\path\platmon.ini"`).
+  It reports running once connected, and on a stop or shutdown request reports stopped and exits with
+  status 0; a user's logoff does not stop it. Outside the service control manager it exits with status 2.
+  Not provided: an installer, a default configuration path, recovery actions and a log: the server's
+  messages go to standard error, which a service does not have, so a configuration error shows only as
+  the service stopping (`config-check` shows it). CI's smoke test creates, starts and stops it.
 - Not shown: a run on a Windows host outside CI, Windows on ARM, more than 64 CPUs, a sleep and resume,
   the disk query without administrator rights.
 
