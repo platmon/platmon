@@ -1093,9 +1093,10 @@ On `x86_64-pc-windows-msvc`:
     DPCs and interrupts), idle; the counters Windows does not have are 0. Only the CPUs of the process's
     processor group, so at most 64.
   - `cpu[].freq` (`cpu_frequency`): each CPU's `% Processor Performance` (PDH, by the counter's English
-    name, so any display language) times its base clock (the registry's `~MHz`), in Hz rounded to the MHz:
-    the speed Task Manager shows, an average since the last collection that moves with turbo and power
-    saving. Processor group 0's CPUs; sensor provider `pdh`.
+    name, so any display language) times its nominal clock (PDH's `Processor Frequency`, the base the share
+    is of; the registry's `~MHz` is not, it can be one value for a hybrid CPU's P- and E-cores), in Hz
+    rounded to the MHz: the speed Task Manager shows, an average since the last collection that moves with
+    turbo and power saving. Processor group 0's CPUs; sensor provider `pdh`.
   - `memory`: `GlobalMemoryStatusEx` (used = total − available); swap is the paging files' size and use
     (`SystemPageFileInformation`, which `winternl.h` leaves out; its layout has not changed since Windows
     NT).

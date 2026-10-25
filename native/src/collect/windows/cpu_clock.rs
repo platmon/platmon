@@ -1,7 +1,8 @@
 //! CPU clocks on Windows: each processor's "% Processor Performance" (PDH, by the counter's English name)
-//! times its base clock (~MHz in the registry), the speed Task Manager shows. The share is an average over
-//! the time since the last collection, so it moves with turbo and power saving; processor group 0 only.
-use super::registry_dword;
+//! times its nominal clock ("Processor Frequency", the base the share is of), the speed Task Manager shows.
+//! Not the registry's ~MHz: a hybrid CPU's P-, E- and LP E-cores have different nominal clocks, and ~MHz can
+//! be one value for all of them. The share is an average over the time since the last collection, so it
+//! moves with turbo and power saving; processor group 0 only.
 use crate::metadata::{clock, source, Group, Slot};
 use std::collections::BTreeMap;
 use windows_sys::Win32::System::Performance::{PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
@@ -11,14 +12,14 @@ use windows_sys::Win32::System::Performance::{PdhAddEnglishCounterW, PdhCloseQue
                                               PDH_MORE_DATA};
 
 const COUNTER: &str = "\\Processor Information(*)\\% Processor Performance";
+const NOMINAL: &str = "\\Processor Information(*)\\Processor Frequency";
 /// PDH_FMT_NOCAP100 (pdh.h; windows-sys leaves it out): a turbo clock reads above 100 %.
 const NOCAP100: u32 = 0x8000;
 
 /// PDH's open query, or why it could not be opened.
 pub struct Clocks {
-    pdh: Result<(PDH_HQUERY, PDH_HCOUNTER), (&'static str, String)>,
-    /// MHz by CPU id, read on first use
-    base: BTreeMap<i64, Option<i64>>,
+    /// the query, its share counter and its nominal clock (MHz) counter
+    pdh: Result<(PDH_HQUERY, PDH_HCOUNTER, PDH_HCOUNTER), (&'static str, String)>,
 }
 
 // the query's handles may be used from any thread, one at a time
@@ -26,7 +27,7 @@ unsafe impl Send for Clocks {}
 
 impl Drop for Clocks {
     fn drop(&mut self) {
-        if let Ok((q, _)) = self.pdh {
+        if let Ok((q, _, _)) = self.pdh {
             unsafe { PdhCloseQuery(q) };
         }
     }
@@ -40,28 +41,34 @@ impl Clocks {
     /// Opens the query and takes its first reading, so the first collection has an average.
     pub fn new() -> Clocks {
         let mut q: PDH_HQUERY = std::ptr::null_mut();
-        let mut c: PDH_HCOUNTER = std::ptr::null_mut();
         let status = unsafe { PdhOpenQueryW(std::ptr::null(), 0, &mut q) };
         let pdh = if status != 0 {
             Err((reason(status), format!("PdhOpenQueryW: {:#x}", status)))
         } else {
-            let path: Vec<u16> = COUNTER.encode_utf16().chain(Some(0)).collect();
-            match unsafe { PdhAddEnglishCounterW(q, path.as_ptr(), 0, &mut c) } {
-                0 => {
-                    unsafe { PdhCollectQueryData(q) };
-                    Ok((q, c))
+            let add = |name: &str| {
+                let path: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+                let mut c: PDH_HCOUNTER = std::ptr::null_mut();
+                match unsafe { PdhAddEnglishCounterW(q, path.as_ptr(), 0, &mut c) } {
+                    0 => Ok(c),
+                    status => Err((reason(status), format!("{}: {:#x}", name, status))),
                 }
-                status => {
+            };
+            match (add(COUNTER), add(NOMINAL)) {
+                (Ok(c), Ok(n)) => {
+                    unsafe { PdhCollectQueryData(q) };
+                    Ok((q, c, n))
+                }
+                (Err(e), _) | (_, Err(e)) => {
                     unsafe { PdhCloseQuery(q) };
-                    Err((reason(status), format!("{}: {:#x}", COUNTER, status)))
+                    Err(e)
                 }
             }
         };
-        Clocks { pdh, base: BTreeMap::new() }
+        Clocks { pdh }
     }
 
-    /// {group 0 CPU number: % of the base clock} from the counter's instances ("0,3" is CPU 3 of group 0).
-    fn shares(counter: PDH_HCOUNTER) -> Result<BTreeMap<i64, f64>, u32> {
+    /// {group 0 CPU number: value} from a counter's instances ("0,3" is CPU 3 of group 0).
+    fn values(counter: PDH_HCOUNTER) -> Result<BTreeMap<i64, f64>, u32> {
         let mut buf: Vec<u64> = Vec::new();
         for _ in 0..4 { // more instances can appear between the size and the read
             let (mut size, mut count) = ((buf.len() * 8) as u32, 0u32);
@@ -99,15 +106,17 @@ impl Clocks {
         }
         let start = clock();
         let read = match &self.pdh {
-            Ok((q, c)) => match unsafe { PdhCollectQueryData(*q) } {
-                0 => Clocks::shares(*c).map_err(|s| (reason(s), format!("{}: {:#x}", COUNTER, s))),
+            Ok((q, c, n)) => match unsafe { PdhCollectQueryData(*q) } {
+                0 => Clocks::values(*c).map_err(|s| (reason(s), format!("{}: {:#x}", COUNTER, s))).and_then(|shares| {
+                    Clocks::values(*n).map(|mhz| (shares, mhz)).map_err(|s| (reason(s), format!("{}: {:#x}", NOMINAL, s)))
+                }),
                 s => Err((reason(s), format!("PdhCollectQueryData: {:#x}", s))),
             },
             Err(e) => Err(e.clone()),
         };
         let span = Some((start, clock()));
-        let shares = match read {
-            Ok(shares) => Some(shares),
+        let read = match read {
+            Ok(read) => Some(read),
             Err((reason, detail)) => {
                 if !ids.is_empty() {
                     g.note("cpu", reason, Some(detail));
@@ -117,15 +126,11 @@ impl Clocks {
         };
         let mut out = Vec::new();
         for id in ids {
-            let base = *self.base.entry(*id).or_insert_with(|| {
-                registry_dword(&format!("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\{}", id), "~MHz").map(i64::from)
-            });
             let target = format!("cpu{}", id);
-            let hz = match (base.filter(|m| *m > 0), shares.as_ref().map(|s| s.get(id))) {
-                (Some(mhz), Some(Some(share))) => Some(g.got((share * mhz as f64 / 100.0).round() as i64 * 1_000_000)),
-                (None, _) => { g.note(&target, "not_exposed", None); None }
-                (_, Some(None)) => { g.note(&target, "no_data", None); None } // no current value from PDH
-                (_, None) => None, // the read failed, noted above
+            let hz = match read.as_ref().map(|(shares, mhz)| (shares.get(id), mhz.get(id).filter(|m| **m > 0.0))) {
+                Some((Some(share), Some(mhz))) => Some(g.got((share * mhz / 100.0).round() as i64 * 1_000_000)),
+                Some(_) => { g.note(&target, "no_data", None); None } // no current value from PDH
+                None => None, // the read failed, noted above
             };
             g.sensor(Slot::Cpu(*id), Some(source("pdh", "hertz", "device_channel",
                 vec![("cpu", (*id).into()), ("attr", "% Processor Performance".into())])), hz.and(span));
