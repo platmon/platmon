@@ -5,7 +5,8 @@ use crate::collect::{rate, reason_value, window_ms};
 use crate::json::{round_to, Value};
 use crate::metadata::{clock, Group, Span};
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
-                                     ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, ERROR_PATH_NOT_FOUND, INVALID_HANDLE_VALUE};
+                                     ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, ERROR_PATH_NOT_FOUND, HANDLE,
+                                     INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, QueryDosDeviceW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
 use windows_sys::Win32::System::Ioctl::{DISK_PERFORMANCE, IOCTL_DISK_PERFORMANCE};
 use windows_sys::Win32::System::IO::DeviceIoControl;
@@ -18,12 +19,12 @@ const PREFIX: &str = "PhysicalDrive";
 type Row = [u64; 8];
 const QUEUE: usize = 6;
 
-fn error_code(e: &std::io::Error) -> u32 {
+pub(super) fn error_code(e: &std::io::Error) -> u32 {
     e.raw_os_error().unwrap_or(0) as u32
 }
 
 /// The PhysicalDriveN names Windows lists, sorted.
-fn drives() -> Result<Vec<String>, std::io::Error> {
+pub(super) fn drives() -> Result<Vec<String>, std::io::Error> {
     let mut buf = vec![0u16; 1 << 16];
     loop {
         let n = unsafe { QueryDosDeviceW(std::ptr::null(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
@@ -42,23 +43,40 @@ fn drives() -> Result<Vec<String>, std::io::Error> {
     }
 }
 
-/// One drive's counters; opened without access rights, which the query does not need.
+/// A drive's handle, opened without access rights, which its queries do not need; closed when dropped.
+pub(super) struct Drive(HANDLE);
+
+impl Drive {
+    pub(super) fn open(name: &str) -> Result<Drive, std::io::Error> {
+        let path: Vec<u16> = format!("\\\\.\\{}", name).encode_utf16().chain(Some(0)).collect();
+        let h = unsafe { CreateFileW(path.as_ptr(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, std::ptr::null(), OPEN_EXISTING, 0,
+                                     std::ptr::null_mut()) };
+        if h == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Drive(h))
+    }
+
+    /// DeviceIoControl(code, input, into out): the bytes written.
+    pub(super) fn control<I, O>(&self, code: u32, input: Option<&I>, out: &mut O) -> Result<usize, std::io::Error> {
+        let (inp, inlen) = input.map_or((std::ptr::null(), 0), |i| ((i as *const I).cast(), std::mem::size_of::<I>() as u32));
+        let mut len = 0u32;
+        let ok = unsafe { DeviceIoControl(self.0, code, inp, inlen, (out as *mut O).cast(), std::mem::size_of::<O>() as u32,
+                                          &mut len, std::ptr::null_mut()) };
+        if ok == 0 { Err(std::io::Error::last_os_error()) } else { Ok(len as usize) }
+    }
+}
+
+impl Drop for Drive {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// One drive's counters.
 fn read(name: &str) -> Result<Row, std::io::Error> {
-    let path: Vec<u16> = format!("\\\\.\\{}", name).encode_utf16().chain(Some(0)).collect();
-    let h = unsafe { CreateFileW(path.as_ptr(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, std::ptr::null(), OPEN_EXISTING, 0,
-                                 std::ptr::null_mut()) };
-    if h == INVALID_HANDLE_VALUE {
-        return Err(std::io::Error::last_os_error());
-    }
     let mut p = DISK_PERFORMANCE::default();
-    let mut len = 0u32;
-    let ok = unsafe { DeviceIoControl(h, IOCTL_DISK_PERFORMANCE, std::ptr::null(), 0, (&mut p as *mut DISK_PERFORMANCE).cast(),
-                                      std::mem::size_of::<DISK_PERFORMANCE>() as u32, &mut len, std::ptr::null_mut()) };
-    let e = std::io::Error::last_os_error();
-    unsafe { CloseHandle(h) };
-    if ok == 0 {
-        return Err(e);
-    }
+    Drive::open(name)?.control::<(), _>(IOCTL_DISK_PERFORMANCE, None, &mut p)?;
     let u = |x: i64| x.max(0) as u64;
     Ok([p.ReadCount as u64, u(p.BytesRead), u(p.ReadTime), p.WriteCount as u64, u(p.BytesWritten), u(p.WriteTime),
         p.QueueDepth as u64, u(p.IdleTime)])

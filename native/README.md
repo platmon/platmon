@@ -1091,7 +1091,11 @@ On `x86_64-pc-windows-msvc`:
   - `cpu`: per-CPU usage from `NtQuerySystemInformation` (`SystemProcessorPerformanceInformation`, 100 ns
     units) through the same `CpuCounters` as Linux: user, kernel time without idle as system (it includes
     DPCs and interrupts), idle; the counters Windows does not have are 0. Only the CPUs of the process's
-    processor group, so at most 64. `freq` is `null`.
+    processor group, so at most 64.
+  - `cpu[].freq` (`cpu_frequency`): each CPU's `% Processor Performance` (PDH, by the counter's English
+    name, so any display language) times its base clock (the registry's `~MHz`), in Hz rounded to the MHz:
+    the speed Task Manager shows, an average since the last collection that moves with turbo and power
+    saving. Processor group 0's CPUs; sensor provider `pdh`.
   - `memory`: `GlobalMemoryStatusEx` (used = total − available); swap is the paging files' size and use
     (`SystemPageFileInformation`, which `winternl.h` leaves out; its layout has not changed since Windows
     NT).
@@ -1107,9 +1111,16 @@ On `x86_64-pc-windows-msvc`:
   - `disk_io`: `IOCTL_DISK_PERFORMANCE` on each `PhysicalDriveN`, with Linux's rates and reasons, provider
     `ioctl_disk_performance`; `major`, `minor`, `merges` and `io_time_ms` are `null` and `io_time_ratio`
     comes from the idle time ([disk-io.md](../docs/reference/disk-io.md#windows)).
-  - The other optional groups (CPU clocks, GPU, NPU, temperature, power, fans, power mode, board info)
-    are `unavailable` with `unsupported_platform`; `sensor_meta` is empty. Pressure is left out, as when
-    it is off, whatever `platmon.ini` says.
+  - `temperature`: each hardware GPU's temperature from its adapter performance data
+    (`D3DKMT_ADAPTER_PERFDATA`, what Task Manager shows; a driver that reports none, often an integrated
+    GPU's, is `not_exposed`), keyed by the adapter's name, provider `d3dkmt`; and each drive's own
+    temperature (`StorageDeviceTemperatureProperty`: NVMe and some SATA drives; virtual disks and most USB
+    bridges are `not_exposed`), keyed by its model, provider `storage_temperature`. A repeated name gets
+    ` (gpuN)` or ` (PhysicalDriveN)`. Windows has no API for the CPU's temperature, so there is none.
+  - `sensor_meta` covers the CPU clocks and temperatures, as on Linux (`device_channel`: the CPU number,
+    the adapter's position and name, the `PhysicalDriveN` number).
+  - The other optional groups (GPU, NPU, power, fans, power mode, board info) are `unavailable` with
+    `unsupported_platform`. Pressure is left out, as when it is off, whatever `platmon.ini` says.
   - Slow groups: the probe, with `collect/probe.rs` shared by both platforms and std's `connect_timeout`
     for the connection ([probe.md](../docs/reference/probe.md#windows)). Storage, Wi-Fi and battery are
     left out, as when they are off.
@@ -1131,7 +1142,8 @@ On `x86_64-pc-windows-msvc`:
   messages go to standard error, which a service does not have, so a configuration error shows only as
   the service stopping (`config-check` shows it). CI's smoke test creates, starts and stops it.
 - Not shown: a run on a Windows host outside CI, Windows on ARM, more than 64 CPUs, a sleep and resume,
-  the disk query without administrator rights.
+  the disk query without administrator rights, a GPU or drive temperature (the CI runner, a VM, has
+  neither), the CPU clock against Task Manager.
 
 The Linux servers behave the same (unit tests, `config_fixture.py` 67/67, `runtime_fixture.py` 7/7,
 `fixture.sh` 11/11, `live_http.py` with no difference, `pytest`), but moved code changes their bytes, and

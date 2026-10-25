@@ -4,8 +4,9 @@
 
 - build-info: the system allocator's mark;
 - collect: one recorded collection (src/collect/windows), with the required data, CPU usage, the elapsed
-  clock reported as "boottime", the network and disk counters with rates, and the other optional groups
-  unsupported_platform;
+  clock reported as "boottime", the network and disk counters with rates, each CPU clock and temperature
+  with its sensor record (a runner can have neither: its group is then unavailable, never error), and the
+  other optional groups unsupported_platform;
 - script and loop exit 2 with the usage: they are Linux's (fake trees, rusage);
 - config-check without a file: the defaults, no error;
 - runtime-script: answers /api/status as starting, with the given instance id;
@@ -25,7 +26,7 @@ import urllib.request
 
 TIMEOUT = 30
 INSTANCE = "00000000-0000-4000-8000-000000000000"
-OPTIONAL = ("cpu_frequency", "gpu", "npu", "temperature", "power", "fans", "power_mode", "board_info")
+OPTIONAL = ("gpu", "npu", "power", "fans", "power_mode", "board_info")
 
 
 def run(binary, args, stdin=""):
@@ -74,6 +75,16 @@ def main(binary):
     collectors = stats.get("collectors", {})
     check("collect: optional groups", all(collectors.get(g, {}).get("reason") == "unsupported_platform" for g in OPTIONAL),
           json.dumps(collectors))
+    sensors = out.get("sensors", {})
+    cpus = stats.get("cpu", [])
+    check("collect: cpu_frequency", collectors.get("cpu_frequency", {}).get("state") in ("ok", "unavailable")
+          and all((isinstance(c.get("freq"), int) and c["freq"] > 0 and sensors.get(f"/cpu/{i}/freq", {}).get("span"))
+                  or (c.get("freq") is None and f"/cpu/{i}/freq" in sensors) for i, c in enumerate(cpus)),
+          json.dumps([c.get("freq") for c in cpus]) + " " + json.dumps(collectors.get("cpu_frequency")))
+    temps = stats.get("temperature", {})
+    check("collect: temperature", collectors.get("temperature", {}).get("state") in ("ok", "unavailable")
+          and all(isinstance(t, float) and sensors.get("/temperature/" + k.replace("~", "~0").replace("/", "~1"), {}).get("span")
+                  for k, t in temps.items()), json.dumps(temps) + " " + json.dumps(collectors.get("temperature")))
     network = stats.get("network", {})
     interfaces = network.get("interfaces", [])
     check("collect: network", network.get("provider") == "if_table2" and network.get("scope") == {"kind": "host", "id": None}
@@ -90,6 +101,8 @@ def main(binary):
           and collectors.get("disk_io", {}).get("state") in ("ok", "partial")
           and out.get("passive", {}).get("disk_io"), json.dumps(disk_io) + " " + json.dumps(collectors.get("disk_io")))
     print("      " + json.dumps({k: stats.get(k) for k in ("model", "system", "uptime", "memory", "disk", "cpu_sampling")}))
+    print("      " + json.dumps({"freq": [c.get("freq") for c in cpus], "temperature": temps,
+                                 "collectors": {g: collectors.get(g) for g in ("cpu_frequency", "temperature")}}, ensure_ascii=False))
     print("      " + json.dumps([(i["name"], i["reason"], i["rates"]) for i in interfaces], ensure_ascii=False))
     print("      " + json.dumps([(d["name"], d["in_flight"], d["reason"], d["rates"]) for d in disks]))
     for command in ("script", "loop"):

@@ -10,7 +10,7 @@ pub mod windows;
 pub use windows::{observe, Collector};
 
 use crate::json::{round_to, Value};
-use crate::metadata::{self, clock, Span};
+use crate::metadata::{self, clock, pointer, Group, Slot, Span};
 use std::collections::BTreeMap;
 
 /// The required reads' spans, by name (Trace.required).
@@ -127,6 +127,52 @@ impl Collected {
         out.set("passive", spans);
         out
     }
+}
+
+/// core.sensor_entries: {JSON Pointer: metadata} for the sensor values in the final stats, from the groups
+/// named temperature, power, fans, cpu_frequency, gpu and npu (those given); fan_ids: each fan's id, in order.
+pub fn sensor_entries(stats: &Value, fan_ids: &[u64], groups: &[&Group]) -> Vec<(String, Value)> {
+    let mut out = Vec::new();
+    let mut add = |ptr: String, value: Option<&Value>, name: &str, slot: Slot| {
+        let Some(group) = groups.iter().find(|g| g.name == name) else { return };
+        if let Some((_, info)) = group.sensors.iter().find(|(s, _)| *s == slot) {
+            let mut info = info.clone();
+            if value.map_or(true, Value::is_null) {
+                info.set("span", Value::Null);
+            }
+            out.push((ptr, info));
+        }
+    };
+    for table in ["temperature", "power"] {
+        if let Some(Value::Obj(items)) = stats.get(table) {
+            for (k, v) in items {
+                add(pointer(&[table, k]), Some(v), table, Slot::Key(k.clone()));
+            }
+        }
+    }
+    if let Some(Value::Arr(fans)) = stats.get("fans") {
+        for (i, (f, id)) in fans.iter().zip(fan_ids).enumerate() {
+            add(pointer(&["fans", &i.to_string(), "rpm"]), f.get("rpm"), "fans", Slot::Fan(*id, "rpm"));
+            add(pointer(&["fans", &i.to_string(), "percent"]), f.get("percent"), "fans", Slot::Fan(*id, "percent"));
+        }
+    }
+    if let Some(Value::Arr(cpus)) = stats.get("cpu") {
+        for (i, c) in cpus.iter().enumerate() {
+            if let Some(Value::Int(id)) = c.get("id") {
+                add(pointer(&["cpu", &i.to_string(), "freq"]), c.get("freq"), "cpu_frequency", Slot::Cpu(*id));
+            }
+        }
+    }
+    for kind in ["gpu", "npu"] {
+        if let Some(v @ Value::Obj(_)) = stats.get(kind) {
+            for field in ["usage", "freq", "max_freq"] {
+                if v.contains(field) {
+                    add(pointer(&[kind, field]), v.get(field), kind, Slot::Key(field.into()));
+                }
+            }
+        }
+    }
+    out
 }
 
 fn span_value(span: metadata::Span) -> Value {
