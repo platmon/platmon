@@ -1,9 +1,11 @@
 //! Windows: the required data (CPU, memory, the system volume, identity) from the Win32 and NT system
-//! information calls, Network (network.rs), Disk I/O (disk_io.rs) and the probe's connection; the other
-//! optional groups have no provider here yet (unsupported_platform). Rust only: the Python service has no Windows collector to
-//! compare with.
+//! information calls, the CPU clocks (cpu_clock.rs), temperatures (temperature.rs), Network (network.rs),
+//! Disk I/O (disk_io.rs) and the probe's connection; the other optional groups have no provider here yet
+//! (unsupported_platform). Rust only: the Python service has no Windows collector to compare with.
+pub mod cpu_clock;
 pub mod disk_io;
 pub mod network;
+pub mod temperature;
 
 use super::{timed, Collected, CpuCounters, Required};
 use crate::json::{round_to, Value};
@@ -46,8 +48,9 @@ pub fn connect_ms(address: &str, port: u16, timeout: f64) -> (Option<f64>, Optio
     }
 }
 
-/// The optional groups of a Linux collection, each without a provider here.
+/// The optional groups of a Linux collection, in its order; those without a provider here are unsupported_platform.
 const OPTIONAL: [&str; 8] = ["cpu_frequency", "gpu", "npu", "temperature", "power", "fans", "power_mode", "board_info"];
+const READ: [&str; 2] = ["cpu_frequency", "temperature"];
 
 /// SystemPageFileInformation and its entries (winternl.h leaves them out; stable since Windows NT).
 const SYSTEM_PAGE_FILE_INFORMATION: i32 = 18;
@@ -212,6 +215,7 @@ fn system_info() -> Value {
 pub struct Collector {
     pub platform: &'static str,
     cpu: CpuCounters,
+    clocks: cpu_clock::Clocks,
     network: Option<network::Network>,
     disk_io: Option<disk_io::Disks>,
     logged: Vec<(String, Vec<String>)>,
@@ -221,16 +225,24 @@ impl Collector {
     /// max_gap: seconds, max(3 × interval, 5 s) in the service; passive: network, disk_io, pressure on.
     /// Pressure has no Windows reader yet and is left out, as when it is off.
     pub fn new(max_gap: f64, passive: [bool; 3]) -> Collector {
-        Collector { platform: "Windows", cpu: CpuCounters::new(Some(max_gap), "interval"),
+        Collector { platform: "Windows", cpu: CpuCounters::new(Some(max_gap), "interval"), clocks: cpu_clock::Clocks::new(),
                     network: passive[0].then(|| network::Network::new(Some(max_gap))),
                     disk_io: passive[1].then(|| disk_io::Disks::new(Some(max_gap))), logged: Vec::new() }
     }
 
-    /// The fields and order of a Linux collection, the optional groups unsupported_platform.
+    /// The fields and order of a Linux collection, the optional groups without a provider unsupported_platform.
     pub fn collect(&mut self) -> Result<Collected, String> {
         let mut required: Required = Vec::new();
         let (usage, sampling) = self.cpu.sample(cpu_times)?;
         required.push(("cpu", self.cpu.span));
+        let mut groups: Vec<Group> = OPTIONAL.iter().map(|name| Group::new(name, true)).collect();
+        let ids: Vec<i64> = usage.iter().map(|(n, _)| *n).collect();
+        let freqs = self.clocks.sample(&ids, &mut groups[0]);
+        let temps = temperature::read(&mut groups[3]);
+        for g in groups.iter_mut().filter(|g| !READ.contains(&g.name.as_str())) {
+            let name = g.name.clone();
+            g.note(&name, "unsupported_platform", None);
+        }
         let [total, used, swap_total, swap_used] = timed(&mut required, "memory", memory)?;
         let disk = timed(&mut required, "disk", disk_usage)?;
         let uptime = timed(&mut required, "uptime", crate::platform::boottime_ns).ok_or("uptime unreadable")?;
@@ -249,7 +261,7 @@ impl Collector {
             let mut c = Value::obj();
             c.set("id", (*n).into());
             c.set("usage", (*u).into());
-            c.set("freq", Value::Null);
+            c.set("freq", freqs.iter().find(|(x, _)| x == n).and_then(|(_, f)| *f).into());
             c
         }).collect()));
         s.set("cpu_sampling", sampling);
@@ -264,15 +276,10 @@ impl Collector {
         dv.set("total", disk.0.into());
         dv.set("used", disk.1.into());
         s.set("disk", dv);
-        s.set("temperature", Value::obj());
+        s.set("temperature", Value::Obj(temps));
         s.set("power", Value::obj());
         s.set("fans", Value::Arr(vec![]));
         s.set("npu", Value::Null);
-        let mut groups: Vec<Group> = OPTIONAL.iter().map(|name| {
-            let mut g = Group::new(name, true);
-            g.note(name, "unsupported_platform", None);
-            g
-        }).collect();
         // after the required data: a failed collection never reaches it
         let mut network = None;
         if let Some(n) = self.network.as_mut() {
@@ -290,8 +297,9 @@ impl Collector {
             disk_io = span;
             groups.push(g);
         }
+        let sensors = super::sensor_entries(&s, &[], &groups.iter().collect::<Vec<_>>());
         s.set("collectors", metadata::summarize(&groups, &mut self.logged));
-        Ok(Collected { stats: s, sensors: Vec::new(), required, passive: [network, disk_io, None] })
+        Ok(Collected { stats: s, sensors, required, passive: [network, disk_io, None] })
     }
 }
 
@@ -339,9 +347,29 @@ mod tests {
         assert!(matches!(system.get("arch"), Some(Value::Str(a)) if a != "unknown"));
         assert!(matches!(system.get("kernel"), Some(Value::Str(k)) if k.starts_with("10.0.")), "{:?}", system);
         let collectors = s.get("collectors").unwrap();
-        for name in OPTIONAL {
+        for name in OPTIONAL.iter().filter(|n| !READ.contains(n)) {
             let state = collectors.get(name).and_then(|g| g.get("reason"));
             assert_eq!(state, Some(&Value::Str("unsupported_platform".into())), "{}", name);
+        }
+        // a value has its sensor record, with a read; a VM may have no clock or temperature to give
+        let sensor = |ptr: &str| col.sensors.iter().find(|(p, _)| p == ptr).map(|(_, m)| m);
+        for (i, c) in cpus.iter().enumerate() {
+            let record = sensor(&format!("/cpu/{}/freq", i)).unwrap_or_else(|| panic!("no record for cpu row {}", i));
+            match c.get("freq") {
+                Some(Value::Int(hz)) => assert!(*hz > 0 && matches!(record.get("span"), Some(Value::Arr(_))), "{:?} {:?}", c, record),
+                Some(Value::Null) => assert_eq!(record.get("span"), Some(&Value::Null)),
+                other => panic!("freq {:?}", other),
+            }
+        }
+        let Some(Value::Obj(temps)) = s.get("temperature") else { panic!("no temperature table") };
+        for (k, v) in temps {
+            assert!(matches!(v, Value::Float(t) if (-40.0..150.0).contains(t)), "{} {:?}", k, v);
+            let record = sensor(&crate::metadata::pointer(&["temperature", k])).unwrap_or_else(|| panic!("no record for {}", k));
+            assert!(matches!(record.get("span"), Some(Value::Arr(_))) && record.get("unit") == Some(&Value::Str("celsius".into())));
+        }
+        for name in READ {
+            let state = collectors.get(name).and_then(|g| g.get("state"));
+            assert!(matches!(state, Some(Value::Str(s)) if s == "ok" || s == "unavailable"), "{}: {:?}", name, collectors.get(name));
         }
         let network = s.get("network").unwrap();
         assert_eq!(network.get("provider"), Some(&Value::Str("if_table2".into())));

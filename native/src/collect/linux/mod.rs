@@ -8,7 +8,7 @@ pub mod passive;
 pub mod sysfs;
 
 use crate::json::Value;
-use crate::metadata::{self, pointer, Group, Slot};
+use crate::metadata::{self, Group};
 use crate::runtime;
 use super::{Collected, CpuCounters};
 use common::Fan;
@@ -131,7 +131,8 @@ impl Collector {
             stats.set("pressure", v);
             pressure = span;
         }
-        let sensors = sensor_entries(&stats, &fans, &g);
+        let fan_ids: Vec<u64> = fans.iter().map(|f| f.id).collect();
+        let sensors = super::sensor_entries(&stats, &fan_ids, &[&g.temperature, &g.power, &g.fans, &g.cpu_frequency, &g.gpu, &g.npu]);
         let groups = g.into_vec([self.network.is_some(), self.disks.is_some(), self.pressure]);
         stats.set("collectors", metadata::summarize(&groups, &mut self.logged));
         Ok(Collected { stats, sensors, required, passive: [network, disk_io, pressure] })
@@ -146,48 +147,4 @@ fn fans_value(fans: &[Fan]) -> Value {
         v.set("percent", f.percent.into());
         v
     }).collect())
-}
-
-/// core.sensor_entries: {JSON Pointer: metadata} for the sensor values in the final stats.
-fn sensor_entries(stats: &Value, fans: &[Fan], g: &Groups) -> Vec<(String, Value)> {
-    let mut out = Vec::new();
-    let mut add = |ptr: String, value: Option<&Value>, group: &Group, slot: Slot| {
-        if let Some((_, info)) = group.sensors.iter().find(|(s, _)| *s == slot) {
-            let mut info = info.clone();
-            if value.map_or(true, Value::is_null) {
-                info.set("span", Value::Null);
-            }
-            out.push((ptr, info));
-        }
-    };
-    for (table, group) in [("temperature", &g.temperature), ("power", &g.power)] {
-        if let Some(Value::Obj(items)) = stats.get(table) {
-            for (k, v) in items {
-                add(pointer(&[table, k]), Some(v), group, Slot::Key(k.clone()));
-            }
-        }
-    }
-    for (i, f) in fans.iter().enumerate() {
-        let rpm: Value = f.rpm.into();
-        let pct: Value = f.percent.into();
-        add(pointer(&["fans", &i.to_string(), "rpm"]), Some(&rpm), &g.fans, Slot::Fan(f.id, "rpm"));
-        add(pointer(&["fans", &i.to_string(), "percent"]), Some(&pct), &g.fans, Slot::Fan(f.id, "percent"));
-    }
-    if let Some(Value::Arr(cpus)) = stats.get("cpu") {
-        for (i, c) in cpus.iter().enumerate() {
-            if let Some(Value::Int(id)) = c.get("id") {
-                add(pointer(&["cpu", &i.to_string(), "freq"]), c.get("freq"), &g.cpu_frequency, Slot::Cpu(*id));
-            }
-        }
-    }
-    for (kind, group) in [("gpu", &g.gpu), ("npu", &g.npu)] {
-        if let Some(v @ Value::Obj(_)) = stats.get(kind) {
-            for field in ["usage", "freq", "max_freq"] {
-                if v.contains(field) {
-                    add(pointer(&[kind, field]), v.get(field), group, Slot::Key(field.into()));
-                }
-            }
-        }
-    }
-    out
 }
