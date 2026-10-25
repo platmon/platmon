@@ -1,9 +1,10 @@
 //! Windows: the required data (CPU, memory, the system volume, identity) from the Win32 and NT system
-//! information calls, the CPU clocks (cpu_clock.rs), temperatures (temperature.rs), Network (network.rs),
-//! Disk I/O (disk_io.rs) and the probe's connection; the other optional groups have no provider here yet
+//! information calls, the CPU clocks (cpu_clock.rs), the GPU (gpu.rs), temperatures (temperature.rs), Network
+//! (network.rs), Disk I/O (disk_io.rs) and the probe's connection; the other optional groups have no provider here yet
 //! (unsupported_platform). Rust only: the Python service has no Windows collector to compare with.
 pub mod cpu_clock;
 pub mod disk_io;
+pub mod gpu;
 pub mod network;
 pub mod temperature;
 
@@ -50,7 +51,7 @@ pub fn connect_ms(address: &str, port: u16, timeout: f64) -> (Option<f64>, Optio
 
 /// The optional groups of a Linux collection, in its order; those without a provider here are unsupported_platform.
 const OPTIONAL: [&str; 8] = ["cpu_frequency", "gpu", "npu", "temperature", "power", "fans", "power_mode", "board_info"];
-const READ: [&str; 2] = ["cpu_frequency", "temperature"];
+const READ: [&str; 3] = ["cpu_frequency", "gpu", "temperature"];
 
 /// SystemPageFileInformation and its entries (winternl.h leaves them out; stable since Windows NT).
 const SYSTEM_PAGE_FILE_INFORMATION: i32 = 18;
@@ -216,6 +217,7 @@ pub struct Collector {
     pub platform: &'static str,
     cpu: CpuCounters,
     clocks: cpu_clock::Clocks,
+    gpu: gpu::Gpu,
     network: Option<network::Network>,
     disk_io: Option<disk_io::Disks>,
     logged: Vec<(String, Vec<String>)>,
@@ -225,7 +227,7 @@ impl Collector {
     /// max_gap: seconds, max(3 × interval, 5 s) in the service; passive: network, disk_io, pressure on.
     /// Pressure has no Windows reader yet and is left out, as when it is off.
     pub fn new(max_gap: f64, passive: [bool; 3]) -> Collector {
-        Collector { platform: "Windows", cpu: CpuCounters::new(Some(max_gap), "interval"), clocks: cpu_clock::Clocks::new(),
+        Collector { platform: "Windows", cpu: CpuCounters::new(Some(max_gap), "interval"), clocks: cpu_clock::Clocks::new(), gpu: gpu::Gpu::new(),
                     network: passive[0].then(|| network::Network::new(Some(max_gap))),
                     disk_io: passive[1].then(|| disk_io::Disks::new(Some(max_gap))), logged: Vec::new() }
     }
@@ -238,6 +240,7 @@ impl Collector {
         let mut groups: Vec<Group> = OPTIONAL.iter().map(|name| Group::new(name, true)).collect();
         let ids: Vec<i64> = usage.iter().map(|(n, _)| *n).collect();
         let freqs = self.clocks.sample(&ids, &mut groups[0]);
+        let gpu = self.gpu.sample(&mut groups[1]);
         let temps = temperature::read(&mut groups[3]);
         for g in groups.iter_mut().filter(|g| !READ.contains(&g.name.as_str())) {
             let name = g.name.clone();
@@ -265,7 +268,7 @@ impl Collector {
             c
         }).collect()));
         s.set("cpu_sampling", sampling);
-        s.set("gpu", Value::Null);
+        s.set("gpu", gpu.into());
         let mut mv = Value::obj();
         mv.set("total", total.into());
         mv.set("used", used.into());
@@ -366,6 +369,17 @@ mod tests {
             assert!(matches!(v, Value::Float(t) if (-40.0..150.0).contains(t)), "{} {:?}", k, v);
             let record = sensor(&crate::metadata::pointer(&["temperature", k])).unwrap_or_else(|| panic!("no record for {}", k));
             assert!(matches!(record.get("span"), Some(Value::Arr(_))) && record.get("unit") == Some(&Value::Str("celsius".into())));
+        }
+        match s.get("gpu") {
+            Some(Value::Null) => assert_eq!(collectors.get("gpu").and_then(|g| g.get("reason")), Some(&Value::Str("not_detected".into()))),
+            Some(gpu) => {
+                assert_eq!(gpu.get("provider"), Some(&Value::Str("pdh_gpu_engine".into())));
+                for k in ["usage", "freq", "max_freq"] {
+                    let record = sensor(&format!("/gpu/{}", k)).unwrap_or_else(|| panic!("no record for gpu {}", k));
+                    assert_eq!(gpu.get(k).map_or(true, Value::is_null), record.get("span") == Some(&Value::Null), "{} {:?}", k, gpu);
+                }
+            }
+            None => panic!("no gpu"),
         }
         for name in READ {
             let state = collectors.get(name).and_then(|g| g.get("state"));

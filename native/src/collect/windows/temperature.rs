@@ -17,7 +17,7 @@ use windows_sys::Win32::System::Ioctl::{PropertyStandardQuery, StorageDeviceProp
                                         STORAGE_TEMPERATURE_DATA_DESCRIPTOR, STORAGE_TEMPERATURE_INFO};
 
 /// D3DKMT_ADAPTERTYPE's SoftwareDevice bit: the Basic Render Driver, which has no sensors.
-const SOFTWARE_DEVICE: u32 = 1 << 2;
+pub(super) const SOFTWARE_DEVICE: u32 = 1 << 2;
 
 /// "key (suffix)" when another value already has key's name.
 fn unique_key(table: &[(String, Value)], key: String, suffix: &str) -> String {
@@ -25,19 +25,19 @@ fn unique_key(table: &[(String, Value)], key: String, suffix: &str) -> String {
 }
 
 /// Text that ends at its first NUL.
-fn until_nul(units: &[u16]) -> String {
+pub(super) fn until_nul(units: &[u16]) -> String {
     let n = units.iter().position(|c| *c == 0).unwrap_or(units.len());
     String::from_utf16_lossy(&units[..n]).trim().to_string()
 }
 
-fn query<T>(adapter: u32, kind: KMTQUERYADAPTERINFOTYPE, out: &mut T) -> i32 {
+pub(super) fn query<T>(adapter: u32, kind: KMTQUERYADAPTERINFOTYPE, out: &mut T) -> i32 {
     let mut q = D3DKMT_QUERYADAPTERINFO { hAdapter: adapter, Type: kind, pPrivateDriverData: (out as *mut T).cast(),
                                           PrivateDriverDataSize: std::mem::size_of::<T>() as u32 };
     unsafe { D3DKMTQueryAdapterInfo(&mut q) }
 }
 
 /// The open handles of the display adapters, which the caller closes.
-fn adapters() -> Result<Vec<D3DKMT_ADAPTERINFO>, i32> {
+pub(super) fn adapters() -> Result<Vec<D3DKMT_ADAPTERINFO>, i32> {
     let mut e = D3DKMT_ENUMADAPTERS2 { NumAdapters: 0, pAdapters: std::ptr::null_mut() };
     let status = unsafe { D3DKMTEnumAdapters2(&mut e) }; // the count only
     if status < 0 {

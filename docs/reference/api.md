@@ -212,6 +212,7 @@ sets neither.
 | `i915` (Intel, `/sys/class/drm/cardN`) | `rc6_residency` | the share of the time between two collections the GPU was not in its RC6 idle state |
 | `amdgpu` | `gpu_busy_percent` | the busy share the driver publishes, as it is |
 | NVIDIA (`nvidia-smi`, including WSL2) | `nvidia-smi` | the utilization percentage reported by NVIDIA |
+| Windows build (not released) | `pdh_gpu_engine` | Task Manager's: the busiest engine's utilization, the processes' shares added up ([native/README.md](../../native/README.md), Windows) |
 
 - The board module is asked first and the DRM class is read where it gave nothing, so a Jetson keeps its
   own numbers and every other host gets what its driver publishes.
