@@ -2,7 +2,7 @@
 //! times its nominal clock ("Processor Frequency", the base the share is of), the speed Task Manager shows.
 //! Not the registry's ~MHz: a hybrid CPU's P-, E- and LP E-cores have different nominal clocks, and ~MHz can
 //! be one value for all of them. The share is an average over the time since the last collection, so it
-//! moves with turbo and power saving; processor group 0 only.
+//! moves with turbo and power saving. Every processor group's CPUs, numbered as the usage's (group_starts).
 use crate::metadata::{clock, source, Group, Slot};
 use std::collections::BTreeMap;
 use windows_sys::Win32::System::Performance::{PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
@@ -31,6 +31,13 @@ impl Drop for Clocks {
             unsafe { PdhCloseQuery(q) };
         }
     }
+}
+
+/// The CPU id of a counter instance "group,number", None for the totals ("_Total", "0,_Total").
+fn cpu_id(name: &str, starts: &[i64]) -> Option<i64> {
+    let (group, number) = name.split_once(',')?;
+    let (group, number) = (group.parse::<usize>().ok()?, number.parse::<i64>().ok()?);
+    Some(starts.get(group)? + number)
 }
 
 fn reason(status: u32) -> &'static str {
@@ -67,8 +74,8 @@ impl Clocks {
         Clocks { pdh }
     }
 
-    /// {group 0 CPU number: value} from a counter's instances ("0,3" is CPU 3 of group 0).
-    fn values(counter: PDH_HCOUNTER) -> Result<BTreeMap<i64, f64>, u32> {
+    /// {CPU id: value} from a counter's instances ("1,3" is CPU 3 of group 1), starts: each group's first id.
+    fn values(counter: PDH_HCOUNTER, starts: &[i64]) -> Result<BTreeMap<i64, f64>, u32> {
         let mut buf: Vec<u64> = Vec::new();
         for _ in 0..4 { // more instances can appear between the size and the read
             let (mut size, mut count) = ((buf.len() * 8) as u32, 0u32);
@@ -88,7 +95,7 @@ impl Clocks {
                     let n = (0..).take_while(|i| *item.szName.add(*i) != 0).count();
                     String::from_utf16_lossy(std::slice::from_raw_parts(item.szName, n))
                 } };
-                let cpu = name.strip_prefix("0,").and_then(|n| n.parse::<i64>().ok());
+                let cpu = cpu_id(&name, starts);
                 let valid = [PDH_CSTATUS_VALID_DATA, PDH_CSTATUS_NEW_DATA].contains(&item.FmtValue.CStatus);
                 if let (Some(cpu), true) = (cpu, valid) {
                     out.insert(cpu, unsafe { item.FmtValue.Anonymous.doubleValue });
@@ -104,11 +111,12 @@ impl Clocks {
         if ids.is_empty() {
             g.note("cpu", "no_data", None);
         }
+        let starts = super::group_starts();
         let start = clock();
         let read = match &self.pdh {
             Ok((q, c, n)) => match unsafe { PdhCollectQueryData(*q) } {
-                0 => Clocks::values(*c).map_err(|s| (reason(s), format!("{}: {:#x}", COUNTER, s))).and_then(|shares| {
-                    Clocks::values(*n).map(|mhz| (shares, mhz)).map_err(|s| (reason(s), format!("{}: {:#x}", NOMINAL, s)))
+                0 => Clocks::values(*c, &starts).map_err(|s| (reason(s), format!("{}: {:#x}", COUNTER, s))).and_then(|shares| {
+                    Clocks::values(*n, &starts).map(|mhz| (shares, mhz)).map_err(|s| (reason(s), format!("{}: {:#x}", NOMINAL, s)))
                 }),
                 s => Err((reason(s), format!("PdhCollectQueryData: {:#x}", s))),
             },
@@ -137,5 +145,21 @@ impl Clocks {
             out.push((*id, hz));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn instances_are_numbered_across_processor_groups() {
+        let starts = [0, 64, 100];
+        assert_eq!(cpu_id("0,3", &starts), Some(3));
+        assert_eq!(cpu_id("1,0", &starts), Some(64));
+        assert_eq!(cpu_id("2,35", &starts), Some(135));
+        for total in ["_Total", "0,_Total", "3,1", ""] {
+            assert_eq!(cpu_id(total, &starts), None, "{}", total);
+        }
     }
 }
