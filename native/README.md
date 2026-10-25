@@ -1112,15 +1112,23 @@ On `x86_64-pc-windows-msvc`:
   - `disk_io`: `IOCTL_DISK_PERFORMANCE` on each `PhysicalDriveN`, with Linux's rates and reasons, provider
     `ioctl_disk_performance`; `major`, `minor`, `merges` and `io_time_ms` are `null` and `io_time_ratio`
     comes from the idle time ([disk-io.md](../docs/reference/disk-io.md#windows)).
+  - `gpu` (`gpu`): the first hardware display adapter (`D3DKMTEnumAdapters2`'s order; the Basic Render
+    Driver is skipped, and with no other adapter `gpu` is `null`, `not_detected`). `usage` is Task
+    Manager's: the busiest engine's `Utilization Percentage` (PDH `GPU Engine`, by the counter's English
+    name), the processes' shares of one engine added up and capped at 100, an average since the last
+    collection; an adapter with no engine at work is `0.0`. `freq` and `max_freq` are its 3D engine's
+    clocks (`D3DKMT_NODE_PERFDATA`); a driver that reports none is `not_exposed`, and Intel's reports none
+    while the GPU sleeps (measured on Meteor Lake: most idle collections), which is `no_data` once the
+    adapter has reported its clocks. `driver` is the adapter's name, `provider` `pdh_gpu_engine`.
   - `temperature`: each hardware GPU's temperature from its adapter performance data
     (`D3DKMT_ADAPTER_PERFDATA`, what Task Manager shows; a driver that reports none, often an integrated
     GPU's, is `not_exposed`), keyed by the adapter's name, provider `d3dkmt`; and each drive's own
     temperature (`StorageDeviceTemperatureProperty`: NVMe and some SATA drives; virtual disks and most USB
     bridges are `not_exposed`), keyed by its model, provider `storage_temperature`. A repeated name gets
     ` (gpuN)` or ` (PhysicalDriveN)`. Windows has no API for the CPU's temperature, so there is none.
-  - `sensor_meta` covers the CPU clocks and temperatures, as on Linux (`device_channel`: the CPU number,
-    the adapter's position and name, the `PhysicalDriveN` number).
-  - The other optional groups (GPU, NPU, power, fans, power mode, board info) are `unavailable` with
+  - `sensor_meta` covers the CPU clocks, the GPU and temperatures, as on Linux (`device_channel`: the CPU
+    number, the adapter's LUID, node and position and name, the `PhysicalDriveN` number).
+  - The other optional groups (NPU, power, fans, power mode, board info) are `unavailable` with
     `unsupported_platform`. Pressure is left out, as when it is off, whatever `platmon.ini` says.
   - Slow groups: the probe, with `collect/probe.rs` shared by both platforms and std's `connect_timeout`
     for the connection ([probe.md](../docs/reference/probe.md#windows)). Storage, Wi-Fi and battery are
