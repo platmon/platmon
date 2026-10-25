@@ -30,7 +30,8 @@ OPTIONAL = ("gpu", "npu", "power", "fans", "power_mode", "board_info")
 
 
 def run(binary, args, stdin=""):
-    return subprocess.run([binary, *args], input=stdin, capture_output=True, text=True, timeout=TIMEOUT)
+    # the binary writes UTF-8 (a localized interface or drive name); a locale codepage such as cp949 fails on it
+    return subprocess.run([binary, *args], input=stdin, capture_output=True, encoding="utf-8", timeout=TIMEOUT)
 
 
 def free_port():
@@ -128,7 +129,7 @@ def main(binary):
         f.write(f"[http]\nbind = 127.0.0.1\nport = {port}\n[probe]\ninterval = 1\ntimeout = 0.5\n"
                 f"targets = 127.0.0.1:{port}\n")
     server = subprocess.Popen([binary, "serve", "platmon-smoke.ini"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                              text=True)
+                              encoding="utf-8")
     try:
         deadline, status, stats = time.monotonic() + TIMEOUT, None, None
         while time.monotonic() < deadline and server.poll() is None:
