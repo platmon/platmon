@@ -1090,13 +1090,14 @@ On `x86_64-pc-windows-msvc`:
   required data in the fields, types and key order of a Linux collection, `platform` `"Windows"`.
   - `cpu`: per-CPU usage from `NtQuerySystemInformation` (`SystemProcessorPerformanceInformation`, 100 ns
     units) through the same `CpuCounters` as Linux: user, kernel time without idle as system (it includes
-    DPCs and interrupts), idle; the counters Windows does not have are 0. Only the CPUs of the process's
-    processor group, so at most 64.
+    DPCs and interrupts), idle; the counters Windows does not have are 0. Every processor group's CPUs
+    (`NtQuerySystemInformationEx` with the group's number), numbered as Task Manager numbers them: group 0's
+    first, then group 1's, and so on.
   - `cpu[].freq` (`cpu_frequency`): each CPU's `% Processor Performance` (PDH, by the counter's English
     name, so any display language) times its nominal clock (PDH's `Processor Frequency`, the base the share
     is of; the registry's `~MHz` is not, it can be one value for a hybrid CPU's P- and E-cores), in Hz
     rounded to the MHz: the speed Task Manager shows, an average since the last collection that moves with
-    turbo and power saving. Processor group 0's CPUs; sensor provider `pdh`.
+    turbo and power saving. Every processor group's CPUs, numbered as their usage; sensor provider `pdh`.
   - `memory`: `GlobalMemoryStatusEx` (used = total − available); swap is the paging files' size and use
     (`SystemPageFileInformation`, which `winternl.h` leaves out; its layout has not changed since Windows
     NT).

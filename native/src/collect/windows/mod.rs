@@ -16,6 +16,7 @@ use windows_sys::Wdk::System::SystemInformation::{NtQuerySystemInformation, Syst
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ};
 use windows_sys::Win32::System::SystemInformation as si;
+use windows_sys::Win32::System::Threading::{GetActiveProcessorCount, GetActiveProcessorGroupCount};
 use windows_sys::Win32::System::WindowsProgramming::SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION;
 
 /// The slow groups this platform has readers for: probe (src/collect/probe.rs). Storage, Wi-Fi and
@@ -92,24 +93,46 @@ fn registry_dword(key: &str, value: &str) -> Option<u32> {
     (rc == 0).then_some(data)
 }
 
-/// {cpu: [user, nice, system, idle, iowait, irq, softirq, steal]} in 100 ns units, for the CPUs of this
-/// process's processor group (at most 64): system is kernel time without idle (it includes DPCs and
-/// interrupts), the fields Windows has no counter for are 0.
+// winternl.h leaves it out: with a processor group number as its input, SystemProcessorPerformanceInformation
+// gives that group's processors (the plain call gives only the calling thread's group).
+#[link(name = "ntdll", kind = "raw-dylib")]
+extern "system" {
+    fn NtQuerySystemInformationEx(class: i32, input: *const std::ffi::c_void, input_len: u32, info: *mut std::ffi::c_void,
+                                  info_len: u32, return_len: *mut u32) -> i32;
+}
+
+/// Each processor group's first CPU id: a CPU's id is its group's first id plus its number in the group,
+/// counting the groups' active processors in group order, as Task Manager numbers them.
+pub fn group_starts() -> Vec<i64> {
+    let mut first = 0i64;
+    (0..unsafe { GetActiveProcessorGroupCount() }).map(|g| {
+        let start = first;
+        first += unsafe { GetActiveProcessorCount(g) } as i64;
+        start
+    }).collect()
+}
+
+/// {cpu: [user, nice, system, idle, iowait, irq, softirq, steal]} in 100 ns units, for the CPUs of every
+/// processor group: system is kernel time without idle (it includes DPCs and interrupts), the fields
+/// Windows has no counter for are 0.
 fn cpu_times() -> Result<BTreeMap<i64, Vec<i64>>, String> {
-    let mut buf = [SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION::default(); 64];
-    let mut len = 0u32;
-    let status = unsafe { NtQuerySystemInformation(SystemProcessorPerformanceInformation, buf.as_mut_ptr().cast(),
-                                                   std::mem::size_of_val(&buf) as u32, &mut len) };
-    if status < 0 {
-        return Err(format!("processor times: NTSTATUS {:#x}", status));
+    let mut out = BTreeMap::new();
+    for (group, first) in group_starts().into_iter().enumerate() {
+        let mut buf = [SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION::default(); 64]; // a group has at most 64
+        let (number, mut len) = (group as u16, 0u32);
+        let status = unsafe { NtQuerySystemInformationEx(SystemProcessorPerformanceInformation, (&number as *const u16).cast(), 2,
+                                                         buf.as_mut_ptr().cast(), std::mem::size_of_val(&buf) as u32, &mut len) };
+        if status < 0 {
+            return Err(format!("processor times of group {}: NTSTATUS {:#x}", group, status));
+        }
+        let n = (len as usize / std::mem::size_of::<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION>()).min(buf.len());
+        out.extend(buf[..n].iter().enumerate()
+            .map(|(i, p)| (first + i as i64, vec![p.UserTime, 0, p.KernelTime - p.IdleTime, p.IdleTime, 0, 0, 0, 0])));
     }
-    let n = len as usize / std::mem::size_of::<SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION>();
-    if n == 0 {
+    if out.is_empty() {
         return Err("processor times: no processors".into());
     }
-    Ok(buf[..n].iter().enumerate()
-        .map(|(i, p)| (i as i64, vec![p.UserTime, 0, p.KernelTime - p.IdleTime, p.IdleTime, 0, 0, 0, 0]))
-        .collect())
+    Ok(out)
 }
 
 /// (total, used, swap total, swap used) in bytes; swap is the paging files.
@@ -343,6 +366,11 @@ mod tests {
         let Some(Value::Arr(cpus)) = s.get("cpu") else { panic!("no cpu list") };
         let unavailable = match s.get("cpu_sampling").and_then(|c| c.get("unavailable")) { Some(Value::Arr(u)) => u.len(), _ => 0 };
         assert!(!cpus.is_empty() || unavailable > 0);
+        // every group's processors, once each
+        let active: usize = (0..unsafe { GetActiveProcessorGroupCount() }).map(|g| unsafe { GetActiveProcessorCount(g) } as usize).sum();
+        assert_eq!(cpus.len() + unavailable, active);
+        let ids: Vec<i64> = cpus.iter().filter_map(|c| match c.get("id") { Some(Value::Int(n)) => Some(*n), _ => None }).collect();
+        assert!(ids.iter().enumerate().all(|(i, n)| *n == i as i64 || unavailable > 0), "{:?}", ids);
         for c in cpus {
             assert!(matches!(c.get("usage"), Some(Value::Float(u)) if (0.0..=100.0).contains(u)), "{:?}", c);
         }
