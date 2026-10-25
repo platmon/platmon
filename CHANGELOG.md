@@ -4,6 +4,22 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `runtime/__init__.py` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## 1.6.0 — 2026-10-25
+
+- armhf (32-bit ARM) is released again: `platmon_1.6.0-1_armhf.deb` runs the native server, so armhf hosts
+  can upgrade from 1.3.0 like the other architectures (the APT repository lists all three). It was checked
+  under QEMU only: in CI on Debian 13 and Ubuntu 24.04 armhf (package smoke and the dpkg lifecycle:
+  install, config-preserving upgrade and downgrade, disabled and masked states, remove and purge), and
+  once by hand on Debian 13 armhf from the released `platmon_1.3.0-1_all.deb` to this package (the same
+  lifecycle). **No real armhf device and no systemd service start** were checked for this release.
+- Internal: the native server builds for Windows (x86_64) and, there, collects the required data,
+  network and disk counters and runs the probe, checked in CI only. It is not released and not supported
+  (native/README.md, "Windows"). The history leaves out a disk without a device number instead of
+  failing (only Windows reports such disks) (#105 to #111).
+- The Linux server's behavior, API and configuration do not change (#109 to #111 add no Linux work per
+  collection), but its binaries are no longer byte for byte 1.5.0's: the collectors moved into
+  `native/src/collect/` (#105).
+
 ## 1.5.0 — 2026-10-24
 
 - Deprecated: the Python server (`platmon.py`, `collector/`, `runtime/`), which the source installation

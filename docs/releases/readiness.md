@@ -1,5 +1,34 @@
 # Release readiness
 
+## 1.6.0 release gate (2026-10-25)
+
+Changes since 1.5.0: the native collectors moved into `native/src/collect/` (#105), the Windows build's
+clocks, collector, network, probe and disk counters (#106 to #108, #110, #111; built and
+checked in CI, not released), and the armhf package released again (#109; the APT repository accepts it
+with platmon/platmon.github.io#6, merged). A minor release by the owner's choice: the HTTP API,
+`platmon.ini` keys and defaults, command options, status codes and schema versions are unchanged. The
+server's bytes change: x86_64 `efb24bd170ae5575`, aarch64 `bc6b7e8854cf1df0`, armhf `9ed50c864e019973`.
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| native equivalence on the release tree (x86_64): fake trees, configurations, runtime, live HTTP | `fixture.sh` 11/11, `config_fixture.py` 67/67, `runtime_fixture.py` 7/7, `live_http.py` no difference |
+| `pytest`, Rust unit tests | 1008 passed, 2 skipped; 30/30 |
+| `package.py` 1.6.0-1 (amd64, arm64, armhf), `SHA256SUMS`, `check_package.py` (amd64, the PC), Lintian (Ubuntu 24.04, `--pedantic --fail-on error,warning`) | built, `sha256sum -c` OK, smoke passed, clean |
+| `check_package.py` arm64 on the Jetson Orin Nano (Python 3.10), unpacked in a temporary directory | smoke passed; the packaged server is `bc6b7e8854cf1df0` |
+| armhf under QEMU (CI, #109): Debian 13 and Ubuntu 24.04 armhf, package smoke and dpkg lifecycle; by hand, Debian 13 armhf from the released `platmon_1.3.0-1_all.deb` to `platmon_1.6.0-1_armhf.deb` | passed: install, config-preserving upgrade and downgrade, disabled and masked state, remove and purge, migration refusal, invalid config recovery |
+| deployed form on the Jetson Orin Nano: the release aarch64 binary as the candidate unit beside the production 1.4.0 | `deploy_check.py checks` 9/9 (start and restart ready in 0.1 s, back 5.35 s after SIGKILL, the held port, every stop), as 1.5.0's |
+| `deploy_check.py soak --hours 1` on the Orin (the same candidate unit; the owner limited it to one hour): 40 min of Hub-like polling, 480 s away, the reconnect, one round of 4 concurrent pollers, 120 s settle | PASS: 3,701 requests, no error, loss or walk problem; 2,881 replayed collections, longest step 1.0 s, no gap; CPU 0.84 % of a core (1.5.0: 0.88); settled PSS 10.6 MiB (budget 14; 1.5.0: 10.6), round peak PSS 11.4 MiB (46); 5 threads, 4 descriptors, no automatic restart |
+Not verified, and therefore open:
+
+- **armhf on a real device and its systemd service:** no armhf board was available (the owner's
+  choice to release on CI and QEMU); systemd does not start under qemu-user, so the service start, its
+  health check and the sandbox are unchecked on armhf. The release notes say so.
+- **No 24 h soak and no `hub_check.py`** at this version, as at 1.5.0: the owner limited the check to an
+  hour; raw: the Orin's `~/platmon-release-1.6.0/`.
+- **No real device upgrade** from 1.5.0 to 1.6.0 under apt.
+
 ## 1.5.0 release gate (2026-10-24)
 
 Changes since 1.4.0: the native server's OS calls behind `native/src/platform/` and a Windows build in CI
