@@ -1130,7 +1130,8 @@ On `x86_64-pc-windows-msvc`:
   - `sensor_meta` covers the CPU clocks, the GPU and temperatures, as on Linux (`device_channel`: the CPU
     number, the adapter's LUID, node and position and name, the `PhysicalDriveN` number).
   - The other optional groups (NPU, power, fans, power mode, board info) are `unavailable` with
-    `unsupported_platform`. Pressure is left out, as when it is off, whatever `platmon.ini` says.
+    `unsupported_platform`. Pressure is left out, as when it is off, whatever `platmon.ini` says: Windows
+    has no stall-time accounting ([pressure.md](../docs/reference/pressure.md#windows)).
   - Slow groups: the probe, with `collect/probe.rs` shared by both platforms and std's `connect_timeout`
     for the connection ([probe.md](../docs/reference/probe.md#windows)). Storage, Wi-Fi and battery are
     left out, as when they are off.
