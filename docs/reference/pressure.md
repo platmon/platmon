@@ -72,6 +72,23 @@ file reads, about 6 µs. Neither is the cost of the normal path on a board, whic
 The default is now on by user policy; unavailable kernels retain their explicit unsupported result,
 and this does not establish a normal-path ARM performance result.
 
+## Windows
+
+The Windows build of the native server (not released; native/README.md, Windows) has no `pressure`:
+it is left out, as when it is off, whatever `platmon.ini` says. Investigated 2026-10-25: Windows has no
+stall-time accounting, nothing that measures the share of time tasks waited on the CPU, memory or I/O.
+What it has are queue lengths and event rates:
+
+| counter | what it is | why it is not `some` / `full` |
+| --- | --- | --- |
+| `\System\Processor Queue Length` | ready threads waiting for a processor, at the moment it is read | an instantaneous count, not a share of time; no 10/60/300 s averages |
+| `\Memory\Pages/sec`, `\Memory\Available Bytes` | pages read from or written to disk to resolve hard page faults, per second; free memory | how much paging happens, not how long anything waited for it |
+| `\PhysicalDisk(*)\Avg. Disk Queue Length` | requests outstanding, averaged over the interval | a device's queue, not the tasks stalled on it; `disk_io` already gives each disk's busy share |
+
+Publishing any of them under `pressure` would give the same field a different meaning on each platform.
+A Windows pressure needs a source that measures stall time; until then the field stays absent there, and
+Windows hosts are compared by `cpu`, `memory` and `disk_io` instead.
+
 ## Not included
 
 Per-cgroup pressure, `/proc/pressure/irq`, triggers (poll-based notifications), rates from `total_us`,
