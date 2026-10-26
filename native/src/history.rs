@@ -21,6 +21,17 @@ fn priority(sid: &str) -> usize {
 }
 
 /// Python's str() of a scalar in an f-string; None for what the collector never puts in an id.
+/// The namespace part of a network or Wi-Fi series id: the scope's id, or "host" for a host scope without
+/// one (Windows, which has no network namespaces); None when neither identifies it.
+fn scope_id(scope: Option<&Value>) -> Result<Option<String>, ()> {
+    let Some(scope) = truthy(scope) else { return Ok(None) };
+    match get_or_null(Some(scope), "id") {
+        Value::Null if scope.get("kind") == Some(&Value::Str("host".into())) => Ok(Some("host".into())),
+        Value::Null => Ok(None),
+        id => py_str(&id).map(Some).ok_or(()),
+    }
+}
+
 pub fn py_str(v: &Value) -> Option<String> {
     match v {
         Value::Null => Some("None".into()),
@@ -113,14 +124,14 @@ pub fn points_of(stats: &Value, meta: &Value) -> Result<Points, ()> {
     }
     if let Some(net) = truthy(stats.get("network")) {
         let Value::Obj(_) = net else { return Err(()) };
-        let ns = truthy(net.get("scope")).map(|s| get_or_null(Some(s), "id")).unwrap_or(Value::Null);
+        let ns = scope_id(net.get("scope"))?;
         for i in list(net.get("interfaces"))? {
             if !matches!(i, Value::Obj(_)) { return Err(()); }
-            if ns.is_null() || i.get("ifindex").map_or(true, Value::is_null) {
+            let Some(ns) = ns.as_ref().filter(|_| !i.get("ifindex").map_or(true, Value::is_null)) else {
                 continue; // no identity to tie points of one interface together
-            }
+            };
             for k in ["rx_bytes_per_s", "tx_bytes_per_s"] {
-                let id = format!("network/{}/{}/{}/{}", py_str(&ns).ok_or(())?, field(i, "ifindex")?, field(i, "name")?, k);
+                let id = format!("network/{}/{}/{}/{}", ns, field(i, "ifindex")?, field(i, "name")?, k);
                 put(&mut out, id, get_or_null(truthy(i.get("rates")), k));
             }
         }
@@ -129,11 +140,13 @@ pub fn points_of(stats: &Value, meta: &Value) -> Result<Points, ()> {
         let Value::Obj(_) = dio else { return Err(()) };
         for d in list(dio.get("disks"))? {
             if !matches!(d, Value::Obj(_)) { return Err(()); }
-            if matches!(d.get("major"), Some(Value::Null)) {
-                continue; // no device number (Windows): nothing ties points of one disk together
-            }
+            // Windows has no device numbers: its PhysicalDriveN name is the identity
+            let identity = match d.get("major") {
+                Some(Value::Null) => field(d, "name")?,
+                _ => format!("{}:{}/{}", field(d, "major")?, field(d, "minor")?, field(d, "name")?),
+            };
             for k in ["read_bytes_per_s", "write_bytes_per_s"] {
-                let id = format!("disk_io/{}:{}/{}/{}", field(d, "major")?, field(d, "minor")?, field(d, "name")?, k);
+                let id = format!("disk_io/{}/{}", identity, k);
                 put(&mut out, id, get_or_null(truthy(d.get("rates")), k));
             }
         }
@@ -165,12 +178,10 @@ pub fn observation_points(name: &str, data: &Value) -> Result<Points, ()> {
             }
         }
         "wifi" => {
-            let ns = truthy(get("scope")).map(|s| get_or_null(Some(s), "id")).unwrap_or(Value::Null);
+            let ns = scope_id(get("scope"))?;
             for item in list(get("interfaces"))? {
-                if ns.is_null() || item.get("ifindex").map_or(true, Value::is_null) {
-                    continue;
-                }
-                let sid = format!("observation/wifi/{}/{}/{}/signal_dbm", py_str(&ns).ok_or(())?, field(item, "ifindex")?, field(item, "name")?);
+                let Some(ns) = ns.as_ref().filter(|_| !item.get("ifindex").map_or(true, Value::is_null)) else { continue };
+                let sid = format!("observation/wifi/{}/{}/{}/signal_dbm", ns, field(item, "ifindex")?, field(item, "name")?);
                 let connected = truthy(item.get("connected")).is_some();
                 out.push((sid, if connected { get_or_null(Some(item), "signal_dbm") } else { Value::Null }));
             }
@@ -394,14 +405,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_disk_without_a_device_number_has_no_series() {
+    fn a_disk_without_a_device_number_is_named_by_its_drive() {
         let disk = |name: &str, number: &str| format!(
             r#"{{"name": "{}", "major": {}, "minor": {}, "rates": {{"read_bytes_per_s": 1.0, "write_bytes_per_s": 2.0}}}}"#,
             name, number, number);
         let stats = crate::json::parse(&format!(r#"{{"disk_io": {{"disks": [{}, {}]}}}}"#, disk("PhysicalDrive0", "null"),
                                                 disk("sda", "8"))).unwrap();
         let ids: Vec<String> = points_of(&stats, &Value::Null).unwrap().into_iter().map(|(id, _)| id).collect();
-        assert_eq!(ids, ["disk_io/8:8/sda/read_bytes_per_s", "disk_io/8:8/sda/write_bytes_per_s"]);
+        assert_eq!(ids, ["disk_io/PhysicalDrive0/read_bytes_per_s", "disk_io/PhysicalDrive0/write_bytes_per_s",
+                         "disk_io/8:8/sda/read_bytes_per_s", "disk_io/8:8/sda/write_bytes_per_s"]);
+    }
+
+    #[test]
+    fn a_host_scope_names_interfaces_by_host_and_index_and_an_unknown_namespace_has_none() {
+        let net = |scope: &str| crate::json::parse(&format!(
+            r#"{{"network": {{"scope": {}, "interfaces": [{{"name": "Wi-Fi", "ifindex": 18, "rates": {{"rx_bytes_per_s": 1.0,
+               "tx_bytes_per_s": 2.0}}}}, {{"name": "x", "ifindex": null, "rates": null}}]}}}}"#, scope)).unwrap();
+        let ids = |v: &Value| points_of(v, &Value::Null).unwrap().into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(ids(&net(r#"{"kind": "host", "id": null}"#)),
+                   ["network/host/18/Wi-Fi/rx_bytes_per_s", "network/host/18/Wi-Fi/tx_bytes_per_s"]);
+        assert!(ids(&net(r#"{"kind": "process_network_namespace", "id": null}"#)).is_empty());
+        assert_eq!(ids(&net(r#"{"kind": "process_network_namespace", "id": "netns1:ab"}"#))[0], "network/netns1:ab/18/Wi-Fi/rx_bytes_per_s");
+        let wifi = crate::json::parse(r#"{"scope": {"kind": "host", "id": null}, "interfaces": [{"name": "Wi-Fi", "ifindex": 18,
+            "connected": true, "signal_dbm": -69}]}"#).unwrap();
+        assert_eq!(observation_points("wifi", &wifi).unwrap(), [("observation/wifi/host/18/Wi-Fi/signal_dbm".to_string(), Value::Int(-69))]);
     }
 
     #[test]
