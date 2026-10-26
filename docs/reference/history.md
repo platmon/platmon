@@ -56,7 +56,7 @@ Low-frequency series use **their own** observation IDs and start times:
 
 | series | value / identity |
 | --- | --- |
-| `observation/storage/<major>:<minor>/<token>/used_bytes` and `available_bytes` | bytes; token hashes device number/name, filesystem type and source (not a universal filesystem UUID) |
+| `observation/storage/<major>:<minor>/<token>/used_bytes` and `available_bytes` | bytes; token hashes device number/name, filesystem type and source (not a universal filesystem UUID). Windows: `observation/storage/Volume{…}/…`, the volume GUID ([storage.md](storage.md#windows)) |
 | `observation/wifi/<namespace>/<ifindex>/<name>/signal_dbm` | dBm when reported and connected; unknown namespace/index omitted, disconnect is null |
 | `observation/probe/<address>:<port>/connect_ms` | TCP connect ms; timeout/failure is null; IPv6 address bracketed |
 | `observation/battery/<name>/percent`, `…/charge_now_uah`, `…/energy_now_uwh`, `…/power_uw` | percent, µAh, µWh, µW as the kernel counts them; the bay's name is the identity, so a cell swapped into the same bay continues its series. Only the fields a reading has get a series: a gauge counts charge or energy and not both, a driver may report no instantaneous power, and an empty bay reports none of them — a series that could never hold a value would take a slot from one that can. A field that was there and goes missing keeps its series and takes a gap |

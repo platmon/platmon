@@ -101,6 +101,30 @@ counted per disk), with the observation's age. A filesystem is shown by its firs
 more there are ("/ +60 more": bind mounts can be dozens, e.g. under Docker Desktop on WSL); the full list is
 in the API.
 
+## Windows
+
+The Windows build of the native server (not released; native/README.md, Windows) reads the same two lists
+from Windows's own calls, with no access rights on any handle (nothing is read from or written to a disk):
+
+- `filesystems`: each volume Windows lists (`FindFirstVolumeW`) on a fixed or removable disk with at least one
+  mount point (a drive letter or a folder, `GetVolumePathNamesForVolumeNameW`); optical, network and RAM
+  disks are left out. `device` is the volume GUID name (`Volume{…}`), the volume's identity, which a drive
+  letter is not; `source` its path (`\\?\Volume{…}\`); `major` and `minor` are `null`. `fstype` and
+  `read_only` come from `GetVolumeInformationW` (the volume's own read-only flag), the capacity from
+  `GetDiskFreeSpaceExW`: total, used = total − free, available = what platmon's account may still write (a
+  quota can make it less). A volume that cannot answer (an empty card reader is `no_data`, a locked BitLocker
+  volume `permission_denied` or `io_error`) stays listed without `fstype` or numbers.
+- `partitions`: each partition of each `PhysicalDriveN` (`IOCTL_DISK_GET_DRIVE_LAYOUT_EX`), named
+  `Harddisk<N>Partition<M>` as Windows's own device names are, `disk` the drive, `major` and `minor` `null`,
+  `size_bytes` the partition's length; `mount_points` those of the volume whose disk extent starts there
+  (`IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`). Unused MBR slots are left out; a partition with no volume, or
+  whose volume is not mounted, has none.
+- History keeps a volume as `observation/storage/Volume{…}/used_bytes` and `…/available_bytes`
+  ([history.md](history.md)).
+
+Measured on a laptop (one NVMe drive with six partitions, a USB card, Windows 11): one observation 2.3 ms,
+without administrator rights.
+
 ## Not included
 
 Unmounted filesystems' contents or types, partition tables, LVM / md topology, inode counts, quotas,

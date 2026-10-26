@@ -12,8 +12,8 @@
 - config-check without a file: the defaults, no error;
 - runtime-script: answers /api/status as starting, with the given instance id;
 - serve on a free local port: /api/status ready with the clock {"source": "boottime"}, /api/stats 200 with a
-  snapshot, and /api/observations with the probe connecting to the server itself (the only slow group
-  there), then stopped by its own handle;
+  snapshot, and /api/observations with the probe connecting to the server itself and the storage
+  group listing the system volume (the slow groups there), then stopped by its own handle;
 - service: outside the service control manager it exits 2; as a service (sc.exe create, start) it serves
   /api/status ready, and sc.exe stop leaves it stopped with exit code 0 and the port free."""
 import json
@@ -154,14 +154,20 @@ def main(binary):
         deadline, probe = time.monotonic() + TIMEOUT, {}
         while time.monotonic() < deadline:
             code, observations = get(port, "/api/observations")
-            probe = (observations or {}).get("groups", {}).get("probe", {})
-            if probe.get("state") not in (None, "starting"):
+            groups = (observations or {}).get("groups", {})
+            probe, storage = groups.get("probe", {}), groups.get("storage", {})
+            if probe.get("state") not in (None, "starting") and storage.get("state") not in (None, "starting"):
                 break
             time.sleep(0.5)
         targets = (probe.get("data") or {}).get("targets", [])
-        check("serve /api/observations probe", sorted((observations or {}).get("groups", {})) == ["probe"]
+        check("serve /api/observations probe", sorted((observations or {}).get("groups", {})) == ["probe", "storage"]
               and probe.get("state") == "ok" and len(targets) == 1 and isinstance(targets[0].get("connect_ms"), float)
               and targets[0].get("reason") is None, json.dumps(probe))
+        system = os.environ.get("SystemDrive", "C:") + "\\"
+        filesystems = (storage.get("data") or {}).get("filesystems", [])
+        check("serve /api/observations storage", storage.get("state") in ("ok", "partial")
+              and any(p.get("path") == system and fs.get("device", "").startswith("Volume{") and fs.get("total_bytes")
+                      for fs in filesystems for p in fs.get("mount_points", [])), json.dumps(storage))
     finally:
         server.kill()
         output = server.communicate(timeout=TIMEOUT)[0]
