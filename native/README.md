@@ -1134,9 +1134,10 @@ On `x86_64-pc-windows-msvc`:
     `unsupported_platform`. Pressure is left out, as when it is off, whatever `platmon.ini` says: Windows
     has no stall-time accounting ([pressure.md](../docs/reference/pressure.md#windows)).
   - Slow groups: storage, the volumes by their GUID and each drive's partitions
-    ([storage.md](../docs/reference/storage.md#windows)), and the probe, with `collect/probe.rs` shared by
-    both platforms and std's `connect_timeout` for the connection
-    ([probe.md](../docs/reference/probe.md#windows)). Wi-Fi and battery are left out, as when they are off.
+    ([storage.md](../docs/reference/storage.md#windows)); battery, the battery class's IOCTLs and the AC
+    line ([battery.md](../docs/reference/battery.md#windows)); and the probe, with `collect/probe.rs`
+    shared by both platforms and std's `connect_timeout` for the connection
+    ([probe.md](../docs/reference/probe.md#windows)). Wi-Fi is left out, as when it is off.
 - `platform/windows.rs`: `BCryptGenRandom` for the instance id; a WinSock listener with a backlog of 5,
   not inherited by child processes, and `SO_EXCLUSIVEADDRUSE` instead of Linux's `SO_REUSEADDR`, which on
   Windows lets another socket bind the same port.

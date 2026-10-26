@@ -112,6 +112,32 @@ interval = 60
 `interval` is 10 to 3600 seconds. The floor is 10 rather than 1 so no configuration can put the reading
 near the driver's 1 s cache, where every read pays the full firmware call.
 
+## Windows
+
+The Windows build of the native server (not released; native/README.md, Windows) reads each battery
+device interface Windows lists (`GUID_DEVICE_BATTERY`) through the battery class's IOCTLs — what Windows's
+own battery meter asks — with a read-only handle, and the AC line from `GetSystemPowerStatus`. Provider
+`ioctl_battery`:
+
+- `name` is `BAT0`, `BAT1`, … in Windows's order of the interfaces (the unique id Windows also offers is a
+  serial number, which platmon never reads). `present` is `false` for an interface with no battery in it
+  (no battery tag), and then every field is `null`, as on Linux.
+- Windows counts energy in mWh: `energy_now_uwh`, `energy_full_uwh`, `energy_full_design_uwh` are those ×
+  1000, and `charge_*` and `current_ua` are always `null`. A gauge that counts in its own relative units
+  (`BATTERY_CAPACITY_RELATIVE`) gives no energy. `voltage_uv` is mV × 1000; `power_uw` is the rate in mW ×
+  1000, signed as Windows signs it (negative while discharging). A value Windows reports as unknown is
+  `null`, and so is a cycle count of 0 (no cycle counter).
+- `percent` is remaining over full-charge capacity, rounded, as Windows computes its battery meter; there is
+  no separate driver percentage.
+- `status` uses the Linux words for Windows's flags: `Charging`, `Discharging`, or `Not charging` (on AC,
+  neither); `capacity_level` is `Critical` while Windows flags the battery critical, otherwise `null`.
+  `technology` is the chemistry Windows reports (`LION`, `PbAc`, …) as given; `health` is `null`.
+- `external` is one entry, `{"name": "AC", "type": "Mains", "online": …}`, from the AC line status (`null`
+  when Windows reports it unknown). A desktop without a battery has it too, with an empty `batteries`.
+
+Checked 2026-10-25 on a laptop (Windows 11, one Li-ion battery, non-admin): every value equal to WMI's
+`BatteryStatus`, `BatteryFullChargedCapacity` and `BatteryCycleCount` read at the same time.
+
 ## Not included
 
 No charge or discharge control, no calibration, no battery threshold in `[thresholds]`: for a battery a
