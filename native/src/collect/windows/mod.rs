@@ -9,6 +9,7 @@ pub mod gpu;
 pub mod network;
 pub mod storage;
 pub mod temperature;
+pub mod wifi;
 
 use super::{timed, Collected, CpuCounters, Required};
 use crate::json::{round_to, Value};
@@ -21,15 +22,15 @@ use windows_sys::Win32::System::SystemInformation as si;
 use windows_sys::Win32::System::Threading::{GetActiveProcessorCount, GetActiveProcessorGroupCount};
 use windows_sys::Win32::System::WindowsProgramming::SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION;
 
-/// The slow groups this platform has readers for, in Linux's order: storage (storage.rs), battery
-/// (battery.rs) and probe (src/collect/probe.rs). Wi-Fi has no Windows reader yet; it is left out, as when
-/// it is off.
+/// The slow groups, in Linux's order: storage (storage.rs), Wi-Fi (wifi.rs), battery (battery.rs) and probe
+/// (src/collect/probe.rs).
 pub mod observe {
-    pub const GROUPS: [&str; 3] = ["storage", "battery", "probe"];
+    pub const GROUPS: [&str; 4] = ["storage", "wifi", "battery", "probe"];
 
     pub fn reader(name: &str, cfg: &crate::config::Config) -> crate::slow::Reader {
         match name {
             "storage" => Box::new(|g| Ok(super::storage::storage(g))),
+            "wifi" => Box::new(|g| Ok(super::wifi::wifi(g))),
             "battery" => Box::new(|g| Ok(super::battery::battery(g))),
             "probe" => {
                 let mut p = crate::collect::probe::Probe::new(cfg.targets.clone(), cfg.float("probe", "timeout"));

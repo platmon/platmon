@@ -52,6 +52,26 @@ interface is `unavailable` / `not_detected`; an unreadable file is `permission_d
 unknown header is `invalid_data`; a row that does not match the format is left out (`line<N>`,
 `invalid_data`).
 
+## Windows
+
+The Windows build of the native server (not released; native/README.md, Windows) asks the WLAN service
+(`wlanapi`) instead, for each wireless interface it lists. Provider `wlanapi`, `scope` `{"kind": "host",
+"id": null}` as for `network` on Windows. Passive as on Linux: no scan, no connection, and no SSID, BSSID
+or nearby network is read.
+
+- `name` is the interface's alias, as `network` names it (`Wi-Fi`); `ifindex` its index.
+- `connection_state` / `connected`: `connected` / `true` while Windows reports the interface connected,
+  `disconnected` / `false` when disconnected or not ready, and `unknown` / `null` while it is associating,
+  authenticating or discovering.
+- `signal_dbm` is the RSSI Windows last measured (`wlan_intf_opcode_rssi`), only while connected.
+  `signal_raw`, `link_quality` and `noise_dbm` are `null`: Windows has no noise level, and its "signal
+  quality" is a percentage derived from the RSSI, not the kernel's link value.
+- No WLAN service (a host without Wi-Fi hardware, Windows Server without the feature) is `unavailable` /
+  `not_exposed`; a service with no wireless interface is `unavailable` / `not_detected`.
+
+Checked 2026-10-26 on a laptop (Windows 11 26H2, non-admin): the RSSI equal to `netsh wlan show
+interfaces`.
+
 ## Configuration
 
 ```ini
