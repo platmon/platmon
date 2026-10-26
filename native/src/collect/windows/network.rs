@@ -18,13 +18,26 @@ fn row(r: &MIB_IF_ROW2) -> Row {
      r.OutOctets, r.OutUcastPkts.wrapping_add(r.OutNUcastPkts), r.OutErrors, r.OutDiscards]
 }
 
+/// The interface's operational status by its RFC 2863 name (IF_OPER_STATUS).
+fn oper_status(r: &MIB_IF_ROW2) -> &'static str {
+    match r.OperStatus {
+        1 => "up",
+        2 => "down",
+        3 => "testing",
+        5 => "dormant",
+        6 => "notPresent",
+        7 => "lowerLayerDown",
+        _ => "unknown",
+    }
+}
+
 fn name(r: &MIB_IF_ROW2) -> String {
     let n = r.Alias.iter().position(|c| *c == 0).unwrap_or(r.Alias.len());
     String::from_utf16_lossy(&r.Alias[..n])
 }
 
-/// (index, name, counters) of the interfaces, or the error code.
-fn read() -> Result<Vec<(u32, String, Row)>, u32> {
+/// (index, name, counters, operational status) of the interfaces, or the error code.
+fn read() -> Result<Vec<(u32, String, Row, &'static str)>, u32> {
     let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
     let rc = unsafe { GetIfTable2(&mut table) };
     if rc != 0 {
@@ -32,7 +45,7 @@ fn read() -> Result<Vec<(u32, String, Row)>, u32> {
     }
     let rows = unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize) };
     let out = rows.iter().filter(|r| r.InterfaceAndOperStatusFlags._bitfield & FILTER_INTERFACE == 0)
-        .map(|r| (r.InterfaceIndex, name(r), row(r))).collect();
+        .map(|r| (r.InterfaceIndex, name(r), row(r), oper_status(r))).collect();
     unsafe { FreeMibTable(table.cast()) };
     Ok(out)
 }
@@ -89,7 +102,7 @@ impl Network {
         let window = last.as_ref().map(|l| start - l.0);
         let mut kept = Vec::new();
         let mut interfaces = Vec::new();
-        for (index, name, row) in rows {
+        for (index, name, row, status) in rows {
             let before = last.as_ref().and_then(|l| l.1.iter().find(|(k, _)| k.0 == index && k.1 == name)).map(|(_, r)| r);
             let mut rates = Value::Null;
             let reason = match (before, window) {
@@ -118,6 +131,7 @@ impl Network {
             let mut v = Value::obj();
             v.set("name", name.as_str().into());
             v.set("ifindex", (index as i64).into());
+            v.set("oper_status", status.into());
             v.set("rx", dir(&row[..4]));
             v.set("tx", dir(&row[4..]));
             v.set("rates", rates);

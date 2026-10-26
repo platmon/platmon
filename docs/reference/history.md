@@ -39,7 +39,7 @@ collection started (elapsed clock, as of the answer; wall-clock steps do not cha
 | `memory/used_bytes` | used memory | - |
 | `temperature/<source id>` (or `temperature/name:<key>` without an id) | °C | `sensor_meta` source id ([api.md](api.md#sensor-sources-and-read-times)) |
 | `power/<source id>` (or `power/name:<key>` without an id) | W | the same, for the power rails: a rail is a named sensor value like a temperature channel |
-| `network/<namespace id>/<ifindex>/<name>/rx_bytes_per_s`, `…/tx_bytes_per_s` | bytes/s | namespace, index and name together ([network.md](network.md#scope-and-identity)); `host` for the namespace of a host scope without one (Windows); interfaces without a known index or namespace are not kept |
+| `network/<namespace id>/<ifindex>/<name>/rx_bytes_per_s`, `…/tx_bytes_per_s` | bytes/s | namespace, index and name together ([network.md](network.md#scope-and-identity)); `host` for the namespace of a host scope without one (Windows, where only interfaces whose `oper_status` is `up` are kept); interfaces without a known index or namespace are not kept |
 | `disk_io/<major>:<minor>/<name>/read_bytes_per_s`, `…/write_bytes_per_s` | bytes/s | device number and name ([disk-io.md](disk-io.md)); Windows, without device numbers: `disk_io/PhysicalDriveN/…`, the drive's name ([disk-io.md](disk-io.md#windows)) |
 
 A replaced device, another namespace or index, or a new source id starts a **new** series instead of

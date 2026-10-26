@@ -113,7 +113,11 @@ from `GetIfTable2` instead of `/proc/self/net/dev`, with the same fields, rates,
 
 - `scope` is `{"kind": "host", "id": null}`: Windows has no network namespace, so `namespace_changed`
   and `identity_unavailable` do not occur, and an interface is matched by `ifindex` and name (history:
-  `network/host/<ifindex>/<name>/…`, [history.md](history.md)).
+  `network/host/<ifindex>/<name>/…`, [history.md](history.md), for the interfaces that are `up`).
+- `oper_status` (Windows only, after `ifindex`): the interface's operational status by its RFC 2863 name,
+  `up`, `down`, `testing`, `unknown`, `dormant`, `notPresent` or `lowerLayerDown`. A laptop lists two
+  dozen interfaces, most of them virtual adapters that are down or not present (measured: 5 of 25 up);
+  history keeps only those that are up, so they do not take the slots of the disks and temperatures.
 - `provider` is `if_table2`. `name` is the interface's alias (e.g. `Ethernet`, `Wi-Fi`), which can
   contain spaces and non-ASCII characters. The filter drivers' layers over an interface are left out;
   every other interface Windows lists is kept, including the loopback and virtual adapters.

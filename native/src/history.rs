@@ -130,6 +130,9 @@ pub fn points_of(stats: &Value, meta: &Value) -> Result<Points, ()> {
             let Some(ns) = ns.as_ref().filter(|_| !i.get("ifindex").map_or(true, Value::is_null)) else {
                 continue; // no identity to tie points of one interface together
             };
+            if i.get("oper_status").is_some_and(|s| *s != Value::Str("up".into())) {
+                continue; // Windows: a down or absent interface (most of its virtual adapters) carries nothing
+            }
             for k in ["rx_bytes_per_s", "tx_bytes_per_s"] {
                 let id = format!("network/{}/{}/{}/{}", ns, field(i, "ifindex")?, field(i, "name")?, k);
                 put(&mut out, id, get_or_null(truthy(i.get("rates")), k));
@@ -424,6 +427,11 @@ mod tests {
         let ids = |v: &Value| points_of(v, &Value::Null).unwrap().into_iter().map(|(id, _)| id).collect::<Vec<_>>();
         assert_eq!(ids(&net(r#"{"kind": "host", "id": null}"#)),
                    ["network/host/18/Wi-Fi/rx_bytes_per_s", "network/host/18/Wi-Fi/tx_bytes_per_s"]);
+        let statuses = crate::json::parse(r#"{"network": {"scope": {"kind": "host", "id": null}, "interfaces": [
+            {"name": "Wi-Fi", "ifindex": 18, "oper_status": "up", "rates": null},
+            {"name": "6to4 Adapter", "ifindex": 2, "oper_status": "notPresent", "rates": null},
+            {"name": "Ethernet", "ifindex": 7, "oper_status": "down", "rates": null}]}}"#).unwrap();
+        assert_eq!(ids(&statuses), ["network/host/18/Wi-Fi/rx_bytes_per_s", "network/host/18/Wi-Fi/tx_bytes_per_s"]);
         assert!(ids(&net(r#"{"kind": "process_network_namespace", "id": null}"#)).is_empty());
         assert_eq!(ids(&net(r#"{"kind": "process_network_namespace", "id": "netns1:ab"}"#))[0], "network/netns1:ab/18/Wi-Fi/rx_bytes_per_s");
         let wifi = crate::json::parse(r#"{"scope": {"kind": "host", "id": null}, "interfaces": [{"name": "Wi-Fi", "ifindex": 18,
