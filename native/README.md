@@ -1072,7 +1072,9 @@ Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d
 
 ### Windows (collects the required data, not released)
 
-2026-10-24. Not released, not in the support scope; the first steps towards a Windows agent. `src/platform/`
+2026-10-24. Not released, not in the support scope; the first steps towards a Windows agent. It stays
+unreleased until the real-PC checks pass, then becomes an experimental zip (the owner's decision,
+2026-10-25; checks and their status: [remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26)). `src/platform/`
 holds what the service needs from the OS outside the collectors: the elapsed clocks, random bytes for the
 instance id, the listening socket and the exit on a stop request, one module per OS with the same
 functions. `platform/linux.rs` is the code `main.rs`, `metadata.rs`, `runtime.rs` and `http.rs` had,

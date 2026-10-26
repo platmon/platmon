@@ -14,6 +14,46 @@ Earlier update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08
 (`origin/main`, #32–#39 already merged before this resumed task). The table below records historical
 implementation; merging alone does **not** complete the expanded validation requirements.
 
+## Windows build (2026-10-26)
+
+The native server's Windows build (`x86_64-pc-windows-msvc`, native/README.md "Windows") collects
+everything Linux does that Windows has: the required data, CPU clocks (every processor group, the hybrid
+CPUs' own base clocks), the GPU, temperatures, network, disk I/O, all four slow groups (storage, Wi-Fi,
+battery, probe) and their history, and runs as a Windows service. Pressure has no Windows source
+([pressure.md](../reference/pressure.md#windows)).
+
+**Release decision (owner, 2026-10-25):** unreleased until the real-PC checks below pass; then an
+experimental zip of the binary (no installer, no package manager), named as experimental in its release
+notes. The Linux packages and their release gate are unchanged by it.
+
+Real-PC checks (a laptop: Core Ultra 7 155H, Intel Arc iGPU, WD SN810 NVMe, Windows 11 26H2, Korean display
+language, non-admin unless stated). CI runs on a VM, which has none of these devices:
+
+| check | status | evidence |
+| --- | --- | --- |
+| build, unit tests, `tools/windows_smoke.py` (non-admin parts) | passed | every PR from #115 to #124 |
+| CPU clock against Task Manager's formula | passed after #115 | the registry base was wrong on hybrid CPUs (P-cores up to 5.85 GHz); now `% Processor Performance × Processor Frequency` |
+| GPU usage and clocks | passed (#116) | usage near the busiest-engine counter; clocks 650–750 MHz / 2.25 GHz when the driver reports them |
+| drive temperature | read (63–64 °C); **not compared** | the comparison (`Get-StorageReliabilityCounter`) needs an administrator shell |
+| GPU temperature | **not checked** | an integrated GPU reports none (as in Task Manager); needs a discrete GPU |
+| disk counters without admin | passed | |
+| storage, battery, Wi-Fi against Windows's own tools | passed (#120, #121, #123) | `Get-Volume` / `Get-Partition`, WMI battery classes, `netsh wlan` |
+| history on a laptop | passed after #124 | 48 series, nothing dropped |
+| service: `sc.exe create`, `start`, `stop`, `delete`; `/api/status` ready, exit code 0 | **not checked** | needs an administrator shell (`windows_smoke.py` does it) |
+| sleep and resume while serving | **not checked** | needs someone at the PC: data age and `clock` after resume, no repeated gap errors |
+| more than 64 CPUs (several processor groups) | **not checked** | unit-tested numbering only; needs such a host, or `bcdedit /set groupsize` and a reboot |
+
+Record for each check: Windows version, CPU, GPU and driver, drive model, and the values on both sides.
+`cpu_frequency` and `temperature` should never be `error` on a healthy PC.
+
+Known gaps: Intel's GPU driver reports no clocks while the GPU sleeps (`no_data`); one of 14 local smoke
+runs failed the Wi-Fi observation check before its PR and could not be reproduced; GitHub's runners have
+a virtual disk that answers the temperature query with a device error (#119 reports it as not exposed).
+
+Other open items carried from the Windows handoff: the armhf systemd service on a real device (see the
+1.6.0 release gate); removing the Orin's candidate unit (`sudo uninstall.sh`); the local worktrees
+`platmon-w2` and `platmon-svc` on the machine that made them.
+
 ## Final candidate checkpoint — aggregate merge
 
 The owner authorized necessary merges on 2026-10-09. #40, #43, #41, #42 and #44 are merged;
