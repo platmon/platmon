@@ -9,7 +9,7 @@ use windows_sys::Wdk::Graphics::Direct3D::{D3DKMTCloseAdapter, D3DKMTEnumAdapter
                                            D3DKMT_ADAPTER_PERFDATA, D3DKMT_CLOSEADAPTER, D3DKMT_ENUMADAPTERS2,
                                            D3DKMT_QUERYADAPTERINFO, KMTQAITYPE_ADAPTERPERFDATA,
                                            KMTQAITYPE_ADAPTERREGISTRYINFO, KMTQAITYPE_ADAPTERTYPE, KMTQUERYADAPTERINFOTYPE};
-use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_INVALID_FUNCTION,
+use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_INVALID_FUNCTION, ERROR_IO_DEVICE,
                                      ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED, ERROR_PATH_NOT_FOUND, STATUS_ACCESS_DENIED,
                                      STATUS_INVALID_PARAMETER, STATUS_NOT_IMPLEMENTED, STATUS_NOT_SUPPORTED};
 use windows_sys::Win32::System::Ioctl::{PropertyStandardQuery, StorageDeviceProperty, StorageDeviceTemperatureProperty,
@@ -127,6 +127,18 @@ fn drive_temperature(drive: &Drive) -> Result<Option<i16>, std::io::Error> {
     Ok((0..count).map(info).find(|t| t.Index == 0).or_else(|| (count > 0).then(|| info(0))).map(|t| t.Temperature))
 }
 
+/// Why a drive's temperature could not be read, from the Win32 error of opening it or of the query.
+fn drive_reason(code: u32) -> &'static str {
+    match code {
+        ERROR_ACCESS_DENIED => "permission_denied",
+        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => "disappeared",
+        // no temperature from this drive or its bus (a virtual disk, most USB bridges); some virtual disks
+        // fail the query as a device error instead (seen on GitHub's Windows runners)
+        ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER | ERROR_IO_DEVICE => "not_exposed",
+        _ => "io_error",
+    }
+}
+
 /// Each drive's temperature, named by its model.
 fn disks(g: &mut Group, temps: &mut Vec<(String, Value)>) {
     let names = match drives() {
@@ -151,14 +163,7 @@ fn disks(g: &mut Group, temps: &mut Vec<(String, Value)>) {
             }
             Ok((None, _)) => g.note(&name, "not_exposed", None),
             Err(e) => {
-                let reason = match error_code(&e) {
-                    ERROR_ACCESS_DENIED => "permission_denied",
-                    ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => "disappeared",
-                    // no temperature from this drive or its bus (a virtual disk, most USB bridges)
-                    ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER => "not_exposed",
-                    _ => "io_error",
-                };
-                g.note(&name, reason, Some(format!("storage temperature: {}", e)));
+                g.note(&name, drive_reason(error_code(&e)), Some(format!("storage temperature: {}", e)));
             }
         }
     }
@@ -173,4 +178,19 @@ pub fn read(g: &mut Group) -> Vec<(String, Value)> {
         g.note("temperature", "not_detected", None);
     }
     temps
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_drive_that_cannot_give_its_temperature_is_not_exposed() {
+        for code in [ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, ERROR_INVALID_PARAMETER, ERROR_IO_DEVICE] {
+            assert_eq!(drive_reason(code), "not_exposed", "{}", code);
+        }
+        assert_eq!(drive_reason(ERROR_ACCESS_DENIED), "permission_denied");
+        assert_eq!(drive_reason(ERROR_FILE_NOT_FOUND), "disappeared");
+        assert_eq!(drive_reason(5_000), "io_error");
+    }
 }
