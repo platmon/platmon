@@ -13,8 +13,8 @@
 - runtime-script: answers /api/status as starting, with the given instance id;
 - serve on a free local port: /api/status ready with the clock {"source": "boottime"}, /api/stats 200 with a
   snapshot, and /api/observations with the probe connecting to the server itself, the storage group
-  listing the system volume and the battery group with the AC line (the slow groups there), then stopped
-  by its own handle;
+  listing the system volume, the Wi-Fi group (unavailable without a WLAN service) and the battery group
+  with the AC line, then stopped by its own handle;
 - service: outside the service control manager it exits 2; as a service (sc.exe create, start) it serves
   /api/status ready, and sc.exe stop leaves it stopped with exit code 0 and the port free."""
 import json
@@ -157,11 +157,12 @@ def main(binary):
             code, observations = get(port, "/api/observations")
             groups = (observations or {}).get("groups", {})
             probe, storage, battery = groups.get("probe", {}), groups.get("storage", {}), groups.get("battery", {})
-            if all(g.get("state") not in (None, "starting") for g in (probe, storage, battery)):
+            wifi = groups.get("wifi", {})
+            if all(g.get("state") not in (None, "starting") for g in (probe, storage, battery, wifi)):
                 break
             time.sleep(0.5)
         targets = (probe.get("data") or {}).get("targets", [])
-        check("serve /api/observations probe", sorted((observations or {}).get("groups", {})) == ["battery", "probe", "storage"]
+        check("serve /api/observations probe", sorted((observations or {}).get("groups", {})) == ["battery", "probe", "storage", "wifi"]
               and probe.get("state") == "ok" and len(targets) == 1 and isinstance(targets[0].get("connect_ms"), float)
               and targets[0].get("reason") is None, json.dumps(probe))
         system = os.environ.get("SystemDrive", "C:") + "\\"
@@ -174,6 +175,10 @@ def main(binary):
               and power.get("provider") == "ioctl_battery" and len(power.get("external", [])) == 1
               and all(b.get("present") is False or isinstance(b.get("percent"), (int, type(None))) for b in power.get("batteries", [])),
               json.dumps(battery))
+        wireless = wifi.get("data") or {}
+        check("serve /api/observations wifi", wifi.get("state") in ("ok", "unavailable") and wireless.get("provider") == "wlanapi"
+              and all((i.get("connected") is True) or i.get("signal_dbm") is None for i in wireless.get("interfaces", [])),
+              json.dumps(wifi))
     finally:
         server.kill()
         output = server.communicate(timeout=TIMEOUT)[0]
