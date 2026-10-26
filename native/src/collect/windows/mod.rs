@@ -6,6 +6,7 @@ pub mod cpu_clock;
 pub mod disk_io;
 pub mod gpu;
 pub mod network;
+pub mod storage;
 pub mod temperature;
 
 use super::{timed, Collected, CpuCounters, Required};
@@ -19,15 +20,21 @@ use windows_sys::Win32::System::SystemInformation as si;
 use windows_sys::Win32::System::Threading::{GetActiveProcessorCount, GetActiveProcessorGroupCount};
 use windows_sys::Win32::System::WindowsProgramming::SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION;
 
-/// The slow groups this platform has readers for: probe (src/collect/probe.rs). Storage, Wi-Fi and
-/// battery have no Windows reader yet; they are left out, as when they are off.
+/// The slow groups this platform has readers for, in Linux's order: storage (storage.rs) and probe
+/// (src/collect/probe.rs). Wi-Fi and battery have no Windows reader yet; they are left out, as when they
+/// are off.
 pub mod observe {
-    pub const GROUPS: [&str; 1] = ["probe"];
+    pub const GROUPS: [&str; 2] = ["storage", "probe"];
 
     pub fn reader(name: &str, cfg: &crate::config::Config) -> crate::slow::Reader {
-        assert_eq!(name, "probe", "no {} reader on this platform", name);
-        let mut p = crate::collect::probe::Probe::new(cfg.targets.clone(), cfg.float("probe", "timeout"));
-        Box::new(move |g| Ok(p.observe(g)))
+        match name {
+            "storage" => Box::new(|g| Ok(super::storage::storage(g))),
+            "probe" => {
+                let mut p = crate::collect::probe::Probe::new(cfg.targets.clone(), cfg.float("probe", "timeout"));
+                Box::new(move |g| Ok(p.observe(g)))
+            }
+            _ => panic!("no {} reader on this platform", name),
+        }
     }
 }
 

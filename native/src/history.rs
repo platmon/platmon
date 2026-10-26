@@ -149,6 +149,13 @@ pub fn observation_points(name: &str, data: &Value) -> Result<Points, ()> {
     match name {
         "storage" => {
             for fs in list(get("filesystems"))? {
+                if matches!(fs.get("major"), Some(Value::Null)) { // Windows: the volume GUID is the identity
+                    let base = format!("observation/storage/{}", field(fs, "device")?);
+                    for f in ["used_bytes", "available_bytes"] {
+                        out.push((format!("{}/{}", base, f), get_or_null(Some(fs), f)));
+                    }
+                    continue;
+                }
                 let identity = Value::Arr(["major", "minor", "device", "fstype", "source"].iter().map(|k| get_or_null(Some(fs), k)).collect());
                 let token = &crate::sha256::hex(identity.to_py_compact().as_bytes())[..24];
                 let base = format!("observation/storage/{}:{}/{}", field(fs, "major")?, field(fs, "minor")?, token);
@@ -395,5 +402,16 @@ mod tests {
                                                 disk("sda", "8"))).unwrap();
         let ids: Vec<String> = points_of(&stats, &Value::Null).unwrap().into_iter().map(|(id, _)| id).collect();
         assert_eq!(ids, ["disk_io/8:8/sda/read_bytes_per_s", "disk_io/8:8/sda/write_bytes_per_s"]);
+    }
+
+    #[test]
+    fn a_volume_without_a_device_number_is_named_by_its_guid() {
+        let data = crate::json::parse(r#"{"filesystems": [{"device": "Volume{c722dea1-cc0a-40ca-99a0-911c7e3bfdc6}",
+            "major": null, "minor": null, "fstype": "NTFS", "used_bytes": 5, "available_bytes": 7}]}"#).unwrap();
+        let points = observation_points("storage", &data).unwrap();
+        assert_eq!(points, [
+            ("observation/storage/Volume{c722dea1-cc0a-40ca-99a0-911c7e3bfdc6}/used_bytes".to_string(), Value::Int(5)),
+            ("observation/storage/Volume{c722dea1-cc0a-40ca-99a0-911c7e3bfdc6}/available_bytes".to_string(), Value::Int(7)),
+        ]);
     }
 }
