@@ -39,8 +39,8 @@ collection started (elapsed clock, as of the answer; wall-clock steps do not cha
 | `memory/used_bytes` | used memory | - |
 | `temperature/<source id>` (or `temperature/name:<key>` without an id) | °C | `sensor_meta` source id ([api.md](api.md#sensor-sources-and-read-times)) |
 | `power/<source id>` (or `power/name:<key>` without an id) | W | the same, for the power rails: a rail is a named sensor value like a temperature channel |
-| `network/<namespace id>/<ifindex>/<name>/rx_bytes_per_s`, `…/tx_bytes_per_s` | bytes/s | namespace, index and name together ([network.md](network.md#scope-and-identity)); interfaces without a known index are not kept |
-| `disk_io/<major>:<minor>/<name>/read_bytes_per_s`, `…/write_bytes_per_s` | bytes/s | device number and name ([disk-io.md](disk-io.md)); disks without a device number (Windows) are not kept |
+| `network/<namespace id>/<ifindex>/<name>/rx_bytes_per_s`, `…/tx_bytes_per_s` | bytes/s | namespace, index and name together ([network.md](network.md#scope-and-identity)); `host` for the namespace of a host scope without one (Windows); interfaces without a known index or namespace are not kept |
+| `disk_io/<major>:<minor>/<name>/read_bytes_per_s`, `…/write_bytes_per_s` | bytes/s | device number and name ([disk-io.md](disk-io.md)); Windows, without device numbers: `disk_io/PhysicalDriveN/…`, the drive's name ([disk-io.md](disk-io.md#windows)) |
 
 A replaced device, another namespace or index, or a new source id starts a **new** series instead of
 continuing an old one. Rates are the server's own, never recomputed from the counters.
@@ -57,7 +57,7 @@ Low-frequency series use **their own** observation IDs and start times:
 | series | value / identity |
 | --- | --- |
 | `observation/storage/<major>:<minor>/<token>/used_bytes` and `available_bytes` | bytes; token hashes device number/name, filesystem type and source (not a universal filesystem UUID). Windows: `observation/storage/Volume{…}/…`, the volume GUID ([storage.md](storage.md#windows)) |
-| `observation/wifi/<namespace>/<ifindex>/<name>/signal_dbm` | dBm when reported and connected; unknown namespace/index omitted, disconnect is null |
+| `observation/wifi/<namespace>/<ifindex>/<name>/signal_dbm` | dBm when reported and connected; `host` as for network on Windows; unknown namespace/index omitted, disconnect is null |
 | `observation/probe/<address>:<port>/connect_ms` | TCP connect ms; timeout/failure is null; IPv6 address bracketed |
 | `observation/battery/<name>/percent`, `…/charge_now_uah`, `…/energy_now_uwh`, `…/power_uw` | percent, µAh, µWh, µW as the kernel counts them; the bay's name is the identity, so a cell swapped into the same bay continues its series. Only the fields a reading has get a series: a gauge counts charge or energy and not both, a driver may report no instantaneous power, and an empty bay reports none of them — a series that could never hold a value would take a slot from one that can. A field that was there and goes missing keeps its series and takes a gap |
 

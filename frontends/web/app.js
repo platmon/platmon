@@ -228,6 +228,7 @@ const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^gpu\/usage$/, () => 'GPU'],
   [/^npu\/usage$/, () => 'NPU'],
   [/^observation\/storage\/([^/]+)\/[^/]+\/(used_bytes|available_bytes)$/, m => `FS ${m[1]} ${m[2] === 'used_bytes' ? 'used' : 'free'}`],
+  [/^observation\/storage\/(Volume\{[^/]+\})\/(used_bytes|available_bytes)$/, m => `FS ${m[1]} ${m[2] === 'used_bytes' ? 'used' : 'free'}`],
   [/^observation\/wifi\/[^/]+\/\d+\/([^/]+)\/signal_dbm$/, m => `${m[1]} signal`],
   [/^observation\/probe\/([^/]+)\/connect_ms$/, m => `TCP ${m[1]}`],
   [/^observation\/battery\/([^/]+)\/percent$/, m => `${m[1]} charge`],
@@ -240,7 +241,8 @@ const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^power\/name:(.+)$/, m => 'rail ' + m[1]],
   [/^power\/(.+)$/, m => 'rail ' + sensorName('power', m[1])],
   [/^network\/[^/]+\/\d+\/([^/]+)\/(rx|tx)_bytes_per_s$/, m => `${m[1]} ${m[2]}`],
-  [/^disk_io\/[^/]+\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`]];
+  [/^disk_io\/[^/]+\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`],
+  [/^disk_io\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`]];  // Windows: PhysicalDriveN
 // History keys a sensor by its source id (docs/history.md); its name is the sensor_meta pointer with that id
 function sensorName(group, sid) {
   const meta = latestStats && latestStats.sensor_meta && typeof latestStats.sensor_meta === 'object' ? latestStats.sensor_meta : {};

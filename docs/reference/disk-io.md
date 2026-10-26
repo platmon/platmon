@@ -101,8 +101,8 @@ The Windows build of the native server (not released; native/README.md, Windows)
   `PhysicalDrive1`, …; every disk Windows lists is kept (Windows has no `devices/virtual/` to tell virtual
   ones apart; Storage Spaces' member disks are not listed, their virtual disk is).
 - `major` and `minor` are `null`: Windows has no device numbers. A disk is matched by its name, whose
-  number Windows can give to another disk after a removal; a counter regression still resets rates. Such
-  disks have no history series ([history.md](history.md)).
+  number Windows can give to another disk after a removal; a counter regression still resets rates. History
+  keeps them by that name too, `disk_io/PhysicalDriveN/…` ([history.md](history.md)).
 - `merges` is `null` (Windows counts split requests, not merged ones) and so is `io_time_ms` (no
   cumulative busy time). `bytes` are Windows's own byte counts; `time_ms` is its read and write time,
   truncated from 100 ns units; `in_flight` its queue depth.
