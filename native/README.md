@@ -1125,7 +1125,8 @@ On `x86_64-pc-windows-msvc`:
     (`D3DKMT_ADAPTER_PERFDATA`, what Task Manager shows; a driver that reports none, often an integrated
     GPU's, is `not_exposed`), keyed by the adapter's name, provider `d3dkmt`; and each drive's own
     temperature (`StorageDeviceTemperatureProperty`: NVMe and some SATA drives; virtual disks and most USB
-    bridges are `not_exposed`), keyed by its model, provider `storage_temperature`. A repeated name gets
+    bridges are `not_exposed`, also when the query fails as a device error, `ERROR_IO_DEVICE`, as some
+    virtual disks answer it), keyed by its model, provider `storage_temperature`. A repeated name gets
     ` (gpuN)` or ` (PhysicalDriveN)`. Windows has no API for the CPU's temperature, so there is none.
   - `sensor_meta` covers the CPU clocks, the GPU and temperatures, as on Linux (`device_channel`: the CPU
     number, the adapter's LUID, node and position and name, the `PhysicalDriveN` number).
