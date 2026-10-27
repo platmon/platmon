@@ -145,8 +145,9 @@ fn cpu_times() -> Result<BTreeMap<i64, Vec<i64>>, String> {
     Ok(out)
 }
 
-/// (total, used, swap total, swap used) in bytes; swap is the paging files.
-fn memory() -> Result<[i64; 4], String> {
+/// (total, used, (swap total, swap used)) in bytes; swap is the paging files, None if they cannot be read:
+/// the physical memory is the required data, not the paging files.
+fn memory() -> Result<(i64, i64, Option<(i64, i64)>), String> {
     let mut m = si::MEMORYSTATUSEX { dwLength: std::mem::size_of::<si::MEMORYSTATUSEX>() as u32, ..Default::default() };
     if unsafe { si::GlobalMemoryStatusEx(&mut m) } == 0 {
         return Err(last_error("memory"));
@@ -154,12 +155,14 @@ fn memory() -> Result<[i64; 4], String> {
     let mut info = si::SYSTEM_INFO::default();
     unsafe { si::GetSystemInfo(&mut info) };
     let page = info.dwPageSize as i64;
+    let total = m.ullTotalPhys as i64;
+    let used = total - m.ullAvailPhys as i64;
     let mut buf = vec![0u64; 512]; // 4 KiB, 8-byte aligned: a few entries with their names
     let mut len = 0u32;
     let status = unsafe { NtQuerySystemInformation(SYSTEM_PAGE_FILE_INFORMATION, buf.as_mut_ptr().cast(), (buf.len() * 8) as u32,
                                                    &mut len) };
     if status < 0 {
-        return Err(format!("paging files: NTSTATUS {:#x}", status));
+        return Ok((total, used, None));
     }
     let (mut swap_total, mut swap_used, mut offset) = (0i64, 0i64, 0usize);
     let bytes = (len as usize).min(buf.len() * 8);
@@ -172,8 +175,7 @@ fn memory() -> Result<[i64; 4], String> {
         }
         offset += entry.next_entry_offset as usize;
     }
-    let total = m.ullTotalPhys as i64;
-    Ok([total, total - m.ullAvailPhys as i64, swap_total, swap_used])
+    Ok((total, used, Some((swap_total, swap_used))))
 }
 
 /// (total, used) bytes of the volume Windows is on, as the root filesystem on Linux.
@@ -279,7 +281,7 @@ impl Collector {
             let name = g.name.clone();
             g.note(&name, "unsupported_platform", None);
         }
-        let [total, used, swap_total, swap_used] = timed(&mut required, "memory", memory)?;
+        let (total, used, swap) = timed(&mut required, "memory", memory)?;
         let disk = timed(&mut required, "disk", disk_usage)?;
         let uptime = timed(&mut required, "uptime", crate::platform::boottime_ns).ok_or("uptime unreadable")?;
         let host = hostname();
@@ -305,8 +307,8 @@ impl Collector {
         let mut mv = Value::obj();
         mv.set("total", total.into());
         mv.set("used", used.into());
-        mv.set("swap_total", swap_total.into());
-        mv.set("swap_used", swap_used.into());
+        mv.set("swap_total", swap.map(|s| s.0).into());
+        mv.set("swap_used", swap.map(|s| s.1).into());
         s.set("memory", mv);
         let mut dv = Value::obj();
         dv.set("total", disk.0.into());
