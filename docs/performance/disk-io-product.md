@@ -1,5 +1,10 @@
 # Product Disk I/O off / on
 
+> **TL;DR**
+> - Disk I/O adds about +0.15 pp (Orin) and +0.12 pp (Pi) of one core and about 1.1–1.5 ms per collection.
+> - With Network and Disk I/O on, the whole process met the then 2.0 % target on both boards (1.75 % /
+>   1.56 %); on by default.
+
 What the product's Disk I/O collection ([../disk-io.md](../reference/disk-io.md)) costs on top of the current
 default configuration, judged by [budget.md](budget.md). A and B are the same product and bench code with
 `[disk_io]` off (A) and on (B); Network is on in both arms (it is on by default), and the passive prototype

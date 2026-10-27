@@ -1,5 +1,12 @@
 # Storage capacity
 
+> **TL;DR**
+> - The `storage` observation: partitions of the physical disks and the size, use and free space of local
+>   disk filesystems, every 30 s by default; on by default.
+> - Only `/dev/` mounts of local disk filesystems are read; network, FUSE, tmpfs, overlay, squashfs and
+>   pseudo filesystems never are. `disk` in `/api/stats` and `disk_io` are separate.
+> - On Windows: volumes by GUID and each drive's partitions.
+
 A low-frequency group ([observations.md](observations.md)): the partitions of the physical disks and the
 size, use and free space of the local disk filesystems, every `[storage] interval` seconds (30 by
 default). **On by default** (`[storage] enabled = no` turns it off). It is separate from:

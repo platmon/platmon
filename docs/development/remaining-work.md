@@ -1,5 +1,11 @@
 # Remaining work
 
+> **TL;DR**
+> - The staged development plan with its checkpoints, rollouts and device records; current release
+>   evidence is in [release readiness](../releases/readiness.md).
+> - Most sections are historical checkpoints from 2026-10-09 to 2026-10-11; check the repository before
+>   relying on any status here.
+
 The latest status updates (container visibility and Pi PSI, default enablement policy, 2026-10-09) and
 the release evidence are kept in one place: [release readiness](../releases/readiness.md). This file tracks the
 staged plan, checkpoints, rollouts and device records.

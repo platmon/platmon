@@ -1,5 +1,10 @@
 # Product Network off / on
 
+> **TL;DR**
+> - Network collection adds about +0.16 pp (Orin) and +0.18 pp (Pi) of one core, above the old 0.1 pp
+>   per-feature target, which stays recorded as not met.
+> - It is on by default because the whole default configuration fits the budget in [budget.md](budget.md).
+
 What the product's own Network collection ([../network.md](../reference/network.md)) costs, measured as the same
 product and bench code with `[network]` off (A) and on (B). Not the passive prototype: in these runs
 `benchmarks/passive.py` is never called, and its earlier numbers

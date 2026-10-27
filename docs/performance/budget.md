@@ -1,5 +1,11 @@
 # Performance budget
 
+> **TL;DR**
+> - Release target: the default configuration's whole process at most 2.5 % of one core per board (2.0 %
+>   until 2026-10-18).
+> - Judged per board: 1 s collection, one client polling `/api/stats` every 1 s, A B B A windows.
+> - Per-feature review criteria: about ≤ 2 ms collector CPU per collection and a call p95 ≤ 2 ms.
+
 ## Release target raised to 2.5 % (2026-10-18)
 
 The owner raised the default configuration's release target from 2.0 % to **2.5 % of one core**

@@ -1,5 +1,12 @@
 # Low-frequency observations (`/api/observations`)
 
+> **TL;DR**
+> - Slow groups (storage, Wi-Fi, battery, probe) run on their own threads and cadences and are served at
+>   `/api/observations`, never in `/api/stats`.
+> - Each group has its own state, interval and age, so a slow or stuck one cannot make the core snapshot
+>   stale.
+> - Envelope `schema_version` 2: Wi-Fi `connected` can be `null` (unknown); test `connected === true`.
+
 Some data changes slowly or is slow to read: filesystem capacity today, later possibly others. Such a
 group is observed on its own cadence by its own thread, apart from the core Sampler, and served at
 `/api/observations` with its own id, times and age. `/api/stats` (the 1 s snapshot) is unchanged and never

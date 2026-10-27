@@ -1,5 +1,10 @@
 # Low-frequency groups and history: cost
 
+> **TL;DR**
+> - Storage, Wi-Fi, the probe and history cost about 0.01 pp of one core each at their default cadences.
+> - Their call p95 misses the 2 ms responsiveness criterion (storage ~3 ms, Wi-Fi up to 6.4 ms on the Pi).
+> - Measured while they were off by default; the cost numbers still apply.
+
 What the opt-in groups of [../observations.md](../reference/observations.md) (storage, Wi-Fi, TCP connect probe) and
 the recent history ([../history.md](../reference/history.md)) cost, judged by [budget.md](budget.md). All of them are
 **off by default**, so none of this enters the default configuration's 2.0 % target.

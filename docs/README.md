@@ -1,5 +1,10 @@
 # Documentation
 
+> **TL;DR**
+> - Guides for using platmon, references for its API and metric contracts, and engineering records for
+>   architecture, validation and performance.
+> - New here: [getting started](guides/getting-started.md); building a client: [HTTP API](reference/api.md).
+
 The repository [README](../README.md) gives a short overview and quick start.
 Choose a guide for practical usage, a reference for behavior contracts, or an engineering
 document for implementation and validation evidence.

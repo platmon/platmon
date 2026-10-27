@@ -5,6 +5,14 @@
   <img src="frontends/web/assets/brand/platmon-logo-light.svg" alt="platmon" width="440">
 </picture>
 
+> **TL;DR**
+> - One background service collects Linux host metrics (CPU, GPU/NPU, memory, network, disk, sensors,
+>   battery, Wi-Fi, pressure) and serves them to a terminal client, a web dashboard and an HTTP API on
+>   port 9797.
+> - Install the `.deb` (amd64, arm64, armhf) from the APT repository or GitHub Releases; it runs one
+>   static native server.
+> - No authentication: use it on trusted networks or restrict `[http] bind`.
+
 Lightweight platform monitoring for Jetson, Raspberry Pi, PCs and other Linux hosts.
 A background service collects device metrics once and serves them to a terminal client,
 a browser dashboard and an HTTP API.

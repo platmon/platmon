@@ -1,5 +1,10 @@
 # Post-integration stabilization evidence (2026-10-09)
 
+> **TL;DR**
+> - Historical checkpoint for PR #45 (later folded into #46); kept for provenance, not current status.
+> - For later evidence see [remaining work](remaining-work.md) and the [resumed
+>   results](../performance/archive/resumed-integration-results.md).
+
 Historical checkpoint for PR #45. Its changes are now incorporated into PR #46; consult
 [remaining-work.md](remaining-work.md) and [resumed results](../performance/archive/resumed-integration-results.md)
 for the later ARM, Storage/Wi-Fi and container evidence. Earlier pending entries below are retained

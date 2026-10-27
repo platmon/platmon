@@ -1,5 +1,14 @@
 # platmon-native (experimental)
 
+> **TL;DR**
+> - `platmon-native`: the Rust server that the Debian package runs since 1.4.0, built as static musl
+>   binaries (x86_64, aarch64, armhf) and checked against the Python service on fake trees,
+>   configurations, the runtime and live HTTP.
+> - The text below is the development record from its prototype (2026-10-18) onwards; its opening
+>   paragraph predates the switch.
+> - The Windows build collects every group except pressure, NPU, power, fans, power mode and board info,
+>   but is not released (see Windows below).
+
 A Rust port of the core of `collector.collect_recorded`, to measure what a native collector would cost
 and to check whether it can produce the same output. It is next step 1 of
 [rust-feasibility.md](../docs/performance/rust-feasibility.md). Step 3 (below) builds a Rust service

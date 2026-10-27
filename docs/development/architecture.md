@@ -1,5 +1,12 @@
 # Architecture
 
+> **TL;DR**
+> - One collector publishes snapshots; HTTP, the terminal client and the web page only read them, and slow
+>   groups run on their own threads.
+> - The diagrams follow the Python service (`platmon.py`, `collector/`, `runtime/`); the Debian package
+>   runs the equivalent native server from `native/`.
+> - Layers: collectors read the system, runtime schedules and publishes, frontends present.
+
 The service reads system data once and publishes snapshots for the HTTP API, terminal client and web
 viewer. `platmon.py` loads and validates configuration, constructs the readers and workers, and starts
 the HTTP frontend. Runtime scheduling is independent of frontend requests.

@@ -1,5 +1,11 @@
 # Release readiness
 
+> **TL;DR**
+> - Release gates and evidence per version, newest first (1.6.0 at the top).
+> - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
+> - Not verified for 1.6.0: armhf on a real device under systemd, a 24 h soak, an apt upgrade on a real
+>   device.
+
 ## 1.6.0 release gate (2026-10-25)
 
 Changes since 1.5.0: the native collectors moved into `native/src/collect/` (#105), the Windows build's

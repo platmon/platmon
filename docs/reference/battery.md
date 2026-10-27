@@ -1,5 +1,12 @@
 # Battery and external power
 
+> **TL;DR**
+> - The `battery` observation: batteries and external supplies from `/sys/class/power_supply`, every 60 s
+>   by default; on by default.
+> - Passive: never switches, charges, calibrates or reads a serial number; only the attributes the driver
+>   exposes are read.
+> - A slow group because one ACPI read can take ~100 ms; on Windows the battery class IOCTLs and the AC line.
+
 A low-frequency group ([observations.md](observations.md)) named `battery`: the batteries and the external
 supplies the kernel knows about, read from `/sys/class/power_supply` every `[battery] interval` seconds
 (60 by default, 10 to 3600). **On by default** (`[battery] enabled = no` turns it off). Passive: platmon

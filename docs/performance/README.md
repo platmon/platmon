@@ -1,5 +1,11 @@
 # Performance reports
 
+> **TL;DR**
+> - Index of the CPU and memory measurements on a Jetson Orin Nano and a Raspberry Pi 4; each report is
+>   pinned to the commit it measured.
+> - Start with [budget.md](budget.md) (the target), then the current evidence; superseded reports are in
+>   `archive/`.
+
 Measurements of what the platmon service costs on the boards (Jetson Orin Nano, Raspberry Pi 4). Each
 report records the exact commit it measured; later code changes do not update old numbers. Start with the
 budget, then the current evidence. The release decision itself is in [release readiness](../releases/readiness.md).

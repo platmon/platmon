@@ -1,5 +1,11 @@
 # Sysfs path identity: reuse or resolve
 
+> **TL;DR**
+> - Sensor source identity resolution (`sysfs.canonical`) was a large share of each collection (3.7 ms of
+>   14.9 ms on the Orin).
+> - Chosen: keep resolving every path every collection, but let the kernel do it; no cache, so nothing
+>   goes stale.
+
 Follow-up to [collection-response-breakdown.md](collection-response-breakdown.md), which found
 `sysfs.canonical` (resolving a sysfs path for a sensor's source identity) at 3.7 ms of a 14.9 ms
 collection on a Jetson Orin Nano and 1.3 ms of 8.3 ms on a Raspberry Pi 4 (instrumented stage costs).

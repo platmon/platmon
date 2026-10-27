@@ -1,5 +1,12 @@
 # History expiry correction validation (2026-10-09)
 
+> **TL;DR**
+> - Final validation of runtime `aac7ed7` (2026-10-09) after fixing expired slow-group history points that
+>   were kept internally.
+> - Default CPU stayed within 2.0 % on both boards; with every optional group on, the Orin exceeded it,
+>   and Storage/Wi-Fi call p95 exceeded 2 ms.
+> - History retention and memory stayed bounded over the measured windows.
+
 ## Reassessment after a reproduced retention defect
 
 The recovery-gap candidate `65bcc39` still retained expired low-frequency points internally.

@@ -1,5 +1,9 @@
 # Snapshot and /api/stats copy cost
 
+> **TL;DR**
+> - The two `copy.deepcopy` calls were the largest step of an `/api/stats` request.
+> - Adopted change: per-request CPU fell by half on the Orin and by 39 % on the Pi.
+
 Follow-up to [collection-response-breakdown.md](collection-response-breakdown.md), which found the two
 `copy.deepcopy` calls in `Sampler.read` (0.60 ms per request on a Jetson Orin Nano, 0.98 ms on a
 Raspberry Pi 4) to be the largest step of an `/api/stats` request, larger than `json.dumps`. This note

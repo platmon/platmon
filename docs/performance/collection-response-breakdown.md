@@ -1,5 +1,11 @@
 # Collection and response CPU cost breakdown
 
+> **TL;DR**
+> - Splits the service's CPU into code paths: collection dominates, mostly reading values, resolving sysfs
+>   identities and building source descriptors.
+> - On the request side the snapshot copy was the largest step; both led to the identity-resolution and
+>   snapshot-copy changes.
+
 Follow-up to [low-overhead-cadence.md](low-overhead-cadence.md) (D0). D0 measured what the service costs
 at a 1 s interval; this study splits that cost into the code paths that spend it, to choose what a later
 change should touch. Nothing here changes the product: no optimisation, no fewer readings, no new

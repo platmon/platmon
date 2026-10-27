@@ -1,5 +1,12 @@
 # Full-sample replay
 
+> **TL;DR**
+> - `/api/samples` and `/api/observation-samples` return complete published values after a client's
+>   cursor, so a slower consumer (a Hub) can catch up.
+> - Memory only and bounded: retention up to 3600 s, 1–64 MiB shared, 4096 records, 1 MiB per record;
+>   evicted IDs are reported as missing ranges.
+> - Responses are paged (at most 100 records or 2 MiB).
+
 The live endpoints expose the latest reading; a slower Hub can miss intermediate publications.
 Replay retains **complete published values**, including CPU rows, clocks, individual sensors,
 network/disk counters, PSI and sensor provenance, rather than the selected numbers in `/api/history`.

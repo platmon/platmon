@@ -1,5 +1,10 @@
 # Ubuntu LTS qualification
 
+> **TL;DR**
+> - Progress of ADR 0001: CI now covers Python 3.8 to 3.14, with local interpreter and container evidence.
+> - Still open for new official OS support: systemd runs on booted Ubuntu 22.04, 24.04 and 26.04 and
+>   representative hardware; nothing new is advertised yet.
+
 This record tracks implementation of [ADR 0001](adr/0001-ubuntu-lts-python-support.md).
 Python 3.8 and Ubuntu 20.04 are CI observation targets, outside official support and without an
 ongoing compatibility commitment. The native package continues to require Python 3.9 or later.
