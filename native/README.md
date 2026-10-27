@@ -1156,6 +1156,12 @@ On `x86_64-pc-windows-msvc`:
   Not provided: an installer, a default configuration path, recovery actions and a log: the server's
   messages go to standard error, which a service does not have, so a configuration error shows only as
   the service stopping (`config-check` shows it). CI's smoke test creates, starts and stops it.
+- Exposure: as on Linux, the API has no authentication and `[http] bind` defaults to `0.0.0.0`, so a
+  service started with the defaults answers every host that can reach port 9797, with the host name, model
+  and OS version among its data. Windows Defender Firewall asks only when an interactive program first
+  listens; a service is not asked about, so its port is open or closed by the firewall's existing rules.
+  Set `bind = 127.0.0.1`, or allow the port only from trusted addresses
+  ([deployment](../docs/guides/deployment.md)).
 - Not shown: a run on a Windows host outside CI, Windows on ARM, more than 64 CPUs, a sleep and resume,
   the disk query without administrator rights, a GPU or drive temperature (the CI runner, a VM, has
   neither), the CPU clock against Task Manager.

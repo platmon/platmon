@@ -243,7 +243,7 @@ const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^network\/[^/]+\/\d+\/([^/]+)\/(rx|tx)_bytes_per_s$/, m => `${m[1]} ${m[2]}`],
   [/^disk_io\/[^/]+\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`],
   [/^disk_io\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`]];  // Windows: PhysicalDriveN
-// History keys a sensor by its source id (docs/history.md); its name is the sensor_meta pointer with that id
+// History keys a sensor by its source id (docs/reference/history.md); its name is the sensor_meta pointer with that id
 function sensorName(group, sid) {
   const meta = latestStats && latestStats.sensor_meta && typeof latestStats.sensor_meta === 'object' ? latestStats.sensor_meta : {};
   const ptr = Object.keys(meta).find(p => p.startsWith('/' + group + '/') && meta[p] && meta[p].id === sid);

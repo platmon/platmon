@@ -52,8 +52,8 @@ jobs:
           path: native/target/*-unknown-linux-musl*/release/platmon-native
           if-no-files-found: error
 
-  # Windows: the server builds with the MSVC toolchain and its tests pass; nothing collects there yet, so the
-  # smoke test checks that the commands that would collect refuse, and that the HTTP listener answers.
+  # Windows: the server builds with the MSVC toolchain and its tests pass; the smoke test (tools/windows_smoke.py)
+  # runs collect, serve with its observations, and the server as a Windows service, on the runner.
   native-windows:
     runs-on: windows-latest
     env:

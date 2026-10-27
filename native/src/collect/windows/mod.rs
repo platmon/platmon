@@ -1,7 +1,8 @@
 //! Windows: the required data (CPU, memory, the system volume, identity) from the Win32 and NT system
 //! information calls, the CPU clocks (cpu_clock.rs), the GPU (gpu.rs), temperatures (temperature.rs), Network
-//! (network.rs), Disk I/O (disk_io.rs) and the probe's connection; the other optional groups have no provider here yet
-//! (unsupported_platform). Rust only: the Python service has no Windows collector to compare with.
+//! (network.rs), Disk I/O (disk_io.rs), the slow groups (storage.rs, wifi.rs, battery.rs and the probe's
+//! connection); the other optional groups have no provider here (unsupported_platform). Rust only: the Python
+//! service has no Windows collector to compare with.
 pub mod battery;
 pub mod cpu_clock;
 pub mod disk_io;
