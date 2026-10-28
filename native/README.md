@@ -1102,7 +1102,8 @@ On `x86_64-pc-windows-msvc`:
     turbo and power saving. Every processor group's CPUs, numbered as their usage; sensor provider `pdh`.
   - `memory`: `GlobalMemoryStatusEx` (used = total − available); swap is the paging files' size and use
     (`SystemPageFileInformation`, which `winternl.h` leaves out; its layout has not changed since Windows
-    NT).
+    NT). If that query fails, `swap_total` and `swap_used` are `null` and the collection goes on: only the
+    physical memory is required. The web page, `platmon` and `/text` then show no swap row.
   - `disk`: the volume Windows is on (`GetDiskFreeSpaceExW` on the Windows directory), as Linux's root
     filesystem.
   - `uptime`: the interrupt time, the same clock as the data age, two decimals as `/proc/uptime`.
