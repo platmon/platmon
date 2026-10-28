@@ -184,7 +184,7 @@ pub fn thermal_zones(g: &mut Group) -> (Vec<(String, Value)>, Vec<String>, Vec<S
 
 /// {cpu id: jiffies} for online cores; an error fails the collection.
 pub fn cpu_times() -> Result<BTreeMap<i64, Vec<i64>>, String> {
-    let text = std::fs::read_to_string("/proc/stat").map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&*sysfs::at("/proc/stat")).map_err(|e| e.to_string())?;
     let mut times = BTreeMap::new();
     for line in text.lines() {
         let mut it = line.split_whitespace();
@@ -204,7 +204,7 @@ pub fn cpu_times() -> Result<BTreeMap<i64, Vec<i64>>, String> {
 }
 
 pub fn meminfo() -> Result<Vec<(String, i64)>, String> {
-    let text = std::fs::read_to_string("/proc/meminfo").map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&*sysfs::at("/proc/meminfo")).map_err(|e| e.to_string())?;
     text.lines().map(|l| {
         let (k, v) = l.split_once(':').ok_or("meminfo line")?;
         let n: i64 = v.split_whitespace().next().ok_or("meminfo value")?.parse().map_err(|_| "meminfo value")?;
@@ -225,7 +225,7 @@ pub fn os_uname() -> [String; 5] {
 
 /// shutil.disk_usage: (total, used) in bytes.
 pub fn disk_usage(path: &str) -> Result<(i64, i64), String> {
-    let c = std::ffi::CString::new(path).map_err(|e| e.to_string())?;
+    let c = std::ffi::CString::new(&*sysfs::at(path)).map_err(|e| e.to_string())?;
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
     if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
         return Err(std::io::Error::last_os_error().to_string());

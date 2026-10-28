@@ -121,7 +121,7 @@ fn parent_of(name: &str) -> std::io::Result<Option<String>> {
     if !sysfs::exists(&format!("{}/{}/partition", SYS_CLASS_BLOCK, name)) {
         return Ok(None);
     }
-    let target = std::fs::read_link(format!("{}/{}", SYS_CLASS_BLOCK, name))?;
+    let target = std::fs::read_link(&*sysfs::at(&format!("{}/{}", SYS_CLASS_BLOCK, name)))?;
     let t = target.to_string_lossy();
     let dir = t.rsplit_once('/').map_or("", |(d, _)| d);
     Ok(Some(dir.rsplit('/').next().unwrap_or(dir).to_string()))
@@ -130,7 +130,7 @@ fn parent_of(name: &str) -> std::io::Result<Option<String>> {
 /// storage.filesystem_capacity: (f_blocks, f_bfree, f_bavail, f_frsize) of path once it is pinned and
 /// checked to be on device.
 fn capacity(path: &str, device: (i64, i64)) -> std::io::Result<(u64, u64, u64, u64)> {
-    let c = std::ffi::CString::new(path).map_err(|_| std::io::Error::from_raw_os_error(libc::EINVAL))?;
+    let c = std::ffi::CString::new(&*sysfs::at(path)).map_err(|_| std::io::Error::from_raw_os_error(libc::EINVAL))?;
     unsafe {
         let fd = libc::open(c.as_ptr(), libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW);
         if fd < 0 {
@@ -374,7 +374,7 @@ pub fn wifi(g: &mut Group) -> Value {
     if !interfaces.is_empty() {
         use std::os::unix::fs::MetadataExt;
         // as Python: the namespace is kept when only the index listing fails
-        let listed = std::fs::metadata(NETNS).and_then(|st| {
+        let listed = std::fs::metadata(&*sysfs::at(NETNS)).and_then(|st| {
             ns = namespace_id(st.dev(), st.ino()).into();
             if_indexes()
         });
@@ -577,5 +577,483 @@ pub fn connect_ms(address: &str, port: u16, timeout: f64) -> (Option<f64>, Optio
         })();
         libc::close(fd);
         out
+    }
+}
+
+// tests/collector/test_probe.py's connect_ms tests, ported (docs/development/python-test-port.md).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connect_to_a_loopback_listener() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let (ms, why) = connect_ms("127.0.0.1", listener.local_addr().unwrap().port(), 2.0);
+        assert!(matches!(ms, Some(m) if (0.0..2000.0).contains(&m)) && why.is_none(), "{:?} {:?}", ms, why);
+    }
+
+    #[test]
+    fn refused_is_a_failure_not_a_time() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); // closed again
+        assert_eq!(connect_ms("127.0.0.1", port, 2.0), (None, Some("refused")));
+    }
+
+    #[test]
+    fn timeout_is_reported_without_a_time() {
+        // a listener whose accept queue is full drops the next SYN: the connect waits past the timeout
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&listener);
+        assert_eq!(unsafe { libc::listen(fd, 0) }, 0);
+        let mut held = Vec::new();
+        for _ in 0..4 {
+            if let Ok(c) = std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), std::time::Duration::from_millis(100)) {
+                held.push(c);
+            }
+        }
+        assert_eq!(connect_ms("127.0.0.1", port, 0.05), (None, Some("timeout")));
+    }
+
+    #[test]
+    fn a_socket_that_cannot_be_made_is_an_error() {
+        assert_eq!(connect_ms("not an address", 80, 0.1), (None, Some("error")));
+        assert_eq!(reason(libc::EAFNOSUPPORT), "error"); // socket() refused, e.g. IPv6 unavailable
+        assert_eq!((reason(libc::ECONNREFUSED), reason(libc::ENETUNREACH), reason(libc::EHOSTUNREACH), reason(libc::ETIMEDOUT)),
+                   ("refused", "unreachable", "unreachable", "timeout"));
+    }
+
+    // tests/collector/test_battery.py, ported.
+    use crate::collect::linux::sysfs::fake::Root;
+
+    const CHARGE_BATTERY: &[(&str, &str)] = &[ // as read on an ACPI laptop: the charge family, no energy_* and no power_now
+        ("type", "Battery"), ("present", "1"), ("capacity", "89"), ("status", "Not charging"), ("capacity_level", "Normal"),
+        ("technology", "Li-ion"), ("cycle_count", "237"), ("charge_now", "3026000"), ("charge_full", "3400000"),
+        ("charge_full_design", "4023000"), ("voltage_now", "16436000"), ("current_now", "0")];
+    const ENERGY_BATTERY: &[(&str, &str)] = &[ // the other gauge family
+        ("type", "Battery"), ("present", "1"), ("capacity", "54"), ("status", "Discharging"), ("energy_now", "27000000"),
+        ("energy_full", "50000000"), ("energy_full_design", "52000000"), ("voltage_now", "11400000"),
+        ("current_now", "-1200000"), ("power_now", "13680000")];
+
+    fn supplies(root: &Root, list: &[(&str, &[(&str, &str)])]) {
+        root.mkdir(POWER_SUPPLY);
+        for (name, attrs) in list {
+            root.mkdir(&format!("{}/{}", POWER_SUPPLY, name));
+            for (attr, value) in *attrs {
+                root.put(&format!("{}/{}/{}", POWER_SUPPLY, name, attr), value);
+            }
+        }
+    }
+
+    fn observe_battery() -> (Value, Value) {
+        let mut g = Group::new("battery", false);
+        let data = battery(&mut g);
+        (data, g.status())
+    }
+
+    fn text(v: &Value, key: &str) -> String {
+        v.get(key).unwrap().to_string(false)
+    }
+
+    fn first_battery(data: &Value) -> Value {
+        data.get("batteries").unwrap().get_index(0).unwrap().clone()
+    }
+
+    const OK: &str = r#"{"state":"ok","reason":null,"issues":[],"issues_truncated":0}"#;
+
+    #[test]
+    fn charge_family_battery() {
+        let root = Root::new(0);
+        supplies(&root, &[("BAT1", CHARGE_BATTERY)]);
+        let (data, status) = observe_battery();
+        assert_eq!(status.to_string(false), OK);
+        assert_eq!(data.to_string(false), concat!(r#"{"provider":"sysfs_power_supply","batteries":[{"name":"BAT1","present":true,"#,
+            r#""percent":89,"status":"Not charging","capacity_level":"Normal","technology":"Li-ion","health":null,"#,
+            r#""charge_now_uah":3026000,"charge_full_uah":3400000,"charge_full_design_uah":4023000,"energy_now_uwh":null,"#,
+            r#""energy_full_uwh":null,"energy_full_design_uwh":null,"current_ua":0,"power_uw":null,"voltage_uv":16436000,"#,
+            r#""cycle_count":237}],"external":[]}"#));
+    }
+
+    #[test]
+    fn energy_family_battery_keeps_the_sign() {
+        let root = Root::new(0);
+        supplies(&root, &[("BAT0", ENERGY_BATTERY)]);
+        let (data, status) = observe_battery();
+        assert_eq!(text(&status, "state"), r#""ok""#);
+        let b = first_battery(&data);
+        let got: Vec<String> = ["energy_now_uwh", "energy_full_uwh", "power_uw", "current_ua", "charge_now_uah", "cycle_count"]
+            .iter().map(|k| text(&b, k)).collect();
+        assert_eq!(got, ["27000000", "50000000", "13680000", "-1200000", "null", "null"]);
+    }
+
+    #[test]
+    fn an_attribute_the_driver_does_not_expose_is_not_a_problem() {
+        let root = Root::new(0);
+        supplies(&root, &[("BAT1", &[("type", "Battery"), ("present", "1"), ("capacity", "50")])]);
+        let (data, status) = observe_battery();
+        assert_eq!(status.to_string(false), OK);
+        let b = first_battery(&data);
+        assert_eq!((text(&b, "percent"), text(&b, "status"), text(&b, "voltage_uv")), ("50".into(), "null".into(), "null".into()));
+    }
+
+    #[test]
+    fn no_supply_is_unavailable_not_an_error() {
+        for empty in [true, false] {
+            let root = Root::new(0);
+            if empty {
+                root.mkdir(POWER_SUPPLY);
+            }
+            let (data, status) = observe_battery();
+            assert_eq!((text(&status, "state"), text(&status, "reason")), (r#""unavailable""#.into(), r#""not_detected""#.into()));
+            assert_eq!((text(&data, "batteries"), text(&data, "external")), ("[]".into(), "[]".into()));
+        }
+    }
+
+    #[test]
+    fn empty_bay_reports_absent_without_inventing_numbers() {
+        let root = Root::new(0);
+        supplies(&root, &[("BAT2", &[("type", "Battery"), ("present", "0"), ("capacity", "0"), ("status", "Unknown"), ("charge_now", "0")])]);
+        let (data, status) = observe_battery();
+        assert_eq!(text(&status, "state"), r#""ok""#);
+        assert_eq!(first_battery(&data).to_string(false), concat!(r#"{"name":"BAT2","present":false,"percent":null,"status":null,"#,
+            r#""capacity_level":null,"technology":null,"health":null,"charge_now_uah":null,"charge_full_uah":null,"#,
+            r#""charge_full_design_uah":null,"energy_now_uwh":null,"energy_full_uwh":null,"energy_full_design_uwh":null,"#,
+            r#""current_ua":null,"power_uw":null,"voltage_uv":null,"cycle_count":null}"#));
+    }
+
+    #[test]
+    fn external_supplies_and_their_order() {
+        let root = Root::new(0);
+        supplies(&root, &[("ADP1", &[("type", "Mains"), ("online", "1")]), ("ucsi-source-psy-USBC000:002", &[("type", "USB"), ("online", "0")]),
+                          ("BAT1", CHARGE_BATTERY)]);
+        let (data, status) = observe_battery();
+        assert_eq!(text(&status, "state"), r#""ok""#);
+        assert_eq!(text(&data, "external"),
+                   r#"[{"name":"ADP1","type":"Mains","online":true},{"name":"ucsi-source-psy-USBC000:002","type":"USB","online":false}]"#);
+        assert_eq!(text(&first_battery(&data), "name"), r#""BAT1""#);
+        assert!(data.get("batteries").unwrap().get_index(1).is_none());
+    }
+
+    #[test]
+    fn a_ups_holds_charge_like_a_battery() {
+        let root = Root::new(0);
+        supplies(&root, &[("hidev0", &[("type", "UPS"), ("present", "1"), ("capacity", "100"), ("status", "Full")]),
+                          ("ADP1", &[("type", "Mains"), ("online", "1")]), ("wl0", &[("type", "Wireless"), ("online", "0")])]);
+        let (data, status) = observe_battery();
+        assert_eq!(text(&status, "state"), r#""ok""#);
+        let b = first_battery(&data);
+        assert_eq!((text(&b, "name"), text(&b, "percent"), text(&b, "status")), (r#""hidev0""#.into(), "100".into(), r#""Full""#.into()));
+        assert!(data.get("batteries").unwrap().get_index(1).is_none());
+        assert_eq!(text(&data, "external"), r#"[{"name":"ADP1","type":"Mains","online":true},{"name":"wl0","type":"Wireless","online":false}]"#);
+    }
+
+    #[test]
+    fn a_supply_without_a_type_is_left_out() {
+        let root = Root::new(0);
+        supplies(&root, &[("weird", &[("online", "1")])]);
+        let (data, status) = observe_battery();
+        assert_eq!((text(&data, "batteries"), text(&data, "external")), ("[]".into(), "[]".into()));
+        assert_eq!((text(&status, "state"), text(&status, "reason")), (r#""unavailable""#.into(), r#""not_exposed""#.into()));
+    }
+
+    #[test]
+    fn a_value_that_is_not_one_is_invalid_data() {
+        let cases: [(&[(&str, &str)], &str); 5] = [
+            (&[("type", "Battery"), ("present", "1"), ("capacity", "150")], "BAT1.capacity"), // out of 0..100
+            (&[("type", "Battery"), ("present", "1"), ("capacity", ""), ("voltage_now", "1")], "BAT1.capacity"),
+            (&[("type", "Battery"), ("present", "1"), ("voltage_now", "-5")], "BAT1.voltage_now"), // not a voltage
+            (&[("type", "Battery"), ("present", "yes")], "BAT1.present"), // not a flag
+            (&[("type", "Mains"), ("online", "2")], "BAT1.online")];
+        for (attrs, target) in cases {
+            let root = Root::new(0);
+            supplies(&root, &[("BAT1", attrs)]);
+            let (_, status) = observe_battery();
+            assert!(["\"partial\"", "\"error\""].contains(&text(&status, "state").as_str()), "{}", target);
+            assert!(["\"some_unreadable\"", "\"invalid_data\""].contains(&text(&status, "reason").as_str()), "{}", target);
+            assert_eq!(text(&status, "issues"), format!(r#"[{{"target":"{}","reason":"invalid_data"}}]"#, target));
+        }
+    }
+
+    #[test]
+    fn an_over_long_enum_is_not_one() {
+        let root = Root::new(0);
+        let long = "x".repeat(33);
+        supplies(&root, &[("BAT1", &[("type", "Battery"), ("present", "1"), ("capacity", "50"), ("status", &long)])]);
+        let (data, status) = observe_battery();
+        assert_eq!(text(&first_battery(&data), "status"), "null");
+        assert_eq!(status.to_string(false),
+                   r#"{"state":"partial","reason":"some_unreadable","issues":[{"target":"BAT1.status","reason":"invalid_data"}],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn an_unreadable_attribute_is_reported_and_the_rest_kept() {
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root reads a file of mode 000
+        }
+        let root = Root::new(0);
+        supplies(&root, &[("BAT1", CHARGE_BATTERY)]);
+        root.chmod("/sys/class/power_supply/BAT1/capacity", 0);
+        let (data, status) = observe_battery();
+        assert_eq!((text(&status, "state"), text(&status, "reason")), (r#""partial""#.into(), r#""some_unreadable""#.into()));
+        let b = first_battery(&data);
+        assert_eq!((text(&b, "percent"), text(&b, "cycle_count")), ("null".into(), "237".into()));
+    }
+
+    #[test]
+    fn the_host_class_reads() {
+        if !std::path::Path::new(POWER_SUPPLY).is_dir() {
+            return; // no power supply on this host
+        }
+        let (data, status) = observe_battery();
+        assert!(matches!(&data, Value::Obj(items) if items.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>() == ["provider", "batteries", "external"]));
+        assert!(["\"ok\"", "\"unavailable\""].contains(&text(&status, "state").as_str())); // a real host: never partial or error
+        if let Some(Value::Arr(bs)) = data.get("batteries") {
+            for b in bs {
+                assert!(["true", "false", "null"].contains(&text(b, "present").as_str()));
+                assert!(matches!(b.get("percent"), Some(Value::Null) | Some(Value::Int(0..=100))));
+            }
+        }
+        if let Some(Value::Arr(es)) = data.get("external") {
+            for e in es {
+                assert!(matches!(e, Value::Obj(items) if items.len() == 3) && ["true", "false", "null"].contains(&text(e, "online").as_str()));
+            }
+        }
+    }
+
+    // tests/collector/test_wifi.py, ported. The interface is "lo", which every network namespace has with
+    // ifindex 1, so the identity read from the real namespace is known; its files are in the fake tree.
+    const HEAD: &str = "Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n \
+                        face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n";
+    const ORIN: &str = "wlP1p1s0: 0000   60.  -50.  -256        0      0      0      0      0        0\n"; // as read on the boards
+    const PI: &str = " wlan0: 0000   46.  -64.  -256        0      0      0    312      0        0\n";
+    const DOWN: &str = " wlan1: 0000    0     0     0        0      0      0      0      0        0\n"; // listed, not associated
+    const RAW: &str = "  eth9: 0000   70.   70.    0        0      0      0      0      0        0\n"; // a driver without dBm
+    const NOISE: &str = " wlan2: 0000   50.  -55.  -95.       0      0      0      0      0        0\n";
+
+    fn rows(text: &str) -> (String, Vec<(String, &'static str)>) {
+        let (rows, bad) = parse_wireless(text).ok().unwrap();
+        (Value::Arr(rows).to_string(false), bad)
+    }
+
+    /// /proc/net/wireless with PI's row as "lo", the namespace file, and lo's ifindex and carrier.
+    fn lo_tree(root: &Root, wireless: &str, carrier: Option<&str>) {
+        root.put(WIRELESS, wireless.replace("wlan0:", "lo:"));
+        root.put(NETNS, "");
+        root.put("/sys/class/net/lo/ifindex", "1\n");
+        if let Some(c) = carrier {
+            root.put("/sys/class/net/lo/carrier", c);
+        }
+    }
+
+    fn observe_wifi() -> (Value, Value) {
+        let mut g = Group::new("wifi", false);
+        let out = wifi(&mut g);
+        (out, g.status())
+    }
+
+    fn lo(out: &Value) -> Value {
+        out.get("interfaces").unwrap().get_index(0).unwrap().clone()
+    }
+
+    #[test]
+    fn connected_rows_from_the_boards() {
+        assert_eq!(rows(&format!("{}{}{}", HEAD, ORIN, PI)), (concat!(
+            r#"[{"name":"wlP1p1s0","connected":null,"connection_state":"unknown","signal_dbm":-50,"signal_raw":null,"link_quality":60,"noise_dbm":null},"#,
+            r#"{"name":"wlan0","connected":null,"connection_state":"unknown","signal_dbm":-64,"signal_raw":null,"link_quality":46,"noise_dbm":null}]"#).into(), vec![]));
+    }
+
+    #[test]
+    fn unupdated_signal_does_not_determine_connection() {
+        assert_eq!(rows(&format!("{}{}", HEAD, DOWN)).0, // never a last value, never 0
+                   r#"[{"name":"wlan1","connected":null,"connection_state":"unknown","signal_dbm":null,"signal_raw":null,"link_quality":null,"noise_dbm":null}]"#);
+    }
+
+    #[test]
+    fn a_value_without_dbm_is_not_called_dbm() {
+        assert!(rows(&format!("{}{}", HEAD, RAW)).0.contains(r#""signal_dbm":null,"signal_raw":70"#));
+    }
+
+    #[test]
+    fn noise_when_the_driver_gives_it() {
+        assert!(rows(&format!("{}{}", HEAD, NOISE)).0.contains(r#""noise_dbm":-95"#));
+        assert!(rows(&format!("{}{}", HEAD, ORIN)).0.contains(r#""noise_dbm":null"#)); // -256: n/a
+    }
+
+    #[test]
+    fn bad_rows_and_files() {
+        let (text, bad) = rows(&format!("{}{}garbage\na/b: 0000 1. 2. 3. 0 0 0 0 0 0\n", HEAD, ORIN));
+        assert!(text.starts_with(r#"[{"name":"wlP1p1s0""#) && !text.contains("},{"));
+        assert_eq!(bad.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["line4", "line5"]);
+        assert!(parse_wireless("not the header\n").is_err());
+    }
+
+    #[test]
+    fn raw_zero_and_invalid_signal_range() {
+        let (text, bad) = rows(&format!("{}{}", HEAD, RAW.replace("70.   70.", "70.    0.")));
+        assert!(bad.is_empty() && text.contains(r#""signal_dbm":null,"signal_raw":0"#));
+        assert_eq!(rows(&format!("{}{}", HEAD, PI.replace("-64.", "-300."))).1, [("wlan0".to_string(), "invalid_data")]);
+    }
+
+    #[test]
+    fn observation_states() {
+        for (case, state, reason) in [("rows", "ok", "null"), ("header", "unavailable", r#""not_detected""#),
+                                      ("missing", "unavailable", r#""not_exposed""#), ("denied", "error", r#""permission_denied""#),
+                                      ("junk", "error", r#""invalid_data""#)] {
+            if case == "denied" && unsafe { libc::geteuid() } == 0 {
+                continue; // root reads a file of mode 000
+            }
+            let root = Root::new(0);
+            lo_tree(&root, &format!("{}{}", HEAD, PI), Some("1\n"));
+            match case {
+                "header" => root.put(WIRELESS, HEAD),
+                "missing" => root.remove(WIRELESS),
+                "denied" => root.chmod(WIRELESS, 0),
+                "junk" => root.put(WIRELESS, "junk"),
+                _ => {}
+            }
+            let (out, status) = observe_wifi();
+            assert_eq!((status.get("state").unwrap().to_string(false), status.get("reason").unwrap().to_string(false)),
+                       (format!("{:?}", state), reason.to_string()), "{}", case);
+            assert_eq!(out.get("provider").unwrap().to_string(false), r#""proc_net_wireless""#);
+            assert_eq!(out.get("scope").unwrap().get("kind").unwrap().to_string(false), r#""process_network_namespace""#);
+        }
+    }
+
+    #[test]
+    fn observation_exports_known_interface_identity() {
+        use std::os::unix::fs::MetadataExt;
+        let root = Root::new(0);
+        lo_tree(&root, &format!("{}{}", HEAD, PI), Some("1\n"));
+        let (out, _) = observe_wifi();
+        let st = std::fs::metadata(root.path(NETNS)).unwrap();
+        assert_eq!(out.get("scope").unwrap().get("id").unwrap().to_string(false), format!("{:?}", namespace_id(st.dev(), st.ino())));
+        assert_eq!(lo(&out).get("ifindex").unwrap().to_string(false), "1");
+    }
+
+    #[test]
+    fn unavailable_identity_is_not_invented() {
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root passes a directory of mode 000
+        }
+        let root = Root::new(0);
+        lo_tree(&root, &format!("{}{}", HEAD, PI), Some("1\n"));
+        root.chmod("/proc/self/ns", 0); // the namespace cannot be looked up
+        let (out, status) = observe_wifi();
+        root.chmod("/proc/self/ns", 0o755);
+        assert_eq!((out.get("scope").unwrap().get("id").unwrap().to_string(false), lo(&out).get("ifindex").unwrap().to_string(false)),
+                   ("null".into(), "null".into()));
+        assert_eq!(status.get("state").unwrap().to_string(false), r#""partial""#);
+    }
+
+    #[test]
+    fn signal_not_updated_does_not_claim_disconnection() {
+        let root = Root::new(0);
+        lo_tree(&root, &format!("{}{}", HEAD, PI.replace("-64.", "-64 ")), Some("1\n"));
+        let item = lo(&observe_wifi().0);
+        assert_eq!((item.get("connected").unwrap().to_string(false), item.get("signal_dbm").unwrap().to_string(false)),
+                   ("true".into(), "null".into()));
+    }
+
+    #[test]
+    fn connection_states_are_not_inferred_from_signal() {
+        // Python's OSError(5) is EINVAL here with IFF_UP set: a carrier read error that is not a down link
+        for (case, state, connected) in [("1\n", "connected", "true"), ("0\n", "disconnected", "false"), ("moved", "unknown", "null"),
+                                         ("denied", "permission_denied", "null"), ("missing", "unsupported", "null")] {
+            if case == "denied" && unsafe { libc::geteuid() } == 0 {
+                continue;
+            }
+            let root = Root::new(0);
+            lo_tree(&root, &format!("{}{}", HEAD, PI), Some("1\n"));
+            match case {
+                "moved" => root.put("/sys/class/net/lo/ifindex", "4\n"),
+                "denied" => root.chmod("/sys/class/net/lo/carrier", 0),
+                "missing" => root.remove("/sys/class/net/lo/carrier"),
+                c => root.put("/sys/class/net/lo/carrier", c),
+            }
+            let (out, status) = observe_wifi();
+            let item = lo(&out);
+            assert_eq!((item.get("connection_state").unwrap().to_string(false), item.get("connected").unwrap().to_string(false)),
+                       (format!("{:?}", state), connected.to_string()), "{}", case);
+            assert_eq!(item.get("signal_dbm").unwrap().to_string(false), if connected == "true" { "-64" } else { "null" }, "{}", case);
+            assert!(!(out.to_string(false) + &status.to_string(false)).contains("/sys"), "{}", case); // no private path
+        }
+    }
+
+    #[test]
+    fn carrier_and_index_from_fake_sysfs() {
+        let root = Root::new(0);
+        root.put("/sys/class/net/wlan0/ifindex", "3\n");
+        root.put("/sys/class/net/wlan0/carrier", "1\n");
+        assert!(matches!(link_connected("wlan0", 3), Ok(Some(true))));
+        root.put("/sys/class/net/wlan0/carrier", "0\n");
+        assert!(matches!(link_connected("wlan0", 3), Ok(Some(false))));
+        assert!(matches!(link_connected("wlan0", 4), Ok(None)));
+        root.put("/sys/class/net/wlan0/carrier", "2\n");
+        assert!(matches!(link_connected("wlan0", 3), Err(LinkError::Invalid)));
+        if unsafe { libc::geteuid() } != 0 { // carrier errors are not all a down link: EACCES stays an error
+            root.chmod("/sys/class/net/wlan0/carrier", 0);
+            assert!(matches!(link_connected("wlan0", 3), Err(LinkError::Os(e)) if e.raw_os_error() == Some(libc::EACCES)));
+        }
+    }
+
+    #[test]
+    fn real_host_file() {
+        let (out, status) = observe_wifi();
+        assert!(["\"ok\"", "\"unavailable\"", "\"partial\""].contains(&status.get("state").unwrap().to_string(false).as_str()));
+        if let Some(Value::Arr(items)) = out.get("interfaces") {
+            for i in items {
+                assert!(matches!(i.get("signal_dbm"), Some(Value::Null) | Some(Value::Int(i64::MIN..=-1))));
+            }
+        }
+    }
+
+    #[test]
+    fn interface_replaced_during_carrier_read_is_unknown() {
+        let root = Root::new(0);
+        crate::collect::linux::sysfs::fake::answers("/sys/class/net/wlan0/ifindex", vec![Ok("3"), Ok("4")]);
+        root.put("/sys/class/net/wlan0/carrier", "1");
+        assert!(matches!(link_connected("wlan0", 3), Ok(None)));
+    }
+
+    #[test]
+    fn down_carrier_is_disconnected_without_issue() {
+        // Linux refuses a carrier read on a down interface (EINVAL); IFF_UP clear confirms it is down
+        for (flags, after, connected, state) in [("0x0", "1", "false", "disconnected"), ("0x1000", "1", "false", "disconnected"),
+                                                 ("0x0", "4", "null", "unknown")] {
+            let root = Root::new(0);
+            lo_tree(&root, &format!("{}{}", HEAD, PI), None);
+            root.put("/sys/class/net/lo/flags", flags);
+            crate::collect::linux::sysfs::fake::answers("/sys/class/net/lo/ifindex", vec![Ok("1"), Ok(after)]);
+            crate::collect::linux::sysfs::fake::answers("/sys/class/net/lo/carrier", vec![Err(libc::EINVAL)]);
+            let (out, status) = observe_wifi();
+            let item = lo(&out);
+            assert_eq!((item.get("connected").unwrap().to_string(false), item.get("connection_state").unwrap().to_string(false)),
+                       (connected.to_string(), format!("{:?}", state)), "{} {}", flags, after);
+            assert_eq!(item.get("signal_dbm").unwrap().to_string(false), "null");
+            assert_eq!(status.to_string(false), r#"{"state":"ok","reason":null,"issues":[],"issues_truncated":0}"#);
+        }
+    }
+
+    #[test]
+    fn carrier_errors_are_not_all_treated_as_down() {
+        for (errno, flags) in [(libc::EINVAL, "0x1"), (libc::EIO, "0x0"), (libc::EACCES, "0x0")] {
+            let root = Root::new(0);
+            root.put("/sys/class/net/wlan0/ifindex", "3");
+            root.put("/sys/class/net/wlan0/flags", flags);
+            crate::collect::linux::sysfs::fake::answers("/sys/class/net/wlan0/carrier", vec![Err(errno)]);
+            assert!(matches!(link_connected("wlan0", 3), Err(LinkError::Os(e)) if e.raw_os_error() == Some(errno)), "{}", errno);
+        }
+    }
+
+    #[test]
+    fn a_carrier_read_error_that_is_not_a_down_link_is_unavailable() {
+        // test_connection_states_are_not_inferred_from_signal's OSError(5)
+        let root = Root::new(0);
+        lo_tree(&root, &format!("{}{}", HEAD, PI), None);
+        crate::collect::linux::sysfs::fake::answers("/sys/class/net/lo/carrier", vec![Err(libc::EIO)]);
+        let (out, status) = observe_wifi();
+        let item = lo(&out);
+        assert_eq!((item.get("connection_state").unwrap().to_string(false), item.get("connected").unwrap().to_string(false)),
+                   (r#""unavailable""#.into(), "null".into()));
+        assert!(!(out.to_string(false) + &status.to_string(false)).contains("/sys"));
     }
 }

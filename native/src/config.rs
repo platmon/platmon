@@ -423,3 +423,64 @@ pub fn load(path: Option<&str>, frontends: Option<&[&str]>) -> Result<Config, St
 pub fn levels_for(cfg: &Config, platform: &str) -> Value {
     levels(&cfg.ini, Some(platform)).unwrap_or_default()
 }
+
+// tests/collector/test_probe.py's target and config tests, ported (docs/development/python-test-port.md);
+// config_fixture.py compares the rest of the parsing with the Python service's answers.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_targets_like_python() {
+        assert_eq!(parse_targets("192.0.2.1:443, [2001:db8::1]:22 ,").unwrap(),
+                   [("192.0.2.1".to_string(), 443), ("2001:db8::1".to_string(), 22)]);
+        assert!(parse_targets("").unwrap().is_empty());
+        let five = (0..5).map(|n| format!("192.0.2.{}:1", n)).collect::<Vec<_>>().join(",");
+        for text in ["example.com:80", "192.0.2.1", "192.0.2.1:0", "192.0.2.1:65536", "192.0.2.1:http", "2001:db8::1:22",
+                     "192.0.2.1:1,192.0.2.1:1", &five] {
+            assert!(parse_targets(text).is_err(), "{}", text); // names are never resolved; at most 4; no duplicates
+        }
+    }
+
+    #[test]
+    fn probe_config_refusals_and_defaults() {
+        let dir = std::env::temp_dir().join(format!("platmon-native-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (i, (text, error)) in [("[probe]\ntargets = host.example:80\n", "targets"),
+                                   ("[probe]\nenabled = yes\ntargets = 192.0.2.1:1, 192.0.2.2:1\ntimeout = 5\ninterval = 10\n", "interval must be longer"),
+                                   ("[probe]\ntimeout = 20\n", "out of range")].iter().enumerate() {
+            let path = dir.join(format!("{}.ini", i));
+            std::fs::write(&path, text).unwrap();
+            let e = load(Some(path.to_str().unwrap()), None).err().unwrap();
+            assert!(e.contains(error), "{}: {}", text, e);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let cfg = load(None, None).ok().unwrap();
+        assert!(cfg.flag("probe", "enabled") && cfg.text("probe", "targets").is_empty()); // on by default, without targets
+    }
+
+    #[test]
+    fn battery_section() {
+        // tests/collector/test_battery.py test_config_section
+        let cfg = load(None, None).ok().unwrap();
+        assert!(cfg.flag("battery", "enabled") && cfg.float("battery", "interval") == 60.0);
+        let path = std::env::temp_dir().join(format!("platmon-native-battery-{}.ini", std::process::id()));
+        std::fs::write(&path, "[battery]\ninterval = 5\n").unwrap();
+        let e = load(Some(path.to_str().unwrap()), None).err().unwrap();
+        assert!(e.contains("[battery] interval = 5.0 is out of range (10 to 3600)"), "{}", e);
+        std::fs::write(&path, "[battery]\nenabled = no\n").unwrap();
+        assert!(!load(Some(path.to_str().unwrap()), None).ok().unwrap().flag("battery", "enabled"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn wifi_section() {
+        // tests/collector/test_wifi.py test_wifi_is_on_by_default_with_a_5_s_candidate_interval
+        let cfg = load(None, None).ok().unwrap();
+        assert!(cfg.flag("wifi", "enabled") && cfg.float("wifi", "interval") == 5.0);
+        let path = std::env::temp_dir().join(format!("platmon-native-wifi-{}.ini", std::process::id()));
+        std::fs::write(&path, "[wifi]\ninterval = 0.5\n").unwrap();
+        assert!(load(Some(path.to_str().unwrap()), None).err().unwrap().contains("out of range"));
+        let _ = std::fs::remove_file(&path);
+    }
+}

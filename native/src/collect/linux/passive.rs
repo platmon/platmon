@@ -137,7 +137,7 @@ impl Network {
     pub fn sample(&mut self, group: &mut Group) -> (Value, Span) {
         use std::os::unix::fs::MetadataExt;
         let mut ns = None;
-        match std::fs::metadata(NETNS) {
+        match std::fs::metadata(&*sysfs::at(NETNS)) {
             Ok(st) => {
                 let key = (st.dev(), st.ino());
                 if self.ns.as_ref().map_or(true, |(k, _)| *k != key) {
@@ -260,7 +260,7 @@ fn valid_disk_name(name: &str) -> bool {
 
 /// disk_io.is_physical: Some(false) under devices/virtual, Some(true) otherwise, None without a link.
 pub fn is_physical(name: &str) -> io::Result<Option<bool>> {
-    match std::fs::read_link(format!("{}/{}", SYS_BLOCK, name)) {
+    match std::fs::read_link(&*sysfs::at(&format!("{}/{}", SYS_BLOCK, name))) {
         Ok(target) => Ok(Some(!format!("/{}", target.to_string_lossy()).contains("/devices/virtual/"))),
         Err(e) if e.raw_os_error() == Some(libc::ENOENT) => Ok(None),
         Err(e) => Err(e),
@@ -538,6 +538,7 @@ pub fn pressure(group: &mut Group) -> (Value, Span) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collect::linux::sysfs::fake::Root;
 
     #[test]
     fn counters_like_python() {
@@ -563,6 +564,137 @@ mod tests {
     fn netns_id_matches_python() {
         // python3 -c 'import hashlib;print(hashlib.sha256(b"{\"dev\":4,\"ino\":4026531840,\"v\":1}").hexdigest())'
         assert_eq!(namespace_id(4, 4026531840), format!("netns1:{}", crate::sha256::hex(br#"{"dev":4,"ino":4026531840,"v":1}"#)));
+    }
+
+    // tests/collector/test_pressure.py, ported (docs/development/python-test-port.md).
+    const SOME: &str = "some avg10=1.25 avg60=0.50 avg300=0.10 total=123456";
+    const FULL: &str = "full avg10=0.00 avg60=0.00 avg300=0.00 total=0";
+    const T0: i64 = 1_000_000_000_000;
+
+    fn write_pressure(root: &Root, files: &[(&str, &str)]) {
+        root.mkdir(PRESSURE);
+        for (name, text) in files {
+            root.put(&format!("{}/{}", PRESSURE, name), text);
+        }
+    }
+
+    fn read_pressure(root: &Root) -> (Value, Span, Value) {
+        root.at(T0);
+        let mut g = Group::new("pressure", false);
+        let (out, span) = pressure(&mut g);
+        (out, span, g.status())
+    }
+
+    fn resource_names(out: &Value) -> Vec<String> {
+        match out.get("resources") { Some(Value::Obj(r)) => r.iter().map(|(k, _)| k.clone()).collect(), _ => vec![] }
+    }
+
+    #[test]
+    fn parse_some_and_full() {
+        let text = format!("{}\n{}\n", SOME, FULL);
+        let both = parse_pressure(&text).unwrap();
+        assert_eq!(both, [("some", [1.25, 0.5, 0.1], 123456), ("full", [0.0, 0.0, 0.0], 0)]);
+        assert_eq!(parse_pressure(SOME).unwrap(), [("some", [1.25, 0.5, 0.1], 123456)]); // before full existed
+    }
+
+    #[test]
+    fn parse_refuses_other_formats() {
+        for text in ["".to_string(), FULL.into(), format!("{}\n{}", SOME, SOME), "some avg10=1 avg60=0.00 avg300=0.00 total=1".into(),
+                     "some avg10=-1.00 avg60=0.00 avg300=0.00 total=1".into(), "some avg10=1.00 total=1".into(),
+                     format!("{} extra=1", SOME), "partial avg10=0.00 avg60=0.00 avg300=0.00 total=0".into()] {
+            assert!(parse_pressure(&text).is_none(), "{:?}", text);
+        }
+    }
+
+    #[test]
+    fn all_three_with_cpu_full_left_out() {
+        let root = Root::new(T0);
+        let both = format!("{}\n{}\n", SOME, FULL);
+        write_pressure(&root, &[("cpu", &both), ("memory", &both), ("io", &both)]);
+        let (out, span, status) = read_pressure(&root);
+        let some = r#"{"avg10":1.25,"avg60":0.5,"avg300":0.1,"total_us":123456}"#;
+        let full = r#"{"avg10":0.0,"avg60":0.0,"avg300":0.0,"total_us":0}"#;
+        assert_eq!(out.to_string(false), format!(
+            r#"{{"scope":{{"kind":"host"}},"provider":"proc_pressure","resources":{{"cpu":{{"some":{s},"full":null}},"memory":{{"some":{s},"full":{f}}},"io":{{"some":{s},"full":{f}}}}},"read":null}}"#,
+            s = some, f = full)); // cpu's full is undefined at the system level, not a measured 0
+        assert!(span.is_some());
+        assert_eq!(status.get("state").unwrap().to_string(false), r#""ok""#);
+    }
+
+    #[test]
+    fn no_pressure_directory_opens_nothing() {
+        let root = Root::new(T0);
+        let (out, span, status) = read_pressure(&root);
+        assert!(resource_names(&out).is_empty() && span.is_none());
+        assert_eq!(status.to_string(false), r#"{"state":"unavailable","reason":"not_exposed","issues":[],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn one_unreadable_file_keeps_the_others() {
+        for (case, state, reason) in [("missing", "ok", None), ("unreadable", "partial", Some("permission_denied")),
+                                      ("garbage", "partial", Some("invalid_data"))] {
+            if case == "unreadable" && unsafe { libc::geteuid() } == 0 {
+                continue; // root reads a file of mode 000
+            }
+            let root = Root::new(T0);
+            write_pressure(&root, &[("cpu", SOME), ("io", SOME)]);
+            match case {
+                "unreadable" => { root.put("/proc/pressure/memory", SOME); root.chmod("/proc/pressure/memory", 0) }
+                "garbage" => root.put("/proc/pressure/memory", "garbage"),
+                _ => {}
+            }
+            let (out, _, status) = read_pressure(&root);
+            assert_eq!(resource_names(&out), ["cpu", "io"], "{}", case);
+            assert_eq!(status.get("state").unwrap().to_string(false), format!("{:?}", state), "{}", case);
+            if let Some(reason) = reason {
+                assert!(status.get("issues").unwrap().to_string(false).contains(&format!(r#""reason":"{}""#, reason)), "{}", case);
+            }
+        }
+    }
+
+    #[test]
+    fn all_unreadable_is_an_error_without_a_read() {
+        let root = Root::new(T0);
+        write_pressure(&root, &[("cpu", "x"), ("memory", "x"), ("io", "x")]);
+        let (out, span, status) = read_pressure(&root);
+        assert!(resource_names(&out).is_empty() && span.is_none());
+        assert_eq!(status.get("state").unwrap().to_string(false), r#""error""#);
+    }
+
+    #[test]
+    fn the_read_spans_the_three_files() {
+        let root = Root::new(T0);
+        write_pressure(&root, &[("cpu", SOME), ("memory", SOME), ("io", SOME)]);
+        let (_, span, _) = read_pressure(&root);
+        assert_eq!(span, Some((T0, T0 + 3 * crate::metadata::FAKE_TICK))); // before the first read to after the last
+    }
+
+    #[test]
+    fn disabled_reads_nothing() {
+        let root = Root::new(T0);
+        root.required();
+        write_pressure(&root, &[("cpu", SOME), ("memory", SOME), ("io", SOME)]);
+        let stats = crate::collect::linux::Collector::new(5.0, [false, false, false]).collect().ok().unwrap().stats;
+        assert!(stats.get("pressure").is_none() && stats.get("collectors").unwrap().get("pressure").is_none());
+        root.at(T0);
+        let stats = crate::collect::linux::Collector::new(5.0, [false, false, true]).collect().ok().unwrap().stats;
+        assert_eq!(stats.get("collectors").unwrap().get("pressure").unwrap().get("state").unwrap().to_string(false), r#""ok""#);
+    }
+
+    #[test]
+    fn real_host_pressure() {
+        let mut g = Group::new("pressure", false);
+        let (out, span) = pressure(&mut g);
+        let Some(Value::Obj(resources)) = out.get("resources") else { panic!("no resources") };
+        if !std::path::Path::new(PRESSURE).is_dir() {
+            assert!(resources.is_empty());
+            return; // no /proc/pressure on this host (PSI not built in or disabled)
+        }
+        assert!(span.is_some() && resources.iter().all(|(k, _)| ["cpu", "memory", "io"].contains(&k.as_str())));
+        for (_, r) in resources {
+            let Some(Value::Float(avg)) = r.get("some").and_then(|s| s.get("avg10")) else { panic!("avg10") };
+            assert!((0.0..=100.0).contains(avg));
+        }
     }
 
     #[test]
