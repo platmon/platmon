@@ -1403,6 +1403,58 @@ mod tests {
         }
     }
 
+    // tests/collector/test_network_integration.py, ported: the network in the collection. Its checks in the
+    // Sampler are runtime_fixture.py's provenance scenario.
+    #[test]
+    fn network_on_unless_disabled_and_never_read_when_off() {
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        h.root.required();
+        h.root.at(T0);
+        let stats = crate::collect::linux::Collector::new(5.0, [false, false, false]).collect().ok().unwrap().stats;
+        assert!(stats.get("network").is_none() && stats.get("collectors").unwrap().get("network").is_none());
+        let mut c = crate::collect::linux::Collector::new(5.0, [true, false, false]);
+        assert_eq!(c.network.as_ref().unwrap().max_gap, Some(5 * S));
+        h.root.at(T0);
+        let stats = c.collect().ok().unwrap().stats;
+        assert_eq!(stats.get("network").unwrap().get("read").unwrap().to_string(false), "null"); // no read time outside the Sampler
+        assert_eq!(stats.get("collectors").unwrap().get("network").unwrap().get("state").unwrap().to_string(false), r#""ok""#);
+    }
+
+    #[test]
+    fn a_core_failure_reads_no_network() {
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        h.root.required();
+        h.root.put("/proc/meminfo", "garbage");
+        fake::answers(NET_DEV, vec![Err(libc::EIO)]);
+        h.root.at(T0);
+        assert!(crate::collect::linux::Collector::new(5.0, [true, false, false]).collect().is_err());
+        assert!(sysfs::fake::answer_left(NET_DEV)); // the collection failed before the network part: nothing read
+    }
+
+    #[test]
+    fn a_lasting_failure_is_logged_once() {
+        let mut logged = Vec::new();
+        let mut g = Group::new("network", false);
+        g.note("net_dev", "permission_denied", Some("/proc/self/net/dev: Permission denied".into()));
+        crate::metadata::summarize(std::slice::from_ref(&g), &mut logged);
+        let first = logged.clone();
+        crate::metadata::summarize(std::slice::from_ref(&g), &mut logged); // the same details: not logged again
+        assert_eq!(logged, first);
+        assert_eq!(logged, [("network".to_string(), vec!["net_dev: permission_denied (/proc/self/net/dev: Permission denied)".to_string()])]);
+        crate::metadata::summarize(&[Group::new("network", false)], &mut logged); // readable again: logged once, then quiet
+        assert_eq!(logged, [("network".to_string(), vec![])]);
+    }
+
+    #[test]
+    fn real_service_reading() {
+        let mut c = crate::collect::linux::Collector::new(5.0, [true, false, false]);
+        let col = c.collect().ok().unwrap();
+        assert!(col.passive[0].is_some()); // the read the Sampler checks
+        if std::path::Path::new(NET_DEV).exists() {
+            assert!(iface_names(col.stats.get("network").unwrap()).contains(&r#""lo""#.to_string()));
+        }
+    }
+
     #[test]
     fn pressure_lines() {
         let ok = parse_pressure("some avg10=0.12 avg60=1.00 avg300=0.00 total=123\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n");

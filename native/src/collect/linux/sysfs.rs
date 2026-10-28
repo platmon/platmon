@@ -351,6 +351,11 @@ pub mod fake {
         ANSWERS.with(|a| a.borrow_mut().push((path.to_string(), answers.into_iter().map(|r| r.map(|t| t.as_bytes().to_vec())).collect())));
     }
 
+    /// Whether path still has an answer that no read used.
+    pub fn answer_left(path: &str) -> bool {
+        ANSWERS.with(|a| a.borrow().iter().any(|(p, q)| p == path && !q.is_empty()))
+    }
+
     pub(super) fn answer(path: &str) -> Option<std::io::Result<Vec<u8>>> {
         ANSWERS.with(|a| {
             let mut a = a.borrow_mut();

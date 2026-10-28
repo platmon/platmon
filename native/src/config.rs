@@ -497,4 +497,17 @@ mod tests {
         }
         let _ = std::fs::remove_file(&path);
     }
+
+    #[test]
+    fn network_section() {
+        // tests/collector/test_network_integration.py: on by default; a bad value and an unknown key refused
+        assert!(load(None, None).ok().unwrap().flag("network", "enabled"));
+        let path = std::env::temp_dir().join(format!("platmon-native-network-{}.ini", std::process::id()));
+        for (text, error) in [("[network]\nenabled = maybe\n", "is not a valid bool"), ("[network]\ninterval = 5\n", "unknown key")] {
+            std::fs::write(&path, text).unwrap();
+            let e = load(Some(path.to_str().unwrap()), None).err().unwrap();
+            assert!(e.contains(error), "{}: {}", text, e);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 }
