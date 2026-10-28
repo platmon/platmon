@@ -41,11 +41,24 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
           SERVER: native/target/x86_64-unknown-linux-musl/release/platmon-native
+        # --record also rewrites the Python service's recorded answers (native/tools/golden.py): they must
+        # come out as committed, so the recorded answers the server is compared with stay the Python service's.
         run: |
-          python3 native/tools/config_fixture.py "$SERVER"
-          python3 native/tools/runtime_fixture.py "$SERVER"
-          native/tools/fixture.sh
+          python3 native/tools/config_fixture.py "$SERVER" --record native/tools/golden/config.json
+          python3 native/tools/runtime_fixture.py "$SERVER" --record native/tools/golden/runtime
+          native/tools/fixture.sh --record
+          git status --porcelain -- native/tools/golden
+          git diff --stat -- native/tools/golden
+          git diff -U0 -- native/tools/golden | cut -c1-2000 | head -n 40
+          test -z "$(git status --porcelain -- native/tools/golden)"
           python3 native/tools/live_http.py "$SERVER"
+      - name: Compare with the recorded answers alone
+        env:
+          SERVER: native/target/x86_64-unknown-linux-musl/release/platmon-native
+        run: |
+          python3 native/tools/config_fixture.py "$SERVER" --golden native/tools/golden/config.json
+          python3 native/tools/runtime_fixture.py "$SERVER" --golden native/tools/golden/runtime
+          native/tools/fixture.sh --golden
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server

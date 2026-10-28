@@ -11,11 +11,15 @@ collections must be equal, and both sides must exit with 0 at the end. A failed 
 collector's {"error"} answer; exiting, not answering in time or writing something else is a broken side,
 never a match. Error messages are not compared. Exit 1 on any difference.
 
+With --record DIR, each scenario's Python answers are also written to DIR/<scenario>.jsonl; with --golden DIR,
+those recorded answers stand in for the Python side (golden.py). The probe's ports are fixed and fixture.sh
+fixes the host name and the tmpfs sizes, so that a recording depends on the tree alone.
+
 Before the scenarios, the harness is run against fake sides that read no tree (CONTROLS): equal ones must
 pass, and both sides failing where a collection is expected, a nonzero exit, a hang (also after part of an
 answer, or an answer completed after the timeout), garbage or an oversized line must fail.
 
-  fixture.py BINARY [SCENARIO ...]
+  fixture.py BINARY [--record DIR | --golden DIR] [SCENARIO ...]
   fixture.py --self-test          # the controls only; needs no container"""
 import fcntl
 import json
@@ -27,6 +31,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+import golden
 
 FX = "/fx"            # tmpfs; FX/sys is mounted at /sys and FX/proc at /proc
 HOST = "/fxhost"      # PLATMON_HOST_ROOT: os-release, nv_tegra_release; statvfs reads this tmpfs
@@ -542,6 +548,7 @@ def passive_failure_steps():
 # The slow groups: storage, Wi-Fi, battery and the TCP probe. Mount points are real directories of the
 # container's own tmpfs mounts (/fx, /fxhost), so the fake mountinfo can give their real device numbers.
 PROBE = {}
+PROBE_PORTS = (39797, 39798)  # listening, and bound but not listening (refused)
 DEVICES = "devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block"
 
 
@@ -646,10 +653,10 @@ def slow_tree():
     supply("USB0", type="USB", online="x")
     supply("NOTYPE", online=1)
     listen = socket.socket()
-    listen.bind(("127.0.0.1", 0))
+    listen.bind(("127.0.0.1", PROBE_PORTS[0]))  # fixed: the container has its own network namespace
     listen.listen(64)
     closed = socket.socket()
-    closed.bind(("127.0.0.1", 0))
+    closed.bind(("127.0.0.1", PROBE_PORTS[1]))
     PROBE.update(listen=listen, closed=closed, targets=f"127.0.0.1:{listen.getsockname()[1]}, "
                  f"127.0.0.1:{closed.getsockname()[1]}, 192.0.2.1:80, [::1]:{closed.getsockname()[1]}")
 
@@ -692,6 +699,7 @@ def slow_steps():
 # nvidia-smi: a fake on the collectors' PATH, found when they start. Each query runs the shell text a step
 # left in NV_DO (cat an answer, sleep past the 0.5 s limit, exit nonzero, die by a signal); the fake logs
 # its arguments and refuses any but the collectors' query.
+SIDES = {"collecting": 2}  # 1 when the Python side is replayed (run's mode "golden")
 NV_BIN, NV_DO, NV_OUT, NV_CALLS = "/usr/bin/nvidia-smi", f"{HOST}/nvidia/do", f"{HOST}/nvidia/out", "/tmp/nvidia-calls"
 NV_ARGS = "--query-gpu=uuid,utilization.gpu,clocks.current.graphics,clocks.max.graphics --format=csv,noheader,nounits"
 NV_FAKE = f"""#!/bin/sh
@@ -729,7 +737,9 @@ def leftovers():
 
 
 def calls(n):
-    """Problems unless the fake was run n times, each with the query's arguments."""
+    """Problems unless the fake was run n times by each side that collects (a replayed one runs nothing),
+    each with the query's arguments."""
+    n *= SIDES["collecting"]
     lines = open(NV_CALLS).read().splitlines() if os.path.exists(NV_CALLS) else []
     wrong = [x for x in lines if x != NV_ARGS]
     return ([f"nvidia-smi run {len(lines)} times, {n} expected"] if len(lines) != n else []) + \
@@ -761,9 +771,9 @@ def nvidia_steps():
         nv(do="kill -9 $$\n")
         return problems
 
-    def checked():  # 23 steps before this one, 21 of them ran the fake on both sides
+    def checked():  # 23 steps before this one, 21 of them ran the fake on each side
         nv("GPU-aaaa-1, 51, 901, 1980\n")
-        return leftovers() + calls(2 * 21)
+        return leftovers() + calls(21)
 
     answers = [  # label, answer; each its own step, 1 s apart
         ("N/A and not supported", "GPU-aaaa-1, [N/A], [Not Supported], N/A \n"),
@@ -807,7 +817,7 @@ def nvidia_alone_tree():
 def nvidia_alone_steps():
     return [("two GPUs", None, 10 * S, OK), ("exit 3: no GPU entry", lambda: nv(do="exit 3\n"), 11 * S, OK),
             ("nothing detected", lambda: nv("", None), 12 * S, OK), ("back", lambda: nv(TWO_GPUS), 13 * S, OK),
-            ("checked", lambda: leftovers() + calls(2 * 4), 14 * S, OK)]
+            ("checked", lambda: leftovers() + calls(4), 14 * S, OK)]
 
 
 def nvidia_drm_first_tree():
@@ -961,10 +971,11 @@ def states(a):
     return out
 
 
-def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
+def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT, record=None):
     """Runs the steps on both sides: (differences, report lines). A step passes only when both sides gave
     what it expects (a collection, or a failed collection) and, for collections, the same one; and the run
-    only when both sides then exit with 0. A side that breaks ends the run."""
+    only when both sides then exit with 0. A side that breaks ends the run. record: a golden.Recorder for
+    the Python side's answers."""
     logs = {n: tempfile.TemporaryFile("w+") for n in ("python", "rust")}
     procs = {"python": start(py_cmd, logs["python"]), "rust": start(rs_cmd, logs["rust"])}
     report, problems, got = [], 0, {OK: 0, FAILS: 0}
@@ -977,6 +988,8 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
                 res[n] = step(p, base, wall, timeout)
             except Broken as e:
                 out.append(f"{n}: {e}")
+        if record is not None and "python" in res:
+            record.add(f"{base} {wall}", res["python"])
         for n, r in res.items():
             if ("error" in r) != (expect == FAILS):
                 out.append(f"{n}: expected {expect}, got " + (f"an error: {r['error']!r}" if "error" in r else "a collection"))
@@ -1011,16 +1024,27 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
     return problems, report
 
 
-def run(name, binary):
+def run(name, binary, mode=None, directory=None):
+    """One scenario; mode "record" also writes the Python answers to directory, "golden" replays them."""
     tree, steps = SCENARIOS[name]
     steps = steps()
     clear()
     tree()
     if name == "slow":  # the slow groups' readers, with the probe's targets the tree opened
         args = [PROBE["targets"], "0.5"]
-        problems, report = compare(steps, ["python3", f"{HERE}/observe_py.py", *args], [binary, "observe-script", *args])
+        py_cmd, rs_cmd = ["python3", f"{HERE}/observe_py.py", *args], [binary, "observe-script", *args]
     else:
-        problems, report = compare(steps, ["python3", f"{HERE}/fixture_py.py"], [binary, "script"])
+        py_cmd, rs_cmd = ["python3", f"{HERE}/fixture_py.py"], [binary, "script"]
+    path = directory and os.path.join(directory, f"{name}.jsonl")
+    SIDES["collecting"] = 1 if mode == "golden" else 2
+    if mode == "golden":
+        py_cmd = ["python3", f"{HERE}/golden.py", path]
+    record = golden.Recorder(path, fake_tree=True) if mode == "record" else None
+    try:
+        problems, report = compare(steps, py_cmd, rs_cmd, record=record)
+    finally:
+        if record is not None:
+            record.close()
     print(f"{name}: {'OK' if not problems else 'FAILED'}")
     print("\n".join(report))
     return problems
@@ -1094,8 +1118,11 @@ def main():
         sys.exit(0 if self_test() else 1)
     if not self_test():
         sys.exit(1)
-    binary, names = sys.argv[1], sys.argv[2:] or list(SCENARIOS)
-    failed = sum(run(n, binary) > 0 for n in names)
+    binary, args, mode, directory = sys.argv[1], sys.argv[2:], None, None
+    if args[:1] in (["--record"], ["--golden"]):
+        mode, directory, args = args[0][2:], os.path.abspath(args[1]), args[2:]
+    names = args or list(SCENARIOS)
+    failed = sum(run(n, binary, mode, directory) > 0 for n in names)
     print(f"{len(names) - failed}/{len(names)} scenarios equal")
     sys.exit(1 if failed else 0)
 
