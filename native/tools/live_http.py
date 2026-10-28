@@ -28,7 +28,8 @@ Per server:
 - a request line cut off: the connection closed after the 10 s request timeout
 - 200 connections at once: handler threads stay within 32 more than before, the server answers again
   once they close, and its threads go back (which connections were refused is not compared: timing)
-- a restart: the previous instance's cursor gets 409 instance_changed with the new instance id
+- a restart: SIGTERM ends the server at once with exit code 0; the previous instance's cursor gets 409
+  instance_changed with the new instance id
 Exit 1 on any difference or failed check."""
 import concurrent.futures as concurrent_futures
 import configparser
@@ -393,12 +394,15 @@ def start(name, binary, port, interval, log):
 
 
 def stop(p):
+    """SIGTERM, as systemd and docker stop send it: (exit code, seconds to exit); killed after 5 s."""
+    t0 = time.monotonic()
     p.terminate()
     try:
-        p.wait(5)
+        code = p.wait(5)
     except subprocess.TimeoutExpired:
         p.kill()
-        p.wait()
+        code = f"{p.wait()} (killed: still running 5 s after SIGTERM)"
+    return code, round(time.monotonic() - t0, 2)
 
 
 def version():
@@ -418,7 +422,7 @@ def main():
     binary, interval = os.path.abspath(sys.argv[1]), 1.0
     ports = {"python": free_port(), "rust": free_port()}
     logs = {n: tempfile.TemporaryFile("w+") for n in ports}
-    procs, restarted = {}, {}
+    procs, restarted, stopped = {}, {}, {}
     try:
         for n in ports:
             procs[n] = start(n, binary, ports[n], interval, logs[n])
@@ -432,7 +436,7 @@ def main():
             t.start()
         res = {n: t.result(300) for n, t in threads.items()}  # what a check raised ends the run here, by name
         for n in ports:  # a restart: the old cursor is refused, never mixed with the new process's ids
-            stop(procs[n])
+            stopped[n] = stop(procs[n])
             procs[n] = start(n, binary, ports[n], interval, logs[n])
         deadline = time.monotonic() + 15
         for n, port in ports.items():
@@ -495,6 +499,9 @@ def main():
         b = r["burst"]
         if b["threads_peak"] > b["threads_before"] + 34 or b["code"] != 200 or b["threads_after"] > b["threads_before"] + 2:
             out.append(f"{n}: burst: {b}")
+        code, seconds = stopped[n]
+        if code != 0 or seconds >= 2:  # a stop exits at once, with status 0
+            out.append(f"{n}: SIGTERM: exit {code} after {seconds} s")
         rs_ = restarted[n]
         if rs_["code"] != 409 or rs_["body"].get("code") != "instance_changed" or rs_["body"].get("instance_id") == r["replay"]["instance"]:
             out.append(f"{n}: after a restart: {rs_}")
@@ -504,7 +511,7 @@ def main():
               "groups": {n: {g: o["state"] for g, o in r["bodies"]["/api/observations"]["groups"].items()} for n, r in res.items()},
               "history_series": {n: len(b["series"]) for n, b in h.items()},
               "codes": {p: [py["endpoints"][p]["code"], rs["endpoints"][p]["code"]] for p in PATHS},
-              "raw": py["raw"], "known": {n: r["known"] for n, r in res.items()}, "restart": {n: r["code"] for n, r in restarted.items()},
+              "raw": py["raw"], "known": {n: r["known"] for n, r in res.items()}, "restart": {n: r["code"] for n, r in restarted.items()}, "stop": stopped,
               **{n: {k: r[k] for k in ("replay", "concurrent", "connection_limit", "request_timeout", "burst")} for n, r in res.items()},
               "differences": out}
     if "--json" in sys.argv:

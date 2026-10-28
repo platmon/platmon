@@ -510,4 +510,123 @@ mod tests {
         }
         let _ = std::fs::remove_file(&path);
     }
+
+    // tests/runtime/test_platmon.py, ported: the configuration platmon.py read, as config-check and serve read it.
+    fn ini(text: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!("platmon-native-cfg-{}-{}.ini", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    fn load_text(text: &str, frontends: Option<&[&str]>) -> Result<Config, String> {
+        let path = ini(text);
+        let out = load(Some(path.to_str().unwrap()), frontends);
+        let _ = std::fs::remove_file(&path);
+        out
+    }
+
+    const FEATURES: [&str; 7] = ["network", "disk_io", "storage", "wifi", "pressure", "probe", "history"];
+
+    #[test]
+    fn defaults() {
+        let cfg = load(None, None).ok().unwrap();
+        assert!(cfg.flag("http", "enabled") && cfg.int("http", "port") == 9797 && cfg.flag("http", "web"));
+        assert_eq!(cfg.float("core", "interval"), 1.0);
+        assert!(FEATURES.iter().all(|f| cfg.flag(f, "enabled")));
+    }
+
+    #[test]
+    fn explicit_disabled_features_override_defaults() {
+        let cfg = load_text(&FEATURES.iter().map(|f| format!("[{}]\nenabled = no\n", f)).collect::<String>(), None).ok().unwrap();
+        assert!(FEATURES.iter().all(|f| !cfg.flag(f, "enabled")));
+    }
+
+    #[test]
+    fn file_overrides_defaults() {
+        let cfg = load_text("[http]\nport = 9000\nweb = no\n", None).ok().unwrap();
+        assert!(cfg.int("http", "port") == 9000 && !cfg.flag("http", "web") && cfg.flag("http", "enabled"));
+        assert_eq!(cfg.text("http", "bind"), "0.0.0.0"); // untouched keys keep their default
+    }
+
+    #[test]
+    fn frontends_flag_enables_exactly_those() {
+        assert!(load_text("[http]\nenabled = no\n", Some(&["http"])).ok().unwrap().flag("http", "enabled"));
+    }
+
+    #[test]
+    fn rejects_bad_config() {
+        let cases: &[(&str, Option<&[&str]>, Option<&str>)] = &[
+            ("[htpp]\nport = 1\n", None, Some("unknown config section")), // typos must not be silently ignored
+            ("[http]\nprot = 9000\n", None, Some("[http] unknown key(s): prot")),
+            ("", Some(&["web"]), Some("unknown frontend")),
+            ("", Some(&["terminal"]), Some("unknown frontend")),
+            ("[terminal]\nenabled = no\n", None, Some("[terminal] is no longer supported: ")), // says to use the platmon command
+            ("[http]\nport = abc\n", None, Some("port = 'abc' is not a valid int")),
+            ("[http]\nenabled = maybe\n", None, Some("is not a valid bool")),
+            ("[http]\nport = 70000\n", None, Some("out of range")),
+            ("[core]\ninterval = 0\n", None, Some("out of range")), // 0 would make the sampler spin
+            ("[http]\nenabled = no\n", None, Some("nothing to run: every output is disabled; set enabled = yes in [http]")),
+            ("", Some(&[]), Some("nothing to run")), // --frontends with no name
+            ("[core]\ninterval = -1\n", None, Some("out of range")),
+            ("port = 1\n", None, Some("cannot parse config")), // no section header
+            ("[http]\nbind = 10%\n", Some(&["http"]), None), // % is literal, not interpolation
+            ("[thresholds]\ncpu = 80\n", None, Some("[thresholds] cpu = '80': give two numbers")),
+            ("[thresholds]\ncpu = 80, 90, 95\n", None, Some("give two numbers")),
+            ("[thresholds]\nmemory = high, 90\n", None, Some("give two numbers")),
+            ("[thresholds]\ngpu = 90, 80\n", None, Some("need 0 < warning < critical <= 100")),
+            ("[thresholds]\nfilesystem = 80, 101\n", None, Some("<= 100")),
+            ("[thresholds]\ncpu = nan, 90\n", None, Some("need 0 < warning")),
+            ("[thresholds]\ntemperature = 0, 90\n", None, Some("<= 150")),
+            ("[thresholds]\ntemperature = 85, 151\n", None, Some("<= 150")),
+            ("[thresholds]\nswap = 80, 90\n", None, Some("[thresholds] unknown key(s): swap")),
+            ("[thresholds]\ntemperature = 70.5, 82\n", None, None),
+            // battery and Wi-Fi: the low reading is the bad one, so warning above critical
+            ("[thresholds]\nbattery = 10, 20\n", None, Some("battery = '10, 20': a low reading is the bad one, so need 100% > warning > critical > 0%")),
+            ("[thresholds]\nbattery = 20, 0\n", None, Some("> 0%")),
+            ("[thresholds]\nbattery = 100, 10\n", None, Some("100% > warning")),
+            ("[thresholds]\nbattery = 20\n", None, Some("give two numbers, warning then critical, e.g. 20, 10")),
+            ("[thresholds]\nwifi = -80, -70\n", None, Some("need 0 dBm > warning > critical > -120 dBm")),
+            ("[thresholds]\nwifi = -70, -121\n", None, Some("> -120 dBm")),
+            ("[thresholds]\nwifi = 5, -80\n", None, Some("0 dBm > warning")),
+            ("[thresholds]\nwifi = nan, -80\n", None, Some("need 0 dBm")),
+            ("[thresholds]\nbattery = 30.5, 5\nwifi = -65, -85\n", None, None)];
+        for (text, frontends, error) in cases {
+            match (load_text(text, *frontends), error) {
+                (Ok(_), None) => {}
+                (Err(e), Some(want)) => assert!(e.contains(want), "{:?}: {}", text, e),
+                (Ok(_), Some(want)) => panic!("{:?} loaded, expected {}", text, want),
+                (Err(e), None) => panic!("{:?}: {}", text, e),
+            }
+        }
+    }
+
+    #[test]
+    fn levels_and_the_board_temperature() {
+        // defaults: percent levels, no temperature (the board's is filled in); the file overrides them
+        assert_eq!(load(None, None).ok().unwrap().value(None).get("levels").unwrap().to_string(false),
+                   r#"{"cpu":[80.0,90.0],"gpu":[80.0,90.0],"memory":[80.0,90.0],"filesystem":[80.0,90.0],"temperature":null,"battery":[20.0,10.0],"wifi":[-70.0,-80.0]}"#);
+        let cfg = load_text("[thresholds]\nmemory = 70, 85\ntemperature = 70.5, 82\n", None).ok().unwrap();
+        let l = cfg.value(None).get("levels").unwrap().clone();
+        assert_eq!([l.get("memory"), l.get("temperature"), l.get("cpu")].map(|v| v.unwrap().to_string(false)), ["[70.0,85.0]", "[70.5,82.0]", "[80.0,90.0]"]);
+        for (platform, expected) in [("Jetson Orin", "[85.0,95.0]"), ("Raspberry Pi", "[75.0,80.0]"), ("Jetson Xavier", "[80.0,90.0]"), ("PC", "[80.0,90.0]"), ("Linux", "[80.0,90.0]")] {
+            assert_eq!(levels_for(&load(None, None).ok().unwrap(), platform).get("temperature").unwrap().to_string(false), expected);
+            let set = load_text("[thresholds]\ntemperature = 60, 70\n", None).ok().unwrap(); // a configured one wins
+            assert_eq!(levels_for(&set, platform).get("temperature").unwrap().to_string(false), "[60.0,70.0]");
+        }
+    }
+
+    #[test]
+    fn missing_file() {
+        assert!(load(Some("/nonexistent/platmon.ini"), None).err().unwrap().contains("cannot read"));
+    }
+
+    #[test]
+    fn replay_config_bounds() {
+        for text in ["[replay]\nretention = 0\n", "[replay]\nretention = nan\n", "[replay]\nretention = 3601\n", "[replay]\nmax_bytes = 1048575\n",
+                     "[replay]\nmax_bytes = 67108865\n", "[replay]\nmax_bytes = 1.5\n", "[replay]\nenabled = maybe\n"] {
+            assert!(load_text(text, None).is_err(), "{:?}", text);
+        }
+    }
 }
