@@ -328,3 +328,508 @@ pub fn collect(cpu: &mut CpuCounters, g: &mut Groups, req: &mut Required) -> Res
     s.set("power", Value::Obj(power));
     Ok((s, fans))
 }
+
+// tests/collector/test_common.py, ported (docs/development/python-test-port.md): /proc/stat, board detection,
+// thermal zones, hwmon and the groups' rules for what could not be read. CpuCounters: collect/mod.rs.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::collect::linux::sysfs::fake::{self, Root};
+
+    fn hwmon(root: &Root, chips: &[&[(&str, &str)]]) {
+        for (i, files) in chips.iter().enumerate() {
+            root.mkdir(&format!("/sys/class/hwmon/hwmon{}", i));
+            for (name, value) in *files {
+                root.put(&format!("/sys/class/hwmon/hwmon{}/{}", i, name), value);
+            }
+        }
+    }
+
+    type Read = (String, String, String, Groups);
+
+    /// hwmon_sensors as (temps, power, fans) JSON and the groups.
+    fn sensors(skip: &[&str], skip_devices: &[&str]) -> Read {
+        let mut g = Groups::new(false);
+        let (t, p, f) = hwmon_sensors(&skip.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                                      &skip_devices.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &mut g);
+        (Value::Obj(t).to_string(false), Value::Obj(p).to_string(false), fans_json(&f), g)
+    }
+
+    fn fans_json(f: &[Fan]) -> String {
+        Value::Arr(f.iter().map(|f| {
+            let mut v = Value::obj();
+            v.set("name", f.name.as_str().into());
+            v.set("rpm", f.rpm.into());
+            v.set("percent", f.percent.into());
+            v
+        }).collect()).to_string(false)
+    }
+
+    fn zones() -> (String, Vec<String>, Vec<String>, Group) {
+        let mut g = Group::new("temperature", false);
+        let (t, types, paths) = thermal_zones(&mut g);
+        (Value::Obj(t).to_string(false), types, paths, g)
+    }
+
+    fn status(g: &Group) -> String {
+        g.status().to_string(false)
+    }
+
+    const OK: &str = r#"{"state":"ok","reason":null,"issues":[],"issues_truncated":0}"#;
+
+    fn issue(state: &str, target: &str, reason: &str) -> String {
+        let r = if state == "partial" { r#""some_unreadable""#.to_string() } else { format!("{:?}", reason) };
+        format!(r#"{{"state":"{}","reason":{},"issues":[{{"target":"{}","reason":"{}"}}],"issues_truncated":0}}"#, state, r, target, reason)
+    }
+
+    #[test]
+    fn cpu_times_rejects_broken_readings() {
+        for text in ["cpu  1 2 3 4 5 6 7 8\nintr 0\n", // the total line only: not "0 CPUs"
+                     "cpu0 1 2 3 4 5 6 7 8\ncpu2 1 x 3 4 5 6 7 8\n", "cpu0\n", "cpu0 1 0 0 1\n",
+                     "cpu0 1 2 3 4 5 6 7 8\ncpu1 1 2 3 4 5 6 7"] { // the last line short, no newline
+            let root = Root::new(0);
+            root.put("/proc/stat", text);
+            assert!(cpu_times().is_err(), "{:?}", text);
+        }
+    }
+
+    #[test]
+    fn cpu_times_reads_eight_or_more_counters() {
+        let root = Root::new(0);
+        root.put("/proc/stat", "cpu  9 9 9 9 9 9 9 9 9 9\ncpu0 1 2 3 4 5 6 7 8\ncpu1 1 2 3 4 5 6 7 8 9 10\nctxt 5\n");
+        let t = cpu_times().unwrap();
+        assert_eq!(t.into_iter().collect::<Vec<_>>(), [(0, vec![1, 2, 3, 4, 5, 6, 7, 8]), (1, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10])]);
+    }
+
+    #[test]
+    fn a_broken_reading_is_not_a_baseline() {
+        for first_ok in [true, false] {
+            let root = Root::new(0);
+            let mut c = CpuCounters::new(Some(5.0), "interval");
+            let mut sample = |line: &str, t: i64| {
+                root.put("/proc/stat", format!("cpu  0 0 0 0 0 0 0 0\n{}\n", line));
+                crate::metadata::set_clocks(t * 1_000_000_000, 0);
+                c.sample(cpu_times).map(|(u, s)| (u, s.to_string(false)))
+            };
+            if first_ok {
+                assert!(sample("cpu0 0 0 0 0 0 0 0 0", 1).unwrap().1.contains("warmup"));
+            }
+            assert!(sample("cpu0 1 0 0 1", 2).is_err());
+            assert_eq!(sample("cpu0 2 0 0 2 0 0 0 0", 3).unwrap(), (vec![], r#"{"mode":"interval","window_ms":null,"unavailable":[{"id":0,"reason":"warmup"}]}"#.into()));
+            assert_eq!(sample("cpu0 3 0 0 3 0 0 0 0", 4).unwrap(), (vec![(0, 50.0)], r#"{"mode":"interval","window_ms":1000.0,"unavailable":[]}"#.into()));
+        }
+    }
+
+    #[test]
+    fn detect_the_board() {
+        for (compatible, dmi, platform, jetson) in [(Some(&b"nvidia,p3767-0005\0nvidia,tegra234"[..]), false, "Jetson Orin", true),
+                                                    (Some(b"raspberrypi,5-model-b\0brcm,bcm2712"), false, "Raspberry Pi", false),
+                                                    (None, true, "PC", false), (Some(b"rockchip,rk3588"), false, "Linux", false)] {
+            let root = Root::new(0);
+            if let Some(c) = compatible {
+                root.put("/proc/device-tree/compatible", c);
+            }
+            if dmi {
+                root.mkdir("/sys/class/dmi/id");
+            }
+            let (p, board) = super::super::detect();
+            assert_eq!((p, board == super::super::Board::Jetson), (platform, jetson));
+        }
+    }
+
+    #[test]
+    fn host_paths_from_the_host_root() {
+        // the device tree and the host's /etc as the container's bind mounts would show them (here: the tree)
+        let root = Root::new(0);
+        root.required();
+        root.put("/proc/device-tree/compatible", b"nvidia,p3767-0005\0nvidia,tegra234\0");
+        root.put("/proc/device-tree/model", b"Test Board\0");
+        root.put("/usr/lib/os-release", "NAME=\"Ubuntu\"\nPRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\n");
+        root.link("/etc/os-release", "../usr/lib/os-release"); // relative, as on Ubuntu/Debian
+        root.put("/etc/nv_tegra_release", "# R36 (release), REVISION: 5.2, GCID: 1, BOARD: generic\n");
+        let mut c = super::super::Collector::new(5.0, [false; 3]);
+        let stats = c.collect().ok().unwrap().stats;
+        assert_eq!((c.platform, stats.get("model").unwrap().to_string(false)), ("Jetson Orin", r#""Test Board""#.into()));
+        let sys = stats.get("system").unwrap();
+        assert_eq!((sys.get("os").unwrap().to_string(false), sys.get("l4t").unwrap().to_string(false)), (r#""Ubuntu 22.04.5 LTS""#.into(), r#""R36.5.2""#.into()));
+        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        let p = std::ffi::CString::new(root.dir.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::statvfs(p.as_ptr(), &mut st) }, 0);
+        assert_eq!(stats.get("disk").unwrap().get("total").unwrap().to_string(false), (st.f_blocks * st.f_frsize).to_string());
+    }
+
+    #[test]
+    fn os_release_names() {
+        assert_eq!(os_release(Some("NAME=\"Ubuntu\"\nVERSION=\"22.04.5 LTS (Jammy Jellyfish)\"\nPRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\n")).as_deref(), Some("Ubuntu 22.04.5 LTS"));
+        assert_eq!(os_release(Some("NAME='Raspbian GNU/Linux'\nVERSION='12 (bookworm)'\n")).as_deref(), Some("Raspbian GNU/Linux 12 (bookworm)")); // no PRETTY_NAME
+        assert_eq!(os_release(Some("# comment only\n")), None);
+        assert_eq!(os_release(None), None); // file missing
+    }
+
+    #[test]
+    fn hwmon_rails_and_pwm_only_fan() {
+        let root = Root::new(0); // ina3221 rails, the unlabeled sum channel ignored, a pwm fan without tach, rpm left to boards
+        hwmon(&root, &[&[("name", "pwmfan"), ("pwm1", "76")],
+                       &[("name", "ina3221"), ("in1_label", "VDD_IN"), ("in1_input", "5000"), ("curr1_input", "1200"), ("in4_input", "6400"), ("curr4_input", "2416")],
+                       &[("name", "pwm_tach"), ("rpm", "1636")]]);
+        let (t, p, f, _) = sensors(&[], &[]);
+        assert_eq!((t, p, f), ("{}".into(), r#"{"VDD_IN":6.0}"#.into(), r#"[{"name":"pwmfan","rpm":null,"percent":30}]"#.into()));
+    }
+
+    #[test]
+    fn hwmon_pc() {
+        let root = Root::new(0); // acpitz skipped (already a thermal zone), duplicate nvme labels kept apart, a fan with pwm
+        hwmon(&root, &[&[("name", "acpitz"), ("temp1_input", "27800")], &[("name", "coretemp"), ("temp1_label", "Package id 0"), ("temp1_input", "45000")],
+                       &[("name", "nvme"), ("temp1_label", "Composite"), ("temp1_input", "38850")], &[("name", "nvme"), ("temp1_label", "Composite"), ("temp1_input", "41850")],
+                       &[("name", "nct6775"), ("fan2_input", "950"), ("pwm2", "128"), ("power1_input", "12500000")]]);
+        let (t, p, f, _) = sensors(&["acpitz"], &[]);
+        assert_eq!(t, r#"{"coretemp Package id 0":45.0,"nvme Composite":38.85,"nvme Composite (hwmon3)":41.85}"#);
+        assert_eq!((p, f), (r#"{"nct6775 power1":12.5}"#.into(), r#"[{"name":"nct6775 fan2","rpm":950,"percent":50}]"#.into()));
+    }
+
+    #[test]
+    fn hwmon_twin_of_a_zone_is_skipped_by_its_path() {
+        let root = Root::new(0); // the twin is named after the zone (acpitz_0), not its type: only its path can skip it
+        for (n, (zt, milli, twin)) in [("acpitz", "54000", "acpitz_0"), ("iwlwifi_1", "41000", "iwlwifi_1_8")].iter().enumerate() {
+            let z = format!("/sys/devices/virtual/thermal/thermal_zone{}", n);
+            root.put(&format!("{}/type", z), zt);
+            root.put(&format!("{}/temp", z), milli);
+            root.link(&format!("/sys/class/thermal/thermal_zone{}", n), &format!("../../devices/virtual/thermal/thermal_zone{}", n));
+            root.put(&format!("{}/hwmon{}/name", z, n), twin); // the twin sits inside the zone's own directory
+            root.put(&format!("{}/hwmon{}/temp1_input", z, n), milli);
+            root.link(&format!("/sys/class/hwmon/hwmon{}", n), &format!("../../devices/virtual/thermal/thermal_zone{}/hwmon{}", n, n));
+        }
+        root.put("/sys/devices/platform/coretemp.0/hwmon/hwmon9/name", "coretemp"); // real hardware, not a twin
+        root.put("/sys/devices/platform/coretemp.0/hwmon/hwmon9/temp1_input", "58000");
+        root.link("/sys/class/hwmon/hwmon9", "../../devices/platform/coretemp.0/hwmon/hwmon9");
+        let (t, types, paths, _) = zones();
+        assert_eq!(t, r#"{"acpitz":54.0,"iwlwifi_1":41.0}"#);
+        assert_eq!(types, ["acpitz", "iwlwifi_1"]); // neither names the twin
+        assert_eq!(paths, ["devices/virtual/thermal/thermal_zone0", "devices/virtual/thermal/thermal_zone1"]);
+        let (hw, _, _, _) = sensors(&types.iter().map(String::as_str).collect::<Vec<_>>(), &paths.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(hw, r#"{"coretemp temp1":58.0}"#);
+    }
+
+    fn zone(root: &Root, n: usize, zt: &[u8], temp: &str) {
+        root.put(&format!("/sys/class/thermal/thermal_zone{}/type", n), zt);
+        root.put(&format!("/sys/class/thermal/thermal_zone{}/temp", n), temp);
+    }
+
+    #[test]
+    fn thermal_zone_types_and_paths() {
+        let root = Root::new(0);
+        for (i, (zt, t)) in [("cpu-thermal", "51200"), ("acpitz", "27800"), ("acpitz", "30000")].iter().enumerate() {
+            zone(&root, i, zt.as_bytes(), t);
+        }
+        let (t, types, paths, _) = zones();
+        assert_eq!(t, r#"{"cpu":51.2,"acpitz":27.8,"acpitz (thermal_zone2)":30.0}"#);
+        assert_eq!(types, ["cpu_thermal", "acpitz"]); // as hwmon names ("-" -> "_")
+        assert_eq!(paths.iter().map(|p| p.rsplit('/').next().unwrap()).collect::<Vec<_>>(), ["thermal_zone0", "thermal_zone1", "thermal_zone2"]);
+    }
+
+    #[test]
+    fn hwmon_same_names_kept_apart() {
+        let root = Root::new(0); // the first keeps the plain name
+        hwmon(&root, &[&[("name", "ina219"), ("power1_input", "1000000")], &[("name", "ina219"), ("power1_input", "2000000")],
+                       &[("name", "ina3221"), ("in1_label", "VDD_IN"), ("in1_input", "5000"), ("curr1_input", "1000")],
+                       &[("name", "ina3221"), ("in1_label", "VDD_IN"), ("in1_input", "5000"), ("curr1_input", "2000")]]);
+        assert_eq!(sensors(&[], &[]).1, r#"{"ina219 power1":1.0,"ina219 power1 (hwmon1)":2.0,"VDD_IN":5.0,"VDD_IN (hwmon3)":10.0}"#);
+    }
+
+    #[test]
+    fn hwmon_unreadable_fan_is_none_not_zero() {
+        let root = Root::new(0);
+        hwmon(&root, &[&[("name", "nct6775"), ("fan1_label", "CPU fan")]]);
+        root.mkdir("/sys/class/hwmon/hwmon0/fan1_input"); // exists, but reading it fails
+        assert_eq!(sensors(&[], &[]).2, r#"[{"name":"CPU fan","rpm":null,"percent":null}]"#);
+    }
+
+    #[test]
+    fn group_read_values() {
+        for (content, expected, reason) in [("0", Some(0), None), ("42000", Some(42000), None), ("", None, Some("invalid_data")), ("4x", None, Some("invalid_data"))] {
+            let root = Root::new(0); // a measured 0 is a value; an empty number is not 0
+            root.put("/v", content);
+            let mut g = Group::new("t", false);
+            assert_eq!(g.read_int("/v", "v", None), expected);
+            assert_eq!(g.reasons, reason.into_iter().collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn group_read_errors() {
+        for (code, reason) in [(libc::EACCES, "permission_denied"), (libc::EPERM, "permission_denied"), (libc::EIO, "io_error"), (libc::ENODATA, "no_data")] {
+            let root = Root::new(0);
+            root.put("/v", "1");
+            fake::answers("/v", vec![Err(code)]);
+            let mut g = Group::new("t", false);
+            assert!(g.read_int("/v", "v", None).is_none() && g.reasons == [reason]);
+            assert_eq!(g.issues.len(), if reason == "no_data" { 0 } else { 1 }); // no_data: not a problem
+            assert!(!g.status().to_string(false).contains('/')); // paths and error text stay out of the API
+        }
+    }
+
+    #[test]
+    fn group_read_missing_file() {
+        let root = Root::new(0);
+        root.mkdir("/dev0");
+        let mut g = Group::new("t", false);
+        assert!(g.read_int("/dev0/pwm1", "pwm1", Some("/dev0")).is_none());
+        assert!(g.reasons == ["not_exposed"] && g.issues.is_empty()); // an attribute this device does not have
+        assert!(g.read_int("/gone/temp1_input", "temp1", Some("/gone")).is_none());
+        assert_eq!(g.issues, [("temp1".to_string(), "disappeared")]); // listed, then gone before the read
+    }
+
+    #[test]
+    fn group_status() {
+        for (values, reasons, state, reason) in [(2, vec![], "ok", "null"), (2, vec!["not_exposed"], "ok", "null"),
+            (1, vec!["invalid_data"], "partial", r#""some_unreadable""#), (0, vec!["invalid_data", "permission_denied", "io_error"], "error", r#""permission_denied""#),
+            (0, vec!["disappeared", "invalid_data"], "error", r#""disappeared""#), (0, vec!["internal_error", "permission_denied"], "error", r#""internal_error""#),
+            (0, vec!["not_exposed", "no_data"], "unavailable", r#""no_data""#), (0, vec!["not_detected", "not_exposed"], "unavailable", r#""not_exposed""#),
+            (0, vec!["unsupported_platform"], "unavailable", r#""unsupported_platform""#), (0, vec![], "unavailable", r#""not_detected""#)] {
+            let mut g = Group::new("t", false);
+            g.values = values;
+            for (i, r) in reasons.iter().enumerate() {
+                g.note(&format!("x{}", i), r, None);
+            }
+            let st = g.status();
+            assert_eq!((st.get("state").unwrap().to_string(false), st.get("reason").unwrap().to_string(false)), (format!("{:?}", state), reason.to_string()));
+        }
+    }
+
+    #[test]
+    fn group_issues_are_capped() {
+        let mut g = Group::new("t", false);
+        for i in 0..40 {
+            g.note(&format!("hwmon0.temp{}{}", i, "x".repeat(100)), "io_error", Some("detail".into()));
+        }
+        let st = g.status();
+        let Some(Value::Arr(issues)) = st.get("issues") else { panic!() };
+        assert_eq!((issues.len(), st.get("issues_truncated").unwrap().to_string(false), g.details.len()), (32, "8".into(), 32));
+        assert!(issues.iter().all(|i| matches!(i.get("target"), Some(Value::Str(t)) if t.chars().count() <= 64)));
+    }
+
+    #[test]
+    fn one_bad_temperature_keeps_the_rest() {
+        let root = Root::new(0);
+        hwmon(&root, &[&[("name", "coretemp"), ("temp1_input", "45000"), ("temp2_input", ""), ("temp3_input", "garbage"), ("temp4_input", "0")],
+                       &[("name", "ina219"), ("power1_input", "1000000")], &[("name", "nct6775"), ("fan1_input", "900"), ("pwm1", "255")]]);
+        let (t, p, f, g) = sensors(&[], &[]);
+        assert_eq!((t, p, f), (r#"{"coretemp temp1":45.0,"coretemp temp4":0.0}"#.into(), r#"{"ina219 power1":1.0}"#.into(), r#"[{"name":"nct6775 fan1","rpm":900,"percent":100}]"#.into()));
+        assert_eq!(status(&g.temperature), r#"{"state":"partial","reason":"some_unreadable","issues":[{"target":"hwmon0.temp2","reason":"invalid_data"},{"target":"hwmon0.temp3","reason":"invalid_data"}],"issues_truncated":0}"#);
+        assert!(status(&g.power) == OK && status(&g.fans) == OK);
+    }
+
+    #[test]
+    fn partial_power_and_fan_channels() {
+        let root = Root::new(0); // a rail without its voltage is left out; a fan without its speed keeps its pwm; 0 rpm stays 0
+        hwmon(&root, &[&[("name", "ina3221"), ("in1_label", "VDD_IN"), ("in1_input", "5000"), ("curr1_input", "1200"), ("in2_label", "VDD_SOC"), ("in2_input", "5000"), ("curr2_input", "400")],
+                       &[("name", "nct6775"), ("fan1_input", "950"), ("pwm1", "128"), ("fan2_input", "0"), ("pwm2", "0")]]);
+        fake::answers("/sys/class/hwmon/hwmon0/in2_input", vec![Err(libc::EIO)]);
+        fake::answers("/sys/class/hwmon/hwmon1/fan1_input", vec![Err(libc::EACCES)]);
+        let (_, p, f, g) = sensors(&[], &[]);
+        assert_eq!((p, f), (r#"{"VDD_IN":6.0}"#.into(), r#"[{"name":"nct6775 fan1","rpm":null,"percent":50},{"name":"nct6775 fan2","rpm":0,"percent":0}]"#.into()));
+        assert_eq!(g.power.status().get("issues").unwrap().to_string(false), r#"[{"target":"hwmon0.in2","reason":"io_error"}]"#);
+        assert_eq!(g.fans.status().get("issues").unwrap().to_string(false), r#"[{"target":"hwmon1.fan1","reason":"permission_denied"}]"#);
+        assert_eq!(g.temperature.status().get("state").unwrap().to_string(false), r#""unavailable""#); // no temperature channel: absent
+    }
+
+    #[test]
+    fn channel_that_disappears_then_recovers() {
+        let root = Root::new(0);
+        hwmon(&root, &[&[("name", "coretemp"), ("temp1_input", "45000")]]);
+        root.link("/sys/class/hwmon/hwmon0/temp2_input", "gone"); // listed, gone when read
+        let (t, _, _, g) = sensors(&[], &[]);
+        assert_eq!((t, g.temperature.status().get("issues").unwrap().to_string(false)),
+                   (r#"{"coretemp temp1":45.0}"#.into(), r#"[{"target":"hwmon0.temp2","reason":"disappeared"}]"#.into()));
+        root.remove("/sys/class/hwmon/hwmon0/temp2_input");
+        assert_eq!(status(&sensors(&[], &[]).3.temperature), OK);
+    }
+
+    #[test]
+    fn unlistable_hwmon_class() {
+        let root = Root::new(0);
+        root.mkdir("/sys/class/hwmon");
+        fake::unlistable("/sys/class/hwmon", libc::EACCES);
+        let (t, p, f, g) = sensors(&[], &[]);
+        assert_eq!((t, p, f), ("{}".into(), "{}".into(), "[]".into()));
+        assert_eq!(g.temperature.status().get("reason").unwrap().to_string(false), r#""permission_denied""#); // could not look
+    }
+
+    #[test]
+    fn inactive_thermal_zone_is_no_data() {
+        let root = Root::new(0);
+        zone(&root, 0, b"cpu-thermal", "51200");
+        zone(&root, 1, b"cv0-thermal", "0");
+        fake::answers("/sys/class/thermal/thermal_zone1/temp", vec![Err(libc::ENODATA)]);
+        let (t, _, _, g) = zones();
+        assert_eq!((t, status(&g)), (r#"{"cpu":51.2}"#.into(), OK.into()));
+    }
+
+    #[test]
+    fn fan_speed_the_firmware_does_not_report_is_no_data() {
+        for (code, state) in [(libc::EIO, "unavailable"), (libc::EACCES, "error")] {
+            let root = Root::new(0); // acpi_fan: EIO on fan1_input is no tachometer, not a failure; EACCES stays one
+            hwmon(&root, &[&[("name", "acpi_fan"), ("fan1_input", "0")]]);
+            fake::answers("/sys/class/hwmon/hwmon0/fan1_input", vec![Err(code)]);
+            let (_, _, f, g) = sensors(&[], &[]);
+            assert_eq!(f, r#"[{"name":"acpi_fan fan1","rpm":null,"percent":null}]"#);
+            if state == "unavailable" {
+                assert_eq!(status(&g.fans), r#"{"state":"unavailable","reason":"no_data","issues":[],"issues_truncated":0}"#);
+                assert!(g.fans.details.is_empty()); // nothing for the service log either
+            } else {
+                assert_eq!(status(&g.fans), issue("error", "hwmon0.fan1", "permission_denied"));
+            }
+        }
+    }
+
+    #[test]
+    fn cpu_frequency_failure_keeps_usage() {
+        let root = Root::new(0);
+        let freq = |n: i64| format!("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_cur_freq", n);
+        root.put(&freq(1), "1200000\n");
+        let mut c = CpuCounters::new(Some(5.0), "interval");
+        let mut run = |stat: &str, t: i64| {
+            root.required();
+            root.put("/proc/stat", stat);
+            fake::answers(&freq(0), vec![Err(libc::EIO)]);
+            crate::metadata::set_clocks(t, 1_700_000_000_000_000);
+            let mut g = Groups::new(false);
+            let (s, _) = collect(&mut c, &mut g, &mut Vec::new()).unwrap();
+            (s, g.cpu_frequency.status())
+        };
+        let (first, st) = run("cpu0 0 0 0 0 0 0 0 0\ncpu1 0 0 0 0 0 0 0 0\n", 1_000_000_000_000);
+        assert_eq!((first.get("cpu").unwrap().to_string(false), st.get("reason").unwrap().to_string(false)), ("[]".into(), r#""no_data""#.into())); // warmup: no rows
+        let (s, st) = run("cpu0 10 0 0 10 0 0 0 0\ncpu1 0 0 0 20 0 0 0 0\n", 1_001_000_000_000);
+        assert_eq!(s.get("cpu").unwrap().to_string(false), r#"[{"id":0,"usage":50.0,"freq":null},{"id":1,"usage":0.0,"freq":1200000000}]"#);
+        assert_eq!(st.to_string(false), issue("partial", "cpu0", "io_error"));
+        assert!(!s.get("cpu_sampling").unwrap().get("window_ms").unwrap().is_null()); // the CPU baseline went on as before
+    }
+
+    #[test]
+    fn no_optional_sensors_is_not_an_error() {
+        let root = Root::new(0); // a plain Linux host without cpufreq, thermal zones, hwmon chips or a DRM card
+        root.required();
+        let mut c = super::super::Collector::new(5.0, [false; 3]);
+        c.collect().ok().unwrap();
+        root.put("/proc/stat", "cpu  1 0 1 900 10 0 5 0 0 0\ncpu0 101 0 51 900 10 0 5 0 0 0\n");
+        root.at(2_000_000_000);
+        let s = c.collect().ok().unwrap().stats;
+        let Some(Value::Obj(groups)) = s.get("collectors") else { panic!() };
+        assert!(groups.iter().all(|(_, v)| v.get("state").unwrap().to_string(false) == r#""unavailable""#), "{}", s.get("collectors").unwrap().to_string(false));
+        assert!(s.get("cpu").unwrap().get_index(0).is_some());
+    }
+
+    #[test]
+    fn undecodable_temperature_keeps_the_rest() {
+        let root = Root::new(0);
+        hwmon(&root, &[&[("name", "chip"), ("temp1_input", "45000"), ("temp3_input", "42000"), ("power1_input", "1000000"), ("fan1_input", "900"), ("pwm1", "128")]]);
+        root.put("/sys/class/hwmon/hwmon0/temp2_input", b"\xff\n");
+        let (t, p, f, g) = sensors(&[], &[]);
+        assert_eq!((t, p, f), (r#"{"chip temp1":45.0,"chip temp3":42.0}"#.into(), r#"{"chip power1":1.0}"#.into(), r#"[{"name":"chip fan1","rpm":900,"percent":50}]"#.into()));
+        assert_eq!(g.temperature.status().get("issues").unwrap().to_string(false), r#"[{"target":"hwmon0.temp2","reason":"invalid_data"}]"#);
+        assert!(status(&g.power) == OK && status(&g.fans) == OK);
+    }
+
+    #[test]
+    fn unlistable_chip_is_reported_and_the_others_kept() {
+        for (code, reason) in [(libc::EACCES, "permission_denied"), (libc::EIO, "io_error")] {
+            let root = Root::new(0);
+            hwmon(&root, &[&[("name", "a"), ("temp1_input", "40000")], &[("name", "b"), ("temp1_input", "50000")]]);
+            fake::unlistable("/sys/class/hwmon/hwmon0", code);
+            let (t, _, _, g) = sensors(&[], &[]);
+            assert_eq!((t, status(&g.temperature)), (r#"{"b temp1":50.0}"#.into(), issue("partial", "hwmon0", reason)));
+        }
+    }
+
+    #[test]
+    fn unlistable_thermal_class() {
+        let root = Root::new(0);
+        root.mkdir("/sys/class/thermal/thermal_zone0");
+        fake::unlistable("/sys/class/thermal", libc::EIO);
+        let (t, _, _, g) = zones();
+        assert_eq!((t, g.status().get("reason").unwrap().to_string(false)), ("{}".into(), r#""io_error""#.into()));
+    }
+
+    #[test]
+    fn empty_or_missing_classes_are_not_errors() {
+        for empty in [true, false] {
+            let root = Root::new(0);
+            if empty {
+                root.mkdir("/sys/class/hwmon");
+            }
+            let (t, p, f, g) = sensors(&[], &[]);
+            assert_eq!((t, p, f), ("{}".into(), "{}".into(), "[]".into()));
+            let (zt, _, _, zg) = zones();
+            assert_eq!(zt, "{}");
+            for s in [&g.temperature, &g.power, &g.fans, &zg] {
+                assert_eq!(s.status().get("state").unwrap().to_string(false), r#""unavailable""#);
+            }
+        }
+    }
+
+    #[test]
+    fn unreadable_rail_label_is_reported() {
+        let root = Root::new(0); // channel 3 has no label: a sum channel, skipped
+        hwmon(&root, &[&[("name", "ina3221"), ("in1_label", "VDD_IN"), ("in1_input", "5000"), ("curr1_input", "1000"), ("in2_label", "VDD_SOC"),
+                         ("in2_input", "5000"), ("curr2_input", "400"), ("in3_input", "5000"), ("curr3_input", "1400")]]);
+        fake::answers("/sys/class/hwmon/hwmon0/in1_label", vec![Err(libc::EIO)]);
+        let (_, p, _, g) = sensors(&[], &[]);
+        assert_eq!((p, status(&g.power)), (r#"{"VDD_SOC":2.0}"#.into(), issue("partial", "hwmon0.in1_label", "io_error")));
+        let (_, p, _, g) = sensors(&[], &[]); // next collection: readable again
+        assert_eq!((p, status(&g.power)), (r#"{"VDD_IN":5.0,"VDD_SOC":2.0}"#.into(), OK.into()));
+    }
+
+    #[test]
+    fn undecodable_name_or_label_keeps_the_values() {
+        let chip_b = (r#""b temp1":50.0"#, r#""b power1":2.0"#, r#"{"name":"b fan1","rpm":800,"percent":0}"#);
+        for (file, temps, power, fan, with_issue) in [
+            // the chip name is in every key: hwmon0's values are kept under its directory name
+            ("name", r#""hwmon0 Package":40.0"#, r#""VIN":1.0"#, r#"{"name":"CPU fan","rpm":900,"percent":100}"#, vec!["temperature", "power", "fans"]),
+            ("temp1_label", r#""a temp1":40.0"#, r#""VIN":1.0"#, r#"{"name":"CPU fan","rpm":900,"percent":100}"#, vec!["temperature"]),
+            ("power1_label", r#""a Package":40.0"#, r#""a power1":1.0"#, r#"{"name":"CPU fan","rpm":900,"percent":100}"#, vec!["power"]),
+            ("fan1_label", r#""a Package":40.0"#, r#""VIN":1.0"#, r#"{"name":"a fan1","rpm":900,"percent":100}"#, vec!["fans"])] {
+            let root = Root::new(0);
+            hwmon(&root, &[&[("name", "a"), ("temp1_input", "40000"), ("temp1_label", "Package"), ("power1_input", "1000000"), ("power1_label", "VIN"),
+                             ("fan1_input", "900"), ("fan1_label", "CPU fan"), ("pwm1", "255")],
+                           &[("name", "b"), ("temp1_input", "50000"), ("power1_input", "2000000"), ("fan1_input", "800"), ("pwm1", "0")]]);
+            let good = std::fs::read(root.path(&format!("/sys/class/hwmon/hwmon0/{}", file))).unwrap();
+            root.put(&format!("/sys/class/hwmon/hwmon0/{}", file), b"\xff\n");
+            let (t, p, f, g) = sensors(&[], &[]);
+            assert_eq!((t, p, f), (format!("{{{},{}}}", temps, chip_b.0), format!("{{{},{}}}", power, chip_b.1), format!("[{},{}]", fan, chip_b.2)), "{}", file);
+            for (name, grp) in [("temperature", &g.temperature), ("power", &g.power), ("fans", &g.fans)] {
+                let want = if with_issue.contains(&name) { issue("partial", &format!("hwmon0.{}", file), "invalid_data") } else { OK.into() };
+                assert_eq!(status(grp), want, "{} {}", file, name);
+            }
+            root.put(&format!("/sys/class/hwmon/hwmon0/{}", file), &good); // readable again in the next collection
+            let g = sensors(&[], &[]).3;
+            assert!([&g.temperature, &g.power, &g.fans].iter().all(|x| status(x) == OK));
+        }
+    }
+
+    #[test]
+    fn undecodable_zone_type_keeps_the_zones() {
+        let root = Root::new(0);
+        zone(&root, 0, b"\xff\n", "51200");
+        zone(&root, 1, b"gpu-thermal", "52000");
+        let (t, _, _, g) = zones();
+        assert_eq!((t, g.status().get("issues").unwrap().to_string(false)),
+                   (r#"{"thermal_zone0":51.2,"gpu":52.0}"#.into(), r#"[{"target":"thermal_zone0.type","reason":"invalid_data"}]"#.into()));
+    }
+
+    #[test]
+    fn problems_are_logged_when_they_change() {
+        let mut logged = Vec::new();
+        let run = |logged: &mut Vec<(String, Vec<String>)>, reason: Option<&'static str>| {
+            let mut g = Group::new("temperature", false);
+            if let Some(r) = reason {
+                g.note("hwmon0.temp1", r, Some("/sys/class/hwmon/hwmon0/temp1_input: Input/output error".into()));
+            }
+            metadata::summarize(&[g], logged);
+            logged.clone()
+        };
+        let first = run(&mut logged, Some("io_error"));
+        assert!(first[0].1[0].starts_with("hwmon0.temp1: io_error (/sys/class/hwmon/hwmon0/temp1_input"));
+        assert_eq!(run(&mut logged, Some("io_error")), first); // the same problem again: not logged every second
+        assert_eq!(run(&mut logged, None), [("temperature".to_string(), vec![])]); // logged once as readable again
+    }
+}
