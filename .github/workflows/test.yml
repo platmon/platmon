@@ -48,6 +48,8 @@ jobs:
           python3 native/tools/runtime_fixture.py "$SERVER" --record native/tools/golden/runtime
           native/tools/fixture.sh --record
           git status --porcelain -- native/tools/golden
+          git diff --stat -- native/tools/golden
+          git diff -U0 -- native/tools/golden | cut -c1-2000 | head -n 40
           test -z "$(git status --porcelain -- native/tools/golden)"
           python3 native/tools/live_http.py "$SERVER"
       - name: Compare with the recorded answers alone

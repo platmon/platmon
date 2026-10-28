@@ -5,7 +5,8 @@ request: {"request": the line the harness wrote, "answer": the Python side's ans
 Recording (the harnesses' --record DIR) keeps the answer as the comparison sees it, with what differs by
 design or by host taken out: an HTTP response unstamped (runtime_fixture.unstamped: no Date, Server or
 error-page markup), and, on the fake trees, the values the container's kernel chose put back as tokens
-(tokens()): an interface's index, the network namespace's id and the device numbers of the two tmpfs mounts;
+(tokens()): the kernel's release and machine, an interface's index, the network namespace's id and the
+device numbers of the two tmpfs mounts;
 a probe's connect time, which fixture.py compares only as a number >= 0, is kept as 0.
 Replaying (--golden DIR) runs this file as the Python side: it answers each request with the recorded
 answer, the tokens resolved as it answers, from the same places the collectors read them. A request other
@@ -22,7 +23,7 @@ import sys
 
 NETNS = "/proc/self/ns/net"  # the fake tree's link, as the collectors read it
 MOUNTS = ("/fx", "/fxhost")  # the fake trees' tmpfs mounts (fixture.py FX, HOST)
-TOKEN = re.compile(r"\$\{(ifindex|netns|major|minor)(?::([^}]*))?\}")
+TOKEN = re.compile(r"\$\{(ifindex|netns|major|minor|kernel|arch)(?::([^}]*))?\}")
 
 
 def namespace_id(st):
@@ -33,7 +34,8 @@ def namespace_id(st):
 
 def environment():
     """The values a fake-tree answer has from the container rather than from its tree."""
-    env = {"ifindex": {name: i for i, name in socket.if_nameindex()}, "netns": None, "dev": {}}
+    env = {"ifindex": {name: i for i, name in socket.if_nameindex()}, "netns": None, "dev": {},
+           "kernel": os.uname().release, "arch": os.uname().machine}
     try:
         env["netns"] = namespace_id(os.stat(NETNS))
     except OSError:
@@ -49,7 +51,8 @@ def environment():
 
 def tokens(value, env):
     """value with the environment's values as tokens: an "ifindex" that is its "name"'s index now, a string
-    that is the namespace's id, a "major" and "minor" pair that is a tmpfs mount's device."""
+    that is the namespace's id, a "major" and "minor" pair that is a tmpfs mount's device, a "kernel" and an
+    "arch" that are the kernel's (system information, from uname)."""
     if isinstance(value, list):
         return [tokens(v, env) for v in value]
     if isinstance(value, str):
@@ -57,6 +60,9 @@ def tokens(value, env):
     if not isinstance(value, dict):
         return value
     out = {k: tokens(v, env) for k, v in value.items()}
+    for key in ("kernel", "arch"):
+        if key in value and value[key] == env[key]:
+            out[key] = f"${{{key}}}"
     name, index = value.get("name"), value.get("ifindex")
     if isinstance(index, int) and not isinstance(index, bool) and env["ifindex"].get(name) == index:
         out["ifindex"] = f"${{ifindex:{name}}}"
@@ -83,10 +89,10 @@ def resolve(value, env):
     kind, arg = m.groups()
     if kind == "ifindex":
         return env["ifindex"][arg]
-    if kind == "netns":
-        if env["netns"] is None:
+    if kind in ("netns", "kernel", "arch"):
+        if env[kind] is None:
             raise KeyError(value)
-        return env["netns"]
+        return env[kind]
     dev = {mount: d for d, mount in env["dev"].items()}[arg]
     return dev[0] if kind == "major" else dev[1]
 
