@@ -1,21 +1,22 @@
 # Low-frequency groups and history: cost
 
 > **TL;DR**
-> - Storage, Wi-Fi, the probe and history cost about 0.01 pp of one core each at their default cadences.
-> - Their call p95 misses the 2 ms responsiveness criterion (storage ~3 ms, Wi-Fi up to 6.4 ms on the Pi).
+> - Storage and Wi-Fi cost about 0.01 pp of one core each at their default cadences, but their call p95
+>   misses the 2 ms responsiveness criterion (storage ~3 ms, Wi-Fi up to 6.4 ms on the Pi).
+> - The probe was measured on loopback only (0.3–0.7 ms per connect); history holds about 3.5 MiB at its
+>   bound.
 > - Measured while they were off by default; the cost numbers still apply.
 
-What the opt-in groups of [../observations.md](../reference/observations.md) (storage, Wi-Fi, TCP connect probe) and
-the recent history ([../history.md](../reference/history.md)) cost, judged by [budget.md](budget.md). All of them are
-**off by default**, so none of this enters the default configuration's 2.0 % target.
+What the low-frequency groups of [observations.md](../reference/observations.md) (storage, Wi-Fi, TCP connect
+probe) and the recent history ([history.md](../reference/history.md)) cost, judged by [budget.md](budget.md). They
+were **off by default** when this was measured; they are on by default since 1.0.0, whose default
+configuration gate is in [release readiness](../releases/readiness.md#100-release-gate-2026-10-10).
 
-Post-integration audit: the new #42 observation identity/gap implementation still needs real ARM
-retention and changed Wi-Fi cost evidence. Its cached latest-point age fix is in `9555c23`. A synthetic
+After #42 (observation identity and gaps; its ARM retention evidence is in
+[history-expiry-validation.md](history-expiry-validation.md)): a synthetic
 64 × 3602-point test with frequent gaps retained 21,667,030 bytes and peaked at 27,937,318 bytes including
 one 600-point read/JSON (900,411 bytes for the series object). This is Python 3.12 allocation accounting,
 **not ARM RSS**. The original 22.5/28.8 MB synthetic result remains in [history.md](../reference/history.md).
-The new physical-board attempt was interrupted because another suite overlapped; no result from that
-attempt is counted. See [current validation gates](../development/post-integration-validation.md).
 All measured costs below remain attached to their original SHAs; Storage/Wi-Fi p95 misses are unchanged.
 
 A group observed every 30 s gives 4 observations per 120 s window, too few for an off/on process
@@ -40,7 +41,7 @@ samples, with `benchmarks/slow_cost.py` on each board, natively, in its own proc
   kernel asking the wireless driver for station data. Both run on their own group thread, so neither
   delays the 1 s core collection or HTTP answers (tested with a blocked group,
   `tests/collector/test_storage.py::test_http_answers_while_a_group_is_blocked_and_stale`); the criterion is recorded
-  as not met, not waived. Both stay off by default.
+  as not met, not waived. Both were kept off by default then.
 - Storage had one optimization round with a concrete cause (round 1, `eda772f`: every mountinfo line was
   unescaped and converted; round 2 converts only local disk filesystem lines): thread CPU mean 3.07 →
   2.80 ms (Orin), 3.56 → 3.10 ms (Raspberry Pi) at 30 s. No further round.
@@ -51,7 +52,7 @@ samples, with `benchmarks/slow_cost.py` on each board, natively, in its own proc
   143 KiB, `points=600` 424 KiB; the web page asks for 120 points every 10 s.
 
 The integrated service (all groups and history on, polled like the web page) is in
-[../release-readiness.md](../releases/readiness.md).
+[release readiness](../releases/readiness.md).
 
 ## Runs
 
