@@ -3,7 +3,8 @@
 > **TL;DR**
 > - Pick one deployment: the Debian package (recommended), a source install under systemd, or a locally
 >   built Docker image; all listen on port 9797.
-> - The source install and the container run the deprecated Python server.
+> - All three run the native server: the source install from `native/build.sh`'s build of the checkout,
+>   the container from its own build stage.
 > - Expose the unauthenticated API only to trusted networks. The repository ships a Dockerfile, not an
 >   image: publishing a built image distributes its GPL/LGPL base userland.
 
@@ -41,7 +42,7 @@ Install it from the signed APT repository, or a checksum-verified package
 file with APT, then use `systemctl` and `platmon` to operate it. The package installs the service as
 `platmon.service` (the static native server, `/usr/lib/platmon/platmon-native`), web files under
 `/usr/share/platmon` and configuration at `/etc/platmon/platmon.ini`. The source installation and
-the container run the Python server below.
+the container below run the same server, built from the checkout.
 
 APT preserves edited configuration across updates. Existing source or
 Docker installs require an explicit migration, not an in-place switch.
@@ -51,12 +52,11 @@ and the authoritative
 
 ## Source installation with systemd
 
-This runs the Python server, which is deprecated and will be removed in a later release
-([changelog](../../CHANGELOG.md)); the Debian package runs the native server.
-
-From a checkout, on a Linux device with systemd and Python 3.9+:
+From a checkout, on a Linux device with systemd, Docker (to build the server) and Python 3.9+ (for the
+`platmon` command). Build the server for this machine first, then install it:
 
 ```sh
+native/build.sh                        # amd64 and arm64 (native/build-armhf.sh on 32-bit ARM)
 deploy/systemd/install.sh              # install/update, enable at boot, start, add CLI
 deploy/systemd/start.sh                # start or restart; readiness check via /api/stats
 deploy/systemd/stop.sh                 # stop now; still enabled for the next boot
@@ -64,9 +64,9 @@ deploy/systemd/uninstall.sh            # disable and remove code, unit and CLI; 
 deploy/systemd/uninstall.sh --purge    # also remove /etc/platmon config
 ```
 
-The installer validates the candidate config before changing the service.
-It stages a complete copy, then replaces `/opt/platmon` and adapts the
-unit in `/etc/systemd/system/`. A failed replacement or readiness check
+The installer validates the candidate config with the built server before changing the service.
+It stages the server and the web page, then replaces `/opt/platmon` and writes the Debian package's
+unit, with these paths, to `/etc/systemd/system/`. After a `git pull`, build again before installing. A failed replacement or readiness check
 attempts to restore the previous code and unit. A successful update retains
 the previous files in a printed recovery directory. For limitations and
 manual recovery, use [rollback](../reference/packaging.md#rollback).
@@ -82,10 +82,8 @@ use APT for packages.
 
 ## Docker on native Linux
 
-This runs the Python server, which is deprecated and will be removed in a later release
-([changelog](../../CHANGELOG.md)); the Debian package runs the native server.
-
-No ready-made image is published. Build locally from the repository
+The image builds the server in a Rust build stage (as `native/build.sh` does) and runs it on a plain
+Debian base; its health check is `platmon-native health`. No ready-made image is published. Build locally from the repository
 (see [Container image licensing](#container-image-licensing)):
 
 ```sh
@@ -172,10 +170,10 @@ the host listener directly, not a Compose port mapping.
 
 ## Container image licensing
 
-platmon itself is [Apache-2.0](../../LICENSE) and uses only the
-Python standard library. Its Docker base image, `python:3.13-slim`,
-is Debian-based and includes GPL/LGPL system software such as
-`bash`, `coreutils`, `apt` and `glibc`.
+platmon itself is [Apache-2.0](../../LICENSE); the server's one dependency, the `libc` crate, is MIT or
+Apache-2.0. The image's runtime base, `debian:13-slim`, and its build stage, `rust:1.88-slim`, are
+Debian-based and include GPL/LGPL system software such as `bash`, `coreutils`, `apt` and `glibc`
+(the built image contains the runtime base and the static server, not the build stage).
 
 - The repository distributes the Dockerfile and Compose configuration,
   **not** a prebuilt container image. Building and running an image
@@ -184,7 +182,7 @@ is Debian-based and includes GPL/LGPL system software such as
   distributes the bundled components and creates corresponding license
   compliance obligations, such as keeping notices and providing the
   applicable source. platmon remains Apache-2.0.
-- The Dockerfile uses a plain Python base instead of an NVIDIA L4T
+- The Dockerfile uses a plain Debian base instead of an NVIDIA L4T
   image; it does not bundle NVIDIA binaries.
 
 This summarizes the project's distribution policy and is not legal advice.

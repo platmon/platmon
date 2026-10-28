@@ -4,6 +4,15 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `runtime/__init__.py` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+- The source installation and the container run the native server, as the Debian package does: the
+  Python server is no longer installed by any of them. `deploy/systemd/install.sh` installs this
+  checkout's build (`native/build.sh`, or `native/build-armhf.sh` on 32-bit ARM, run first; both need
+  Docker) and the web page, with the package's unit. The Dockerfile builds the server in a
+  `rust:1.88-slim` stage and runs it on `debian:13-slim` (no Python in the image). `platmon-native health
+  [CONFIG]` is the image's health check: it asks `/api/stats` where the configuration listens.
+
 ## 1.6.0 — 2026-10-25
 
 - armhf (32-bit ARM) is released again: `platmon_1.6.0-1_armhf.deb` runs the native server, so armhf hosts

@@ -29,16 +29,15 @@ flowchart LR
 ## Highlights
 
 - **Dependency-free runtime:** the Debian package's server is one static native binary (amd64, arm64, armhf);
-  the `platmon` command, the source installation and the container use the Python 3.9+ standard library
-  only. No Python packages to install on the device.
+  the source installation and the container build and run the same server. The `platmon` command uses
+  the Python 3.9+ standard library only. No Python packages to install on the device.
 - **Hardware-aware monitoring:** CPU, available GPU/NPU, memory, network and disk I/O, storage,
   temperatures, power, fans, battery, Wi-Fi and pressure. Unsupported sources remain unavailable.
 - **One collector, multiple views:** live terminal and web interfaces read the same published snapshots.
 - **History and integration:** recent in-memory trends plus
   [bounded full-sample replay](docs/reference/replay.md) for external consumers.
-- **Deployment choices:** Debian package with systemd, source installation or a locally built Docker image.
-  The source installation and the container run the Python server, which is deprecated and will be
-  removed in a later release (see the [changelog](CHANGELOG.md)).
+- **Deployment choices:** Debian package with systemd, source installation or a locally built Docker image,
+  all running the native server.
 
 ## Quick start
 

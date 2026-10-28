@@ -14,7 +14,8 @@ The service is a static native server built from `native/` (Rust, musl, the syst
 uses the host's systemd; it bundles neither Python nor OS/NVIDIA binaries. A package for an architecture
 does not mean that every OS/kernel on it has been validated. A device whose Python is older than 3.9
 needs a supported OS/interpreter before installation. Releases up to 1.3.0 are one `Architecture: all`
-package with the Python server; the source installation and the container still run that server.
+package with the Python server; the source installation and the container now run the native server too,
+built from the checkout ([deployment](../guides/deployment.md)).
 `armhf` (32-bit ARM, ARMv6 with VFP and later, e.g. Raspberry Pi OS 32-bit) is built by
 `native/build-armhf.sh`; releases 1.4.0 and 1.5.0 had no armhf package, so armhf hosts upgrade from 1.3.0.
 No GitHub runner runs 32-bit ARM code: CI checks the armhf package in Debian 13 and Ubuntu 24.04 armhf

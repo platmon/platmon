@@ -3,18 +3,18 @@
 > **TL;DR**
 > - One collector publishes snapshots; HTTP, the terminal client and the web page only read them, and slow
 >   groups run on their own threads.
-> - The Debian package runs the native server (`native/`, mapped module by module under Native server);
->   the deprecated Python server (`platmon.py`, `collector/`, `runtime/`) runs the source and container
->   installs, and the diagrams name its modules.
+> - Every install runs the native server (`native/`, mapped module by module under Native server). The
+>   deprecated Python server (`platmon.py`, `collector/`, `runtime/`) is installed by none and stays until
+>   its removal as the comparisons' reference; the diagrams name its modules.
 > - Layers: collectors read the system, runtime schedules and publishes, frontends present.
 
 The service reads system data once and publishes snapshots for the HTTP API, terminal client and web
 viewer. Runtime scheduling is independent of frontend requests.
 
-There are two implementations of the same service. The Debian package runs the native server built
-from `native/` ([below](#native-server)). The Python server (`platmon.py`, `collector/`, `runtime/`) runs
-the source installation and the container; it is deprecated since 1.5.0 and is the reference the native
-server is compared with. The diagrams and tables below name the Python modules; the native server has
+There are two implementations of the same service. The Debian package, the source installation and
+the container run the native server built from `native/` ([below](#native-server)). The Python server
+(`platmon.py`, `collector/`, `runtime/`) is deprecated since 1.5.0 and installed by none of them; it is the
+reference the native server is compared with until its removal. The diagrams and tables below name the Python modules; the native server has
 the same structure. `platmon.py` loads and validates configuration, constructs the readers and workers,
 and starts the HTTP frontend.
 
@@ -138,7 +138,8 @@ and durable storage outside this service.
 
 ## Deployment and distribution
 
-`deploy/systemd/` groups the source service unit with its installation and start/stop scripts.
+`deploy/systemd/` groups the source installation's scripts; the unit they write is the package's
+(`packaging/debian/platmon.service`) with the installed paths.
 `deploy/docker/` groups container configuration and scripts. Run these scripts from any working
 directory; direct Compose commands in the README run from the checkout root. Compose resolves its
 build context and default INI file back to that root.
@@ -147,12 +148,12 @@ build context and default INI file back to that root.
 contains the builder, extracted-package smoke check and disposable-container lifecycle and systemd service
 checks. The Debian package contains the static server built from `native/` (`native/build.sh`, one package
 per architecture), the web files of `frontends/web/` and the `platmon` command (`frontends/cli.py`). The
-Python server (`platmon.py`, `collector/`, `runtime/`, `frontends/`) runs the source installation and the
-container; `native/tools/` compares the two. The source archive additionally includes `native/`, deployment
+source installation and the container install the same server and web files; `native/tools/` compares the
+server with the Python server (`platmon.py`, `collector/`, `runtime/`) and with its recorded answers. The source archive additionally includes `native/`, deployment
 files, build tools, benchmarks, tests and documentation.
 
 Installed paths are `/usr/lib/platmon/platmon-native` for the Debian server and `/usr/share/platmon` for its
-web files, `/opt/platmon` for source/container code, `/etc/platmon/platmon.ini` for service configuration and
+web files, `/opt/platmon` for the source installation's and the container's server and web files, `/etc/platmon/platmon.ini` for service configuration and
 `platmon.service` for the systemd unit.
 
 ## Tests and documentation
