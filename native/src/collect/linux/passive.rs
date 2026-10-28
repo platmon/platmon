@@ -89,6 +89,10 @@ pub fn namespace_id(dev: u64, ino: u64) -> String {
 
 /// socket.if_nameindex(): (index, name) of every interface.
 pub fn if_indexes() -> io::Result<Vec<(u32, String)>> {
+    #[cfg(test)]
+    if let Some(answer) = sysfs::fake::indexed() {
+        return answer;
+    }
     let mut out = Vec::new();
     unsafe {
         let list = libc::if_nameindex();
@@ -1028,6 +1032,375 @@ mod tests {
         sample_disks(&mut d, &root, T0 + S);
         kind(&root, "sda", Some(false));
         assert!(names(&sample_disks(&mut d, &root, T0 + 2 * S).0).is_empty());
+    }
+
+    // tests/collector/test_network.py, ported. The interface indexes are injected (fake::indexes); the
+    // namespace is the file /proc/self/ns/net links to in the test tree.
+    const HEAD: &str = "Inter-|   Receive                                                |  Transmit\n \
+                        face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n";
+
+    /// One /proc/net/dev line: rx/tx = (bytes, packets, errors, dropped); the other counters 7.
+    fn net_row(name: &str, rx: [u64; 4], tx: [u64; 4]) -> String {
+        format!("{:>6}: {} {} {} {} 7 7 7 7 {} {} {} {} 7 7 7 7", name, rx[0], rx[1], rx[2], rx[3], tx[0], tx[1], tx[2], tx[3])
+    }
+
+    struct Net {
+        root: Root,
+        ifaces: Vec<(String, u32, [u64; 4], [u64; 4])>,
+    }
+
+    impl Net {
+        fn new(ifaces: &[(&str, u32, [u64; 4], [u64; 4])]) -> Net {
+            let root = Root::new(T0);
+            root.put("/ns/a", "");
+            root.put("/ns/b", "");
+            root.link(NETNS, &root.path("/ns/a").to_string_lossy());
+            let n = Net { root, ifaces: ifaces.iter().map(|(a, b, c, d)| (a.to_string(), *b, *c, *d)).collect() };
+            n.write();
+            n
+        }
+
+        fn write(&self) {
+            self.root.put(NET_DEV, format!("{}{}", HEAD, self.ifaces.iter().map(|(n, _, rx, tx)| net_row(n, *rx, *tx) + "\n").collect::<String>()));
+            fake::indexes(Some(Ok(self.ifaces.iter().map(|(n, i, _, _)| (*i, n.as_str())).collect())));
+        }
+
+        fn set(&mut self, name: &str, index: u32, rx: [u64; 4], tx: [u64; 4]) {
+            self.ifaces.retain(|(n, ..)| n != name);
+            self.ifaces.push((name.into(), index, rx, tx));
+            self.write();
+        }
+
+        fn namespace(&self, file: &str) {
+            self.root.remove(NETNS);
+            self.root.link(NETNS, &self.root.path(file).to_string_lossy());
+        }
+    }
+
+    fn sample_net(n: &mut Network, root: &Root, t: i64) -> (Value, Span, Value) {
+        root.at(t);
+        let mut g = Group::new("network", false);
+        let (out, span) = n.sample(&mut g);
+        (out, span, g.status())
+    }
+
+    fn iface(out: &Value, name: &str) -> Value {
+        match out.get("interfaces") { Some(Value::Arr(d)) => d.iter().find(|x| x.get("name") == Some(&Value::from(name))).cloned().unwrap_or(Value::Null), _ => Value::Null }
+    }
+
+    fn iface_names(out: &Value) -> Vec<String> {
+        match out.get("interfaces") { Some(Value::Arr(d)) => d.iter().map(|x| x.get("name").unwrap().to_string(false)).collect(), _ => vec![] }
+    }
+
+    fn why(out: &Value, name: &str) -> String {
+        iface(out, name).get("reason").map_or("absent".into(), |r| r.to_string(false))
+    }
+
+    fn ns_id(out: &Value) -> String {
+        out.get("scope").unwrap().get("id").unwrap().to_string(false)
+    }
+
+    const Z: [u64; 4] = [0; 4];
+
+    #[test]
+    fn warmup_then_rates_over_the_observed_window() {
+        let mut h = Net::new(&[("eth0", 2, [1000, 10, 0, 0], [2000, 20, 0, 0]), ("lo", 1, [5, 1, 0, 0], [5, 1, 0, 0])]);
+        let mut n = Network::new(Some(5.0));
+        let (out, span, status) = sample_net(&mut n, &h.root, T0);
+        assert_eq!(iface_names(&out), [r#""eth0""#, r#""lo""#]); // deterministic: by name
+        for name in ["eth0", "lo"] {
+            let i = iface(&out, name);
+            assert_eq!(["rates", "reason", "window_ms"].map(|k| i.get(k).unwrap().to_string(false)), ["null", r#""warmup""#, "null"]);
+        }
+        assert!(ns_id(&out).starts_with(r#""netns1:"#));
+        assert_eq!(out.get("scope").unwrap().get("kind").unwrap().to_string(false), r#""process_network_namespace""#);
+        assert_eq!((out.get("provider").unwrap().to_string(false), out.get("read").unwrap().to_string(false)), (r#""proc_net_dev""#.into(), "null".into()));
+        assert_eq!(span, Some((T0, T0 + crate::metadata::FAKE_TICK)));
+        assert_eq!(status.to_string(false), r#"{"state":"ok","reason":null,"issues":[],"issues_truncated":0}"#); // warmup counts as values
+        h.set("eth0", 2, [1200, 14, 1, 2], [2600, 26, 0, 3]);
+        let (out, _, _) = sample_net(&mut n, &h.root, T0 + 2 * S); // 2 s actually passed, whatever the configured interval
+        assert_eq!(iface(&out, "eth0").to_string(false), concat!(r#"{"name":"eth0","ifindex":2,"rx":{"bytes":1200,"packets":14,"errors":1,"dropped":2},"#,
+            r#""tx":{"bytes":2600,"packets":26,"errors":0,"dropped":3},"rates":{"rx_bytes_per_s":100.0,"tx_bytes_per_s":300.0,"#,
+            r#""rx_packets_per_s":2.0,"tx_packets_per_s":3.0},"window_ms":2000.0,"reason":null}"#));
+        let lo = iface(&out, "lo"); // counters did not move: measured 0, not missing
+        assert_eq!(lo.get("rates").unwrap().to_string(false), r#"{"rx_bytes_per_s":0.0,"tx_bytes_per_s":0.0,"rx_packets_per_s":0.0,"tx_packets_per_s":0.0}"#);
+        assert!(lo.get("reason").unwrap().is_null());
+    }
+
+    #[test]
+    fn rate_uses_the_read_start_and_integer_ns() {
+        let mut h = Net::new(&[("eth0", 2, Z, Z)]);
+        let mut n = Network::new(Some(5.0));
+        sample_net(&mut n, &h.root, T0);
+        h.set("eth0", 2, [3, 0, 0, 0], Z);
+        let eth = iface(&sample_net(&mut n, &h.root, T0 + 3).0, "eth0"); // 3 ns: no float rounding of the window
+        assert_eq!((eth.get("rates").unwrap().get("rx_bytes_per_s").unwrap().to_string(false), eth.get("window_ms").unwrap().to_string(false)),
+                   ("1000000000.0".into(), "0.0".into()));
+    }
+
+    #[test]
+    fn wall_clock_is_not_used() {
+        for step in [0, -5_000_000, 3_600_000_000] {
+            let mut h = Net::new(&[("eth0", 2, Z, Z)]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            h.set("eth0", 2, [100, 0, 0, 0], Z);
+            h.root.at(T0 + S);
+            crate::metadata::set_clocks(T0 + S, 1_000_000_000_000_000 + step); // the wall clock jumps; the elapsed one does not
+            let mut g = Group::new("network", false);
+            let (out, _) = n.sample(&mut g);
+            assert_eq!(iface(&out, "eth0").get("rates").unwrap().get("rx_bytes_per_s").unwrap().to_string(false), "100.0");
+        }
+    }
+
+    #[test]
+    fn any_counter_going_down_gives_no_rate_and_a_new_baseline() {
+        for field in 0..8 {
+            let start = [100u64; 8];
+            let mut h = Net::new(&[("eth0", 2, [100; 4], [100; 4])]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            let mut lower = start;
+            lower[field] = 99;
+            h.set("eth0", 2, [lower[0], lower[1], lower[2], lower[3]], [lower[4], lower[5], lower[6], lower[7]]);
+            let eth = iface(&sample_net(&mut n, &h.root, T0 + S).0, "eth0");
+            assert_eq!(["rates", "reason", "window_ms"].map(|k| eth.get(k).unwrap().to_string(false)), ["null", r#""counter_regressed""#, "1000.0"]);
+            assert_eq!(eth.get("rx").unwrap().get("bytes").unwrap().to_string(false), lower[0].to_string()); // as read, not clamped
+            let up: Vec<u64> = lower.iter().map(|v| v + 10).collect();
+            h.set("eth0", 2, [up[0], up[1], up[2], up[3]], [up[4], up[5], up[6], up[7]]);
+            let eth = iface(&sample_net(&mut n, &h.root, T0 + 2 * S).0, "eth0");
+            assert_eq!(eth.get("rates").unwrap().get("rx_bytes_per_s").unwrap().to_string(false), "10.0"); // from the regressed reading
+        }
+    }
+
+    #[test]
+    fn network_gap_boundary_and_bad_intervals() {
+        for (window, reason) in [(5 * S, "null"), (5 * S + 1, r#""gap""#), (0, r#""invalid_interval""#), (-S, r#""invalid_interval""#)] {
+            let h = Net::new(&[("eth0", 2, Z, Z)]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            let eth = iface(&sample_net(&mut n, &h.root, T0 + window).0, "eth0");
+            assert_eq!(eth.get("reason").unwrap().to_string(false), reason);
+            assert_eq!(eth.get("rates").unwrap().is_null(), reason != "null");
+            assert_eq!(why(&sample_net(&mut n, &h.root, T0 + window + S).0, "eth0"), "null"); // every valid reading is the next baseline
+        }
+    }
+
+    #[test]
+    fn interfaces_come_go_and_are_renamed_or_reindexed() {
+        let mut h = Net::new(&[("eth0", 2, Z, Z), ("wlan0", 3, Z, Z)]);
+        let mut n = Network::new(Some(5.0));
+        sample_net(&mut n, &h.root, T0);
+        h.ifaces.retain(|(x, ..)| x != "wlan0");
+        h.set("usb0", 4, Z, Z);
+        let out = sample_net(&mut n, &h.root, T0 + S).0;
+        assert_eq!(iface_names(&out), [r#""eth0""#, r#""usb0""#]);
+        assert_eq!((why(&out, "usb0"), why(&out, "eth0")), (r#""warmup""#.into(), "null".into()));
+        h.set("wlan0", 3, [5, 0, 0, 0], Z); // back after one reading without it: no old baseline
+        h.set("eth0", 9, Z, Z); // same name, another device
+        h.ifaces.retain(|(x, ..)| x != "usb0");
+        h.set("usb1", 4, Z, Z); // same index, renamed
+        let out = sample_net(&mut n, &h.root, T0 + 2 * S).0;
+        assert_eq!(["eth0", "usb1", "wlan0"].map(|x| why(&out, x)), [r#""warmup""#; 3]);
+        assert_eq!(n.last.as_ref().unwrap().2.len(), 3); // only what the last reading saw
+    }
+
+    #[test]
+    fn namespace_change_restarts_every_baseline() {
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        let mut n = Network::new(Some(5.0));
+        let first = ns_id(&sample_net(&mut n, &h.root, T0).0);
+        h.namespace("/ns/b");
+        let out = sample_net(&mut n, &h.root, T0 + S).0;
+        assert!(ns_id(&out) != first && why(&out, "eth0") == r#""namespace_changed""#);
+        assert_eq!(why(&sample_net(&mut n, &h.root, T0 + 2 * S).0, "eth0"), "null");
+    }
+
+    #[test]
+    fn identity_lookup_failures_keep_counters_without_rates() {
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root passes a directory of mode 000
+        }
+        let mut h = Net::new(&[("eth0", 2, [1, 0, 0, 0], Z)]);
+        let mut n = Network::new(Some(5.0));
+        sample_net(&mut n, &h.root, T0);
+        h.root.chmod("/proc/self/ns", 0);
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + S);
+        h.root.chmod("/proc/self/ns", 0o755);
+        let eth = iface(&out, "eth0");
+        assert_eq!((ns_id(&out), eth.get("rx").unwrap().get("bytes").unwrap().to_string(false), eth.get("rates").unwrap().to_string(false)),
+                   ("null".into(), "1".into(), "null".into()));
+        assert_eq!(why(&out, "eth0"), r#""identity_unavailable""#);
+        assert_eq!(status.to_string(false), r#"{"state":"partial","reason":"some_unreadable","issues":[{"target":"netns","reason":"permission_denied"}],"issues_truncated":0}"#);
+        fake::indexes(Some(Err(libc::EIO)));
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + 2 * S);
+        assert_eq!((iface(&out, "eth0").get("ifindex").unwrap().to_string(false), why(&out, "eth0")), ("null".into(), r#""identity_unavailable""#.into()));
+        assert_eq!(status.get("issues").unwrap().to_string(false), r#"[{"target":"ifindex","reason":"io_error"}]"#);
+        h.write();
+        assert_eq!(why(&sample_net(&mut n, &h.root, T0 + 3 * S).0, "eth0"), r#""warmup""#); // unknown identity was no baseline
+        h.ifaces.clear(); // in the file but gone from the index list: unknown, not an error
+        h.write();
+        h.root.put(NET_DEV, format!("{}{}\n", HEAD, net_row("eth0", Z, Z)));
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + 4 * S);
+        assert_eq!((why(&out, "eth0"), status.get("state").unwrap().to_string(false)), (r#""identity_unavailable""#.into(), r#""ok""#.into()));
+    }
+
+    #[test]
+    fn network_bad_rows_are_left_out_and_others_kept() {
+        let lines = [net_row("eth0", [10, 1, 0, 0], Z), net_row("lo", Z, Z), "  bad: 1 2 3".into(), // short row
+                     net_row("neg", Z, Z).replacen(" 0 ", " -1 ", 1), net_row("dec", Z, Z).replacen(" 0 ", " 1.5 ", 1),
+                     net_row("big", Z, Z).replacen(" 0 ", &format!(" {} ", 1u128 << 64), 1),
+                     net_row("max", Z, Z).replacen(" 0 ", &format!(" {} ", u64::MAX), 1),
+                     net_row("uni", Z, Z).replacen(" 0 ", " \u{663} ", 1), // an Arabic-Indic digit is not a counter
+                     net_row("dup", Z, Z), net_row("dup", Z, Z), net_row("x/y", Z, Z), "eth1 1 2 3".into(),
+                     format!("\x1b[2J: {}", ["0"; 16].join(" ")), net_row(&"long".repeat(4), Z, Z), net_row("toolong", Z, Z) + " 0", "".into()];
+        let (rows, bad) = parse_net_dev(&format!("{}{}", HEAD, lines.join("\n"))).unwrap();
+        let mut names: Vec<&str> = rows.iter().map(|(n, _)| n.as_str()).collect();
+        names.sort();
+        assert_eq!(names, ["eth0", "lo", "max"]);
+        assert_eq!(rows.iter().find(|(n, _)| n == "eth0").unwrap().1[..2], [10, 1]);
+        assert_eq!(rows.iter().find(|(n, _)| n == "max").unwrap().1[0], u64::MAX);
+        assert!(bad.iter().all(|(_, r)| *r == "invalid_data"));
+        assert_eq!(bad.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+                   ["bad", "neg", "dec", "big", "uni", "dup", "line13", "line14", "line15", "line16", "toolong"]); // never a path or control character
+    }
+
+    #[test]
+    fn a_malformed_duplicate_still_makes_the_name_ambiguous() {
+        let (rows, bad) = parse_net_dev(&format!("{}  dup: 1 2\n{}\n", HEAD, net_row("dup", Z, Z))).unwrap();
+        assert!(rows.is_empty());
+        assert_eq!(bad.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["dup", "dup"]);
+    }
+
+    #[test]
+    fn bad_rows_in_the_counters_report_and_keep_the_rest() {
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        h.root.put(NET_DEV, format!("{}{}\n{}\n{}\n", HEAD, net_row("eth0", Z, Z), net_row("dup", Z, Z), net_row("dup", Z, Z)));
+        let (out, span, status) = sample_net(&mut Network::new(Some(5.0)), &h.root, T0);
+        assert_eq!(iface_names(&out), [r#""eth0""#]);
+        assert!(span.is_some());
+        assert_eq!(status.to_string(false), r#"{"state":"partial","reason":"some_unreadable","issues":[{"target":"dup","reason":"invalid_data"}],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn network_a_broken_file_gives_nothing_and_clears_baselines() {
+        for text in [[&b"\xff\xfe"[..], HEAD.as_bytes()].concat(), b"Inter-|\n face |bytes packets\n".to_vec(), vec![]] {
+            let h = Net::new(&[("eth0", 2, Z, Z)]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            h.root.put(NET_DEV, &text);
+            let (out, span, status) = sample_net(&mut n, &h.root, T0 + S);
+            assert!(iface_names(&out).is_empty() && span.is_none());
+            assert_eq!(status.to_string(false), r#"{"state":"error","reason":"invalid_data","issues":[{"target":"net_dev","reason":"invalid_data"}],"issues_truncated":0}"#);
+            h.write();
+            assert_eq!(why(&sample_net(&mut n, &h.root, T0 + 2 * S).0, "eth0"), r#""warmup""#);
+        }
+    }
+
+    #[test]
+    fn network_unreadable_file() {
+        for (errno, state, reason) in [(libc::ENOENT, "unavailable", "not_exposed"), (libc::EACCES, "error", "permission_denied"), (libc::EIO, "error", "io_error")] {
+            let h = Net::new(&[("eth0", 2, Z, Z)]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            fake::answers(NET_DEV, vec![Err(errno)]);
+            let (out, span, status) = sample_net(&mut n, &h.root, T0 + S);
+            assert!(iface_names(&out).is_empty() && span.is_none() && n.last.is_none());
+            assert_eq!((status.get("state").unwrap().to_string(false), status.get("reason").unwrap().to_string(false)),
+                       (format!("{:?}", state), format!("{:?}", reason)));
+        }
+    }
+
+    #[test]
+    fn an_empty_list_is_not_a_broken_file() {
+        let h = Net::new(&[]);
+        let (out, span, status) = sample_net(&mut Network::new(Some(5.0)), &h.root, T0);
+        assert!(iface_names(&out).is_empty() && span.is_some());
+        assert_eq!(status.to_string(false), r#"{"state":"unavailable","reason":"not_detected","issues":[],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn many_interfaces_and_capped_issues() {
+        let ifaces: Vec<(String, u32)> = (0..300).map(|n| (format!("veth{}", n), n + 10)).collect();
+        let list: Vec<(&str, u32, [u64; 4], [u64; 4])> = ifaces.iter().map(|(n, i)| (n.as_str(), *i, [*i as u64, *i as u64, 0, 0], [*i as u64, *i as u64, 0, 0])).collect();
+        let h = Net::new(&list);
+        let text = std::fs::read_to_string(h.root.path(NET_DEV)).unwrap() + &(0..100).map(|n| format!("  bad{}: 1\n", n)).collect::<String>();
+        h.root.put(NET_DEV, text);
+        let (out, _, status) = sample_net(&mut Network::new(Some(5.0)), &h.root, T0);
+        assert_eq!(iface_names(&out).len(), 300); // nothing left out for being virtual or many
+        assert!(status.get("issues").unwrap().get_index(31).is_some() && status.get("issues").unwrap().get_index(32).is_none());
+        assert_eq!(status.get("issues_truncated").unwrap().to_string(false), "68");
+    }
+
+    #[test]
+    fn network_changing_the_output_does_not_touch_the_baseline() {
+        let h = Net::new(&[("eth0", 2, [100, 0, 0, 0], Z)]);
+        let mut n = Network::new(Some(5.0));
+        let (mut out, _, _) = sample_net(&mut n, &h.root, T0);
+        *out.get_mut("interfaces").unwrap() = Value::Arr(vec![]);
+        assert_eq!(iface(&sample_net(&mut n, &h.root, T0 + S).0, "eth0").get("rates").unwrap().get("rx_bytes_per_s").unwrap().to_string(false), "0.0");
+    }
+
+    #[test]
+    fn network_real_host_reading() {
+        let mut g = Group::new("network", false);
+        let (out, span) = Network::new(None).sample(&mut g);
+        let names = iface_names(&out);
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
+        assert!(["\"ok\"", "\"partial\"", "\"unavailable\""].contains(&g.status().get("state").unwrap().to_string(false).as_str()));
+        if std::path::Path::new(NET_DEV).exists() {
+            assert!(names.contains(&r#""lo""#.to_string()) && span.is_some());
+        }
+    }
+
+    #[test]
+    fn namespace_a_b_a_and_a_failure_in_between() {
+        use std::os::unix::fs::MetadataExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root passes a directory of mode 000
+        }
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        let mut n = Network::new(Some(5.0));
+        let a = ns_id(&sample_net(&mut n, &h.root, T0).0);
+        h.namespace("/ns/b");
+        let out = sample_net(&mut n, &h.root, T0 + S).0;
+        let st = std::fs::metadata(h.root.path("/ns/b")).unwrap();
+        assert_eq!(ns_id(&out), format!("{:?}", namespace_id(st.dev(), st.ino())));
+        assert!(ns_id(&out) != a && why(&out, "eth0") == r#""namespace_changed""#);
+        h.namespace("/ns/a");
+        let out = sample_net(&mut n, &h.root, T0 + 2 * S).0;
+        assert!(ns_id(&out) == a && why(&out, "eth0") == r#""namespace_changed""#);
+        h.root.chmod("/proc/self/ns", 0);
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + 3 * S);
+        h.root.chmod("/proc/self/ns", 0o755);
+        assert_eq!((ns_id(&out), why(&out, "eth0")), ("null".into(), r#""identity_unavailable""#.into())); // never the old id
+        assert_eq!(status.get("issues").unwrap().to_string(false), r#"[{"target":"netns","reason":"permission_denied"}]"#);
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + 4 * S);
+        assert_eq!((ns_id(&out), why(&out, "eth0"), status.get("state").unwrap().to_string(false)), (a, r#""warmup""#.into(), r#""ok""#.into()));
+        assert_eq!(why(&sample_net(&mut n, &h.root, T0 + 5 * S).0, "eth0"), "null");
+    }
+
+    #[test]
+    fn the_namespace_id_is_kept_per_instance() {
+        let h = Net::new(&[]);
+        let (mut one, mut two) = (Network::new(None), Network::new(None));
+        let a = ns_id(&sample_net(&mut one, &h.root, T0).0);
+        h.namespace("/ns/b");
+        let b = ns_id(&sample_net(&mut two, &h.root, T0).0);
+        h.namespace("/ns/a");
+        assert!(a != b && ns_id(&sample_net(&mut one, &h.root, T0 + S).0) == a && one.ns != two.ns);
+    }
+
+    #[test]
+    fn counter_accepts_exactly_what_it_did() {
+        for (text, expected) in [("0", Some(0)), ("00", Some(0)), ("7", Some(7)), ("18446744073709551615", Some(u64::MAX)),
+                                 ("18446744073709551616", None), ("1000000000000000000000000000000", None), ("-1", None), ("+1", None),
+                                 ("1.5", None), ("1e3", None), ("", None), (" ", None), ("abc", None), ("\u{663}", None), ("\u{b2}", None),
+                                 ("0x10", None), ("1_000", None), ("\u{ff11}", None)] {
+            assert_eq!(counter(text), expected, "{:?}", text);
+        }
     }
 
     #[test]

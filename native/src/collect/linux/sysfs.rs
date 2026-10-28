@@ -319,6 +319,17 @@ pub mod fake {
         // path -> what its next reads give, in order (Python's injected read functions)
         static ANSWERS: RefCell<Vec<(String, std::collections::VecDeque<Result<Vec<u8>, i32>>)>> = RefCell::new(Vec::new());
         static UNLISTABLE: RefCell<Vec<(String, i32)>> = RefCell::new(Vec::new());
+        static INDEXES: RefCell<Option<Result<Vec<(u32, String)>, i32>>> = RefCell::new(None);
+    }
+
+    /// What if_nameindex() answers from now on in this thread: (index, name) pairs, or an OS error by errno
+    /// (Python's injected indexes); None: the real list again.
+    pub fn indexes(answer: Option<Result<Vec<(u32, &str)>, i32>>) {
+        INDEXES.with(|i| *i.borrow_mut() = answer.map(|a| a.map(|l| l.into_iter().map(|(n, s)| (n, s.to_string())).collect())));
+    }
+
+    pub fn indexed() -> Option<std::io::Result<Vec<(u32, String)>>> {
+        INDEXES.with(|i| i.borrow().clone().map(|a| a.map_err(std::io::Error::from_raw_os_error)))
     }
 
     /// Listing directory path (entries) fails with errno until listable(path).
@@ -415,6 +426,7 @@ pub mod fake {
             ROOT.with(|r| *r.borrow_mut() = None);
             ANSWERS.with(|a| a.borrow_mut().clear());
             UNLISTABLE.with(|u| u.borrow_mut().clear());
+            INDEXES.with(|i| *i.borrow_mut() = None);
             crate::metadata::set_clocks(i64::MIN, i64::MIN);
             for e in walk(&self.dir) {
                 let _ = std::fs::set_permissions(&e, std::fs::Permissions::from_mode(0o755));
