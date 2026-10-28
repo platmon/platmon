@@ -1,4 +1,4 @@
-//! frontends/server.py: the live HTTP API. Requests only read the latest publication (runtime::Sampler,
+//! runtime/server.py: the live HTTP API. Requests only read the latest publication (runtime::Sampler,
 //! slow::Observations) and never collect. HTTP/1.0, one request per connection, at most 32 connections
 //! (excess ones are closed before a thread is started for them), 10 s to send the request line and
 //! headers (per read, as Python's socket timeout), 10 s without progress per response write.

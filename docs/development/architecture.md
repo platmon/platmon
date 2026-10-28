@@ -3,13 +3,20 @@
 > **TL;DR**
 > - One collector publishes snapshots; HTTP, the terminal client and the web page only read them, and slow
 >   groups run on their own threads.
-> - The diagrams follow the Python service (`platmon.py`, `collector/`, `runtime/`); the Debian package
->   runs the equivalent native server from `native/`.
+> - The Debian package runs the native server (`native/`, mapped module by module under Native server);
+>   the deprecated Python server (`platmon.py`, `collector/`, `runtime/`) runs the source and container
+>   installs, and the diagrams name its modules.
 > - Layers: collectors read the system, runtime schedules and publishes, frontends present.
 
 The service reads system data once and publishes snapshots for the HTTP API, terminal client and web
-viewer. `platmon.py` loads and validates configuration, constructs the readers and workers, and starts
-the HTTP frontend. Runtime scheduling is independent of frontend requests.
+viewer. Runtime scheduling is independent of frontend requests.
+
+There are two implementations of the same service. The Debian package runs the native server built
+from `native/` ([below](#native-server)). The Python server (`platmon.py`, `collector/`, `runtime/`) runs
+the source installation and the container; it is deprecated since 1.5.0 and is the reference the native
+server is compared with. The diagrams and tables below name the Python modules; the native server has
+the same structure. `platmon.py` loads and validates configuration, constructs the readers and workers,
+and starts the HTTP frontend.
 
 ## Collection and runtime
 
@@ -58,6 +65,30 @@ See the [live API](../reference/api.md), [observations](../reference/observation
 | `runtime/history.py` | Bounded, in-memory history of published snapshots and observations |
 | `runtime/server.py` | HTTP API, `/text` and the web page's files; reads published state only |
 | `runtime/__init__.py` | `VERSION`, the application version |
+
+## Native server
+
+`native/` is one Rust crate, depending only on `libc` (and `windows-sys` on Windows), with the same
+contracts as the Python server: the HTTP API, `platmon.ini` and its messages, `/text`. Each module names
+the Python one it ports.
+
+| Location | Responsibility | Python counterpart |
+| --- | --- | --- |
+| `src/main.rs` | Command dispatch (`serve`, `service` on Windows, `config-check`, `build-info`, the tool commands) | `platmon.py` |
+| `src/config.rs` | `platmon.ini` parsing and checks, with the same defaults and messages | `platmon.py` |
+| `src/collect/linux/`, `src/collect/windows/` | One collector per OS; `collect/mod.rs` holds the CPU counters and required-read spans both use, `collect/probe.rs` the shared probe | `collector/` |
+| `src/metadata.rs`, `src/sha256.rs` | Group diagnostics, read spans, sensor source ids and pointers | `collector/metadata.py` |
+| `src/runtime.rs` | Sampler: cadence, publication, freshness and status | `runtime/sampler.py` |
+| `src/slow.rs` | Low-frequency groups on their own threads | `runtime/slow.py` |
+| `src/history.rs`, `src/replay.rs` | Bounded in-memory history and full-publication replay | `runtime/history.py`, `runtime/replay.py` |
+| `src/http.rs`, `src/render.rs` | HTTP API and the `/text` screen | `runtime/server.py`, `frontends/cli.py` `render` |
+| `src/json.rs`, `src/pystr.rs` | JSON written as Python's `json` writes it; the `str` methods the ports need | standard library |
+| `src/platform/` | Clocks, random bytes, the listening socket and the stop request, per OS | standard library |
+| `src/harness.rs`, `tools/` | Commands and scripts that compare both servers on fake trees, configurations, the runtime and live HTTP | — |
+
+Equivalence checks run in CI (`native` job); the Windows collector has no Python counterpart and is
+checked by its unit tests and `tools/windows_smoke.py`. Build, support scope and results:
+[native/README.md](../../native/README.md).
 
 ## Layers
 

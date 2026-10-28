@@ -17,7 +17,7 @@ carries `Cache-Control: no-store`.
 | --- | --- |
 | `/api/stats` | the current snapshot as JSON; 503 when there is none |
 | `/api/status` | the collector's runtime status as JSON; always 200, also without the web page |
-| `/api/observations` | low-frequency groups (storage capacity, Wi-Fi signal, TCP connect probe) with their own ages; always 200 ([observations.md](observations.md)) |
+| `/api/observations` | low-frequency groups (storage capacity, Wi-Fi signal, battery, TCP connect probe) with their own ages; always 200 ([observations.md](observations.md)) |
 | `/api/history` | recent numbers of the published snapshots, when `[history]` is on; 404 otherwise ([history.md](history.md)) |
 | `/api/samples` | full published core snapshots after a cursor; bounded memory replay ([replay.md](replay.md)) |
 | `/api/observation-samples` | full publications of one slow group after its own cursor ([replay.md](replay.md)) |
