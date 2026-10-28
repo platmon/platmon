@@ -392,5 +392,4 @@ hand-started platmon (no autostart) was down before the test and was restarted a
 ## Earlier records
 
 The pre-1.0.0 candidate records (2026-10-09: container visibility, the default enablement policy,
-the final and resumed candidates and their integration evidence) are in the git history of this file
-before `b9b15cd`.
+the final and resumed candidates and their integration evidence) are in this file as of `b96aba8`.
