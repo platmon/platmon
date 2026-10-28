@@ -83,7 +83,7 @@ the runs is the same (round 1: a record before only). Raw files stay on the devi
 
 ## Resumed combined path
 
-The [2026-10-09 resumed results](archive/resumed-integration-results.md) supersede earlier cost claims for
+The 2026-10-09 resumed integration results (`archive/resumed-integration-results.md` as of `b96aba8`) supersede earlier cost claims for
 Storage descriptor verification, Wi-Fi carrier checks and low-frequency history. Runtime `e919baf`:
 20 Storage calls at 30 s and 60 Wi-Fi calls at 5 s per board; 660 s real history retention plus two
 integrated ABBA blocks. All remain optional. The finite retention run does not prove a long-term

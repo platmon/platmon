@@ -45,4 +45,4 @@ document for implementation and validation evidence.
   real-PC checks, Linux release gaps and the Python server's removal.
 - [Release readiness](releases/readiness.md) — acceptance gates and release evidence.
 - [Performance reports](performance/README.md) — budgets, current measurements,
-  background studies and an index of superseded evidence in `performance/archive/`.
+  and background studies.

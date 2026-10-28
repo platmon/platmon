@@ -163,5 +163,5 @@ and browser scripts live with frontend tests. `pytest` still runs the entire sui
 
 User-facing installation and operation guides live in `docs/guides/`, behavior contracts
 in `docs/reference/`, development plans and checkpoints in `docs/development/`,
-release decisions in `docs/releases/`, and measurement reports in `docs/performance/`. Superseded performance reports are retained in `docs/performance/archive/`;
-their measured commits and results remain historical evidence.
+release decisions in `docs/releases/`, and measurement reports in `docs/performance/`. Each performance
+report keeps the commit it measured; superseded reports are in the git history.

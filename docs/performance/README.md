@@ -4,7 +4,7 @@
 > - Index of the CPU and memory measurements on a Jetson Orin Nano and a Raspberry Pi 4; each report is
 >   pinned to the commit it measured.
 > - Start with [budget.md](budget.md) (the target), then the current evidence; superseded reports are in
->   `archive/`.
+>   the git history.
 
 Measurements of what the platmon service costs on the boards (Jetson Orin Nano, Raspberry Pi 4). Each
 report records the exact commit it measured; later code changes do not update old numbers. Start with the
@@ -35,15 +35,8 @@ budget, then the current evidence. The release decision itself is in [release re
 
 ## Superseded
 
-Kept for their raw data and history; their conclusions were replaced by the reports above.
-
-- [final-candidate-plan.md](archive/final-candidate-plan.md), [final-candidate-results.md](archive/final-candidate-results.md):
-  a candidate baseline from before the recovery-gap correction.
-- [recovery-gap-validation.md](archive/recovery-gap-validation.md): replaced by history-expiry-validation.md after
-  a further retention defect.
-- [resumed-integration-plan.md](archive/resumed-integration-plan.md),
-  [resumed-integration-results.md](archive/resumed-integration-results.md): the integration run before the final
-  candidate.
+The reports replaced by the ones above (the final-candidate plan and results, the recovery-gap validation,
+the resumed integration plan and results) were in `archive/` and are in the repository as of `b96aba8`.
 
 ## Background studies
 
