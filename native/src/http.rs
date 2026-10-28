@@ -59,6 +59,29 @@ pub fn bind(addr: &str, port: u16) -> std::io::Result<TcpListener> {
     crate::platform::listen(ip, port, 5)
 }
 
+/// The status code of GET path on host:port, everything within timeout (the health command's check).
+pub fn get_status(host: &str, port: u16, path: &str, timeout: Duration) -> std::io::Result<u16> {
+    let ip: std::net::Ipv4Addr = host.parse().map_err(|_| std::io::Error::other(format!("not an IPv4 address: {}", host)))?;
+    let deadline = std::time::Instant::now() + timeout;
+    let left = || deadline.saturating_duration_since(std::time::Instant::now()).max(Duration::from_millis(1));
+    let mut s = TcpStream::connect_timeout(&(ip, port).into(), timeout)?;
+    s.set_write_timeout(Some(left()))?;
+    s.write_all(format!("GET {} HTTP/1.0\r\nHost: {}:{}\r\n\r\n", path, host, port).as_bytes())?;
+    let mut head = Vec::new();
+    let mut buf = [0u8; 512];
+    while !head.windows(2).any(|w| w == b"\r\n") { // the status line is enough
+        s.set_read_timeout(Some(left()))?;
+        let n = s.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        head.extend_from_slice(&buf[..n]);
+    }
+    let line = String::from_utf8_lossy(&head);
+    line.split(' ').nth(1).and_then(|c| c.parse().ok())
+        .ok_or_else(|| std::io::Error::other(format!("not an HTTP answer: {:?}", line.lines().next().unwrap_or(""))))
+}
+
 /// RFC 7231 date of now, as the Date header.
 fn http_date() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64;
@@ -675,5 +698,23 @@ mod tests {
             let r = get(addr, &format!("GET /api/observation-samples?{} HTTP/1.0\r\n\r\n", query));
             assert!(r.starts_with("HTTP/1.0 400 "), "{}: {}", query, r);
         }
+    }
+
+    #[test]
+    fn get_status_reads_the_status_line() {
+        let (addr, _) = server(|_| {});
+        let port = addr.port();
+        let t0 = std::time::Instant::now();
+        let code = loop { // 503 until the first snapshot, then 200
+            let c = get_status("127.0.0.1", port, "/api/stats", Duration::from_secs(4)).unwrap();
+            if c == 200 || t0.elapsed() > Duration::from_secs(5) {
+                break c;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(code, 200);
+        assert_eq!(get_status("127.0.0.1", port, "/nope", Duration::from_secs(4)).unwrap(), 404);
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        assert!(get_status("127.0.0.1", closed, "/api/stats", Duration::from_secs(1)).is_err()); // refused
     }
 }
