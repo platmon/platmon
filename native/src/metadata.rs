@@ -21,25 +21,39 @@ pub fn clock_source() -> &'static str {
 }
 
 const UNSET: i64 = i64::MIN;
+#[cfg(not(test))]
 static FAKE_BASE: AtomicI64 = AtomicI64::new(UNSET);
+#[cfg(not(test))]
 static FAKE_CALLS: AtomicI64 = AtomicI64::new(0);
+#[cfg(not(test))]
 static FAKE_WALL_US: AtomicI64 = AtomicI64::new(UNSET);
+// Unit tests run in parallel threads: each test's clocks are its own thread's.
+#[cfg(test)]
+thread_local! {
+    static FAKE_BASE: AtomicI64 = AtomicI64::new(UNSET);
+    static FAKE_CALLS: AtomicI64 = AtomicI64::new(0);
+    static FAKE_WALL_US: AtomicI64 = AtomicI64::new(UNSET);
+}
+#[cfg(not(test))]
+fn fake<T>(clock: &'static AtomicI64, f: impl FnOnce(&AtomicI64) -> T) -> T { f(clock) }
+#[cfg(test)]
+fn fake<T>(clock: &'static std::thread::LocalKey<AtomicI64>, f: impl FnOnce(&AtomicI64) -> T) -> T { clock.with(f) }
 /// The step between two calls of a set clock (fixture tests: the same reads give the same spans).
 pub const FAKE_TICK: i64 = 1_000;
 
 /// Sets the clocks for the next collection (script mode): clock() returns base, base + FAKE_TICK, ...
 /// and wall() wall_us / 1e6. Collections never set them.
 pub fn set_clocks(base: i64, wall_us: i64) {
-    FAKE_BASE.store(base, Ordering::Relaxed);
-    FAKE_CALLS.store(0, Ordering::Relaxed);
-    FAKE_WALL_US.store(wall_us, Ordering::Relaxed);
+    fake(&FAKE_BASE, |c| c.store(base, Ordering::Relaxed));
+    fake(&FAKE_CALLS, |c| c.store(0, Ordering::Relaxed));
+    fake(&FAKE_WALL_US, |c| c.store(wall_us, Ordering::Relaxed));
 }
 
 /// Elapsed nanoseconds on the Sampler's clock (see clock_source).
 pub fn clock() -> i64 {
-    let base = FAKE_BASE.load(Ordering::Relaxed);
+    let base = fake(&FAKE_BASE, |c| c.load(Ordering::Relaxed));
     if base != UNSET {
-        return base + FAKE_TICK * FAKE_CALLS.fetch_add(1, Ordering::Relaxed);
+        return base + FAKE_TICK * fake(&FAKE_CALLS, |c| c.fetch_add(1, Ordering::Relaxed));
     }
     let ns = if clock_source() == "boottime" { platform::boottime_ns() } else { platform::monotonic_ns() };
     ns.unwrap_or(0)
@@ -47,7 +61,7 @@ pub fn clock() -> i64 {
 
 /// Unix time in seconds (time.time()).
 pub fn wall() -> f64 {
-    let us = FAKE_WALL_US.load(Ordering::Relaxed);
+    let us = fake(&FAKE_WALL_US, |c| c.load(Ordering::Relaxed));
     if us != UNSET {
         return us as f64 / 1e6;
     }
@@ -131,7 +145,7 @@ impl Group {
             Err(sysfs::ReadError::Utf8) => { self.note(target, "invalid_data", Some(path.into())); return None; }
             Err(sysfs::ReadError::Os(e)) => {
                 if e.raw_os_error() == Some(2) {
-                    let gone = found.map_or(false, |f| !std::path::Path::new(f).exists());
+                    let gone = found.map_or(false, |f| !sysfs::exists(f));
                     self.note(target, if gone { "disappeared" } else { "not_exposed" }, None);
                 } else {
                     let r = sysfs::reason_of(&e);

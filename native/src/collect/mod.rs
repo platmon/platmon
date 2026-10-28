@@ -178,3 +178,146 @@ pub fn sensor_entries(stats: &Value, fan_ids: &[u64], groups: &[&Group]) -> Vec<
 fn span_value(span: metadata::Span) -> Value {
     span.map_or(Value::Null, |(a, b)| Value::Arr(vec![a.into(), b.into()]))
 }
+
+// tests/collector/test_common.py's CpuCounters and cpu_percent tests, ported
+// (docs/development/python-test-port.md). Readings are given as the read function; Python's 5-counter
+// readings have their missing counters as 0, since cpu_times never gives fewer than 8.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    const S: i64 = 1_000_000_000;
+
+    fn reading(cores: &[(i64, &[i64])]) -> BTreeMap<i64, Vec<i64>> {
+        cores.iter().map(|(n, c)| { let mut v = c.to_vec(); v.resize(v.len().max(8), 0); (*n, v) }).collect()
+    }
+
+    fn idle_busy(idle: i64, busy: i64) -> Vec<i64> {
+        vec![busy, 0, 0, idle, 0, 0, 0, 0]
+    }
+
+    /// One sample at t ns: (usage, cpu_sampling as JSON).
+    fn at(c: &mut CpuCounters, t: i64, r: BTreeMap<i64, Vec<i64>>) -> (Vec<(i64, f64)>, String) {
+        metadata::set_clocks(t, 0);
+        let (u, s) = c.sample(|| Ok(r)).unwrap();
+        (u, s.to_string(false))
+    }
+
+    fn counters() -> CpuCounters {
+        CpuCounters::new(Some(5.0), "interval")
+    }
+
+    fn unavailable(s: &str) -> String {
+        s.split_once(r#""unavailable":"#).unwrap().1.trim_end_matches('}').to_string()
+    }
+
+    #[test]
+    fn cpu_percent_table() {
+        let cases: Vec<(Vec<(i64, Vec<i64>)>, Vec<(i64, Vec<i64>)>, Vec<(i64, f64)>, &str)> = vec![
+            (vec![(0, vec![100, 0, 100, 700, 100, 0, 0, 0])], vec![(0, vec![150, 0, 150, 800, 100, 0, 0, 0])], vec![(0, 50.0)], "[]"),
+            (vec![(0, vec![0; 8])], vec![(0, vec![0, 0, 0, 90, 10, 0, 0, 0])], vec![(0, 0.0)], "[]"), // iowait counts as idle
+            (vec![(0, vec![0; 8])], vec![(0, vec![40, 10, 20, 0, 0, 10, 10, 10])], vec![(0, 100.0)], "[]"),
+            (vec![(0, vec![0; 8])], vec![(0, vec![1, 0, 0, 2, 0, 0, 0, 0])], vec![(0, 33.3)], "[]"), // rounded once at the end
+            (vec![(0, vec![1; 5])], vec![(0, vec![1; 5])], vec![], r#"[{"id":0,"reason":"no_ticks"}]"#), // not 0 %
+            (vec![(0, vec![0; 5]), (2, vec![0; 5]), (3, vec![0; 5])], vec![(0, vec![10, 0, 0, 10, 0]), (2, vec![0, 0, 0, 10, 0])],
+             vec![(0, 50.0), (2, 0.0)], "[]"), // cpu1 offline, cpu3 went offline: ids kept, nothing mispaired
+            // guest and guest_nice are already in user and nice: not counted twice
+            (vec![(0, vec![0; 10])], vec![(0, vec![50, 0, 0, 50, 0, 0, 0, 0, 50, 0])], vec![(0, 50.0)], "[]"),
+            (vec![(0, vec![0; 10])], vec![(0, vec![0, 50, 0, 50, 0, 0, 0, 0, 0, 50])], vec![(0, 50.0)], "[]"),
+            (vec![(0, vec![0; 8]), (1, vec![0, 0, 0, 0, 50, 0, 0, 0])], vec![(0, [vec![10], vec![0; 7]].concat()), (1, vec![0, 0, 0, 100, 40, 0, 0, 0]), (2, vec![5; 8])],
+             vec![(0, 100.0)], r#"[{"id":1,"reason":"counter_regressed"},{"id":2,"reason":"warmup"}]"#),
+        ];
+        for (before, after, usage, missing) in cases {
+            let mut c = counters();
+            let r = |x: &Vec<(i64, Vec<i64>)>| reading(&x.iter().map(|(n, v)| (*n, v.as_slice())).collect::<Vec<_>>());
+            at(&mut c, 10 * S, r(&before));
+            let (u, s) = at(&mut c, 11 * S, r(&after));
+            assert_eq!((u, unavailable(&s)), (usage, missing.to_string()));
+        }
+    }
+
+    #[test]
+    fn first_reading_warms_up_then_measures() {
+        let mut c = counters();
+        assert_eq!(at(&mut c, 10 * S, reading(&[(0, &idle_busy(0, 0)), (1, &idle_busy(0, 0))])),
+                   (vec![], r#"{"mode":"interval","window_ms":null,"unavailable":[{"id":0,"reason":"warmup"},{"id":1,"reason":"warmup"}]}"#.into()));
+        // readings 1.25 s apart: the window is what was measured; usage is a tick ratio
+        let (u, s) = at(&mut c, 10 * S + 1_250_000_000, reading(&[(0, &idle_busy(100, 100)), (1, &idle_busy(200, 0))]));
+        assert_eq!((u.clone(), s), (vec![(0, 50.0), (1, 0.0)], r#"{"mode":"interval","window_ms":1250.0,"unavailable":[]}"#.into()));
+        assert_eq!(at(&mut c, 14 * S + 250_000_000, reading(&[(0, &idle_busy(200, 200)), (1, &idle_busy(400, 0))])).0, u); // a longer window
+    }
+
+    #[test]
+    fn cores_come_and_go() {
+        let mut c = counters();
+        at(&mut c, 10 * S, reading(&[(0, &idle_busy(0, 0)), (1, &idle_busy(0, 0))]));
+        let (u, s) = at(&mut c, 11 * S, reading(&[(0, &idle_busy(10, 10)), (1, &idle_busy(20, 0)), (2, &idle_busy(5, 5))]));
+        assert_eq!((u, unavailable(&s)), (vec![(0, 50.0), (1, 0.0)], r#"[{"id":2,"reason":"warmup"}]"#.into()));
+        let (u, s) = at(&mut c, 12 * S, reading(&[(0, &idle_busy(20, 20)), (2, &idle_busy(10, 10))])); // cpu1 went offline
+        assert_eq!((u, unavailable(&s)), (vec![(0, 50.0), (2, 50.0)], "[]".into())); // gone: neither shown nor listed
+        let (u, s) = at(&mut c, 13 * S, reading(&[(0, &idle_busy(30, 30)), (1, &idle_busy(500, 500)), (2, &idle_busy(20, 10))]));
+        assert_eq!((u, unavailable(&s)), (vec![(0, 50.0), (2, 0.0)], r#"[{"id":1,"reason":"warmup"}]"#.into())); // a fresh baseline
+        let (u, _) = at(&mut c, 14 * S, reading(&[(0, &idle_busy(40, 40)), (1, &idle_busy(510, 510)), (2, &idle_busy(30, 10))]));
+        assert_eq!(u[1], (1, 50.0));
+    }
+
+    #[test]
+    fn counter_regression_is_dropped_and_rebased() {
+        let mut c = counters();
+        at(&mut c, 10 * S, reading(&[(0, &idle_busy(100, 100)), (1, &idle_busy(100, 100))]));
+        let (u, s) = at(&mut c, 11 * S, reading(&[(0, &idle_busy(50, 150)), (1, &idle_busy(110, 110))]));
+        assert_eq!((u, unavailable(&s)), (vec![(1, 50.0)], r#"[{"id":0,"reason":"counter_regressed"}]"#.into()));
+        assert_eq!(at(&mut c, 12 * S, reading(&[(0, &idle_busy(60, 160)), (1, &idle_busy(120, 120))])).0, [(0, 50.0), (1, 50.0)]);
+    }
+
+    #[test]
+    fn no_ticks_is_not_zero() {
+        let mut c = counters();
+        at(&mut c, 10 * S, reading(&[(0, &idle_busy(10, 10))]));
+        let (u, s) = at(&mut c, 11 * S, reading(&[(0, &idle_busy(10, 10))]));
+        assert_eq!((u, unavailable(&s)), (vec![], r#"[{"id":0,"reason":"no_ticks"}]"#.into()));
+    }
+
+    #[test]
+    fn invalid_interval() {
+        for step in [0, -S] {
+            let mut c = counters();
+            at(&mut c, 10 * S, reading(&[(0, &idle_busy(0, 0))]));
+            assert_eq!(at(&mut c, 10 * S + step, reading(&[(0, &idle_busy(10, 10))])),
+                       (vec![], r#"{"mode":"interval","window_ms":null,"unavailable":[{"id":0,"reason":"invalid_interval"}]}"#.into()));
+            assert_eq!(at(&mut c, 11 * S + step, reading(&[(0, &idle_busy(20, 20))])).0, [(0, 50.0)]); // rebased on the reading it could not use
+        }
+    }
+
+    #[test]
+    fn gap_boundary_and_recovery() {
+        let mut c = counters();
+        at(&mut c, 10 * S, reading(&[(0, &idle_busy(0, 0))]));
+        assert_eq!(at(&mut c, 15 * S, reading(&[(0, &idle_busy(10, 10))])).0, [(0, 50.0)]); // exactly max_gap: still averaged
+        assert_eq!(at(&mut c, 20 * S + 1, reading(&[(0, &idle_busy(20, 20))])),
+                   (vec![], r#"{"mode":"interval","window_ms":5000.0,"unavailable":[{"id":0,"reason":"gap"}]}"#.into()));
+        let (u, s) = at(&mut c, 21 * S + 1, reading(&[(0, &idle_busy(30, 20))]));
+        assert_eq!((u, s.contains(r#""window_ms":1000.0"#)), (vec![(0, 0.0)], true));
+    }
+
+    #[test]
+    fn read_failure_raises_and_restarts_warmup() {
+        let mut c = counters();
+        at(&mut c, 10 * S, reading(&[(0, &idle_busy(0, 0))]));
+        metadata::set_clocks(11 * S, 0);
+        assert!(c.sample(|| Err("unreadable".into())).is_err());
+        let (u, s) = at(&mut c, 12 * S, reading(&[(0, &idle_busy(10, 10))]));
+        assert_eq!((u, unavailable(&s)), (vec![], r#"[{"id":0,"reason":"warmup"}]"#.into()));
+    }
+
+    #[test]
+    fn counters_are_independent() {
+        let (mut a, mut b) = (counters(), counters());
+        at(&mut a, 10 * S, reading(&[(0, &idle_busy(0, 0))]));
+        at(&mut a, 11 * S, reading(&[(0, &idle_busy(10, 10))]));
+        assert_eq!(unavailable(&at(&mut b, 11 * S, reading(&[(0, &idle_busy(20, 20))])).1), r#"[{"id":0,"reason":"warmup"}]"#);
+        // a compares with its own last reading (10, 10): 33.3 %; against b's (20, 20) it would read 0 %
+        assert_eq!(at(&mut a, 12 * S, reading(&[(0, &idle_busy(30, 20))])).0, [(0, 33.3)]);
+    }
+}

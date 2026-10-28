@@ -73,7 +73,8 @@ change. Before the removal:
 1. Move the source installation and the container to the native server (or a generic tarball).
 2. Freeze the Python service's answers into golden files, so the native equivalence checks keep their
    reference.
-3. Port the Python collector tests (about 290) to Rust.
+3. Port the Python collector tests (about 290) to Rust. Done for all 397 Python service tests, the runtime's
+   too: [Python test port](python-test-port.md) lists where each one is shown now.
 4. Split `native/tools/` by purpose (equivalence, performance, deployment), and move `VERSION` out of
    `runtime/__init__.py` and the benchmarks with the removal. Renaming `native/` needs the owner's approval.
 

@@ -608,4 +608,72 @@ mod tests {
         assert!(r.starts_with("HTTP/1.0 503 Service Unavailable\r\n"), "{}", r);
         assert!(r.ends_with(r#"{"error": "no current data (not collected yet, or collection keeps failing)", "schema_version": 1, "code": "no_current_data", "instance_id": "x", "sample": null}"#));
     }
+
+    // tests/runtime/test_server.py, ported where live_http.py and runtime_fixture.py do not show it
+    // (docs/development/python-test-port.md).
+    fn web_dir(name: &str, files: &[(&str, &[u8])]) -> String {
+        let dir = std::env::temp_dir().join(format!("platmon-native-{}-{}", name, std::process::id()));
+        for (path, bytes) in files {
+            let p = dir.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, bytes).unwrap();
+        }
+        dir.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn web_asset_paths_are_allowlisted() {
+        let web = web_dir("allow", &[("assets/brand/private.svg", b"private asset"), ("index.html", b"page"), ("app.js", b"js")]);
+        let (addr, _) = server(|s| s.web = Some(web.clone()));
+        for path in ["/private.js", "/../app.js", "/%2e%2e/app.js", "/assets/brand/", "/assets/brand/private.svg",
+                     "/assets/brand/../../index.html", "/assets/brand/%2e%2e/%2e%2e/index.html"] {
+            let r = get(addr, &format!("GET {} HTTP/1.0\r\n\r\n", path));
+            assert!(r.starts_with("HTTP/1.0 404 "), "{}: {:?}", path, &r[..r.len().min(60)]);
+        }
+        std::fs::remove_dir_all(&web).unwrap();
+    }
+
+    #[test]
+    fn a_slow_but_steady_reader_gets_the_whole_answer() {
+        // the write timeout is a limit on no progress, not on the whole answer: /api/history can be large
+        let web = web_dir("steady", &[("app.js", &vec![b'x'; 4 << 20])]);
+        let (addr, _) = server(|s| { s.web = Some(web.clone()); s.write_timeout = Duration::from_millis(300); });
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.write_all(b"GET /app.js HTTP/1.0\r\n\r\n").unwrap();
+        let (mut got, mut buf, t0) = (Vec::new(), vec![0u8; 256 << 10], std::time::Instant::now());
+        loop {
+            let n = c.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            got.extend_from_slice(&buf[..n]);
+            std::thread::sleep(Duration::from_millis(20)); // reading slowly, but always within the timeout
+        }
+        assert!(t0.elapsed() > Duration::from_millis(300), "{:?}", t0.elapsed()); // longer than one timeout in all
+        let start = got.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        assert_eq!(got.len() - start, 4 << 20);
+        std::fs::remove_dir_all(&web).unwrap();
+    }
+
+    #[test]
+    fn replay_http_rejects_invalid_queries_and_needs_a_group() {
+        let mut sampler = Sampler::new(1.0, None, "test".into(), "boottime");
+        sampler.replay = Some(Arc::new(crate::replay::Replay::new("test".into(), "boottime", &["battery"], 600.0, 1 << 20)));
+        let obs = Arc::new(Observations { groups: vec![], instance_id: "test".into(), clock_source: "boottime" });
+        let listener = bind("127.0.0.1", 0).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let srv = Arc::new(Server::new(Arc::new(sampler), obs, None, "0".into(), Value::obj()));
+        std::thread::spawn(move || srv.serve(listener));
+        let long = format!("instance_id={}", "x".repeat(129));
+        let big = format!("after={}", "9".repeat(20));
+        for query in ["after=1", "after=-1", "after=1.0", "after=", "limit=0", "limit=101", "limit=", "limit=nan", "limit=1&limit=2",
+                      "extra=x", "group=battery", "instance_id=", &long, &big, "limit=1&after=0&instance_id=x&extra=x&other=y"] {
+            let r = get(addr, &format!("GET /api/samples?{} HTTP/1.0\r\n\r\n", query));
+            assert!(r.starts_with("HTTP/1.0 400 ") && r.contains(r#""code":"invalid_query""#) && r.contains("Cache-Control: no-store"), "{}: {}", query, r);
+        }
+        for query in ["", "group=core", "group=unknown", "group=wifi&group=battery"] {
+            let r = get(addr, &format!("GET /api/observation-samples?{} HTTP/1.0\r\n\r\n", query));
+            assert!(r.starts_with("HTTP/1.0 400 "), "{}: {}", query, r);
+        }
+    }
 }

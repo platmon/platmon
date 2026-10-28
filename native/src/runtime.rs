@@ -580,4 +580,43 @@ mod tests {
         assert_eq!(writer.join().unwrap().map(|p| p.sequence), Some(2));
         assert!(s.view(|| 5_000).0.unwrap().starts_with(r#"{"n": 2,"#));
     }
+
+    #[test]
+    fn only_rfc6901_pointers_to_sensor_values_are_published() {
+        // tests/collector/test_provenance.py: records must sit at the pointer sensor_values writes; dictionary
+        // keys like "01" or "-1" are fine, only list indexes follow the index rule
+        let stats = r#"{"fans": [{"name": "a", "rpm": 1, "percent": null}, {"name": "b", "rpm": 2, "percent": null}],
+                        "temperature": {"a~2b": 1.0, "x/y z \uc628\ub3c4": 2.0, "01": 3.0, "-1": 4.0}}"#;
+        let span = |a: i64, b: i64| Value::Arr(vec![a.into(), b.into()]);
+        let record = |s: Value| { let mut r = Value::obj(); r.set("id", "src1:x".into()); r.set("span", s); r };
+        for (ptr, ok) in [("/fans/-1/rpm", false), ("/fans/01/rpm", false), ("/fans/+0/rpm", false), ("/fans/ 0/rpm", false),
+                          ("/fans/2/rpm", false), ("/temperature/a~2b", false), ("/temperature/a~02b", true), ("/fans/1/rpm", true),
+                          ("/temperature/x~1y z \u{c628}\u{b3c4}", true), ("/temperature/01", true), ("/temperature/-1", true)] {
+            let mut st = json::parse(stats).unwrap();
+            let mut records = Value::obj();
+            for (p, v) in sensor_values(&st) {
+                if !v.is_null() {
+                    records.set(&p, record(span(1_020, 1_021)));
+                }
+            }
+            records.set(ptr, record(span(1_030, 1_031)));
+            let mut required = Value::obj();
+            for n in REQUIRED_READS {
+                required.set(n, span(1_100, 1_200));
+            }
+            let (meta, oldest, problem) = check(&mut st, &records, &required, &Value::obj(), true, 1_000, 2_000);
+            assert_eq!(meta.get(ptr).is_some(), ok, "{}", ptr);
+            assert_eq!((problem.is_none(), oldest.is_some()), (ok, ok), "{}", ptr); // else: from the cycle start
+        }
+    }
+
+    #[test]
+    fn default_stale_after_and_a_new_instance_each_time() {
+        // tests/runtime/test_sampler.py: a floor of 5 s, so a slow collect alone does not trip it; else 3 intervals
+        assert_eq!(Sampler::new(1.0, None, "x".into(), "boottime").stale_ns, 5_000_000_000);
+        assert_eq!(Sampler::new(10.0, None, "x".into(), "boottime").stale_ns, 30_000_000_000);
+        let (a, b) = (uuid4(), uuid4()); // each service start is a new instance: a version 4 UUID
+        assert_ne!(a, b);
+        assert!(a.len() == 36 && a.as_bytes()[14] == b'4' && "89ab".contains(a.as_bytes()[19] as char), "{}", a);
+    }
 }

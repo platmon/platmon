@@ -42,8 +42,8 @@ pub fn find() -> Option<String> {
             }
         }
     }
-    let wsl = std::fs::metadata(WSL).map_or(false, |m| m.is_file());
-    (wsl && usable(WSL)).then(|| WSL.to_string())
+    let wsl = std::fs::metadata(&*super::sysfs::at(WSL)).map_or(false, |m| m.is_file());
+    (wsl && usable(&super::sysfs::at(WSL))).then(|| WSL.to_string())
 }
 
 enum Failure {
@@ -263,6 +263,20 @@ fn hertz(mhz: f64) -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nvidia_wsl_discovery_without_path() {
+        // tests/collector/test_gpu.py: WSL's copy is found where PATH has none
+        if find().is_some_and(|p| p != WSL) {
+            return; // this host has nvidia-smi on its PATH, which comes first
+        }
+        let root = crate::collect::linux::sysfs::fake::Root::new(0);
+        root.put(WSL, "#!/bin/sh\n");
+        root.chmod(WSL, 0o755);
+        assert_eq!(find().as_deref(), Some(WSL));
+        root.chmod(WSL, 0o644); // not executable: not used
+        assert_eq!(find(), None);
+    }
+
     use super::*;
 
     fn rows(lines: &[&str]) -> Option<Vec<Vec<String>>> { csv_rows(lines).ok() }

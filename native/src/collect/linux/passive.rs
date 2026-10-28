@@ -89,6 +89,10 @@ pub fn namespace_id(dev: u64, ino: u64) -> String {
 
 /// socket.if_nameindex(): (index, name) of every interface.
 pub fn if_indexes() -> io::Result<Vec<(u32, String)>> {
+    #[cfg(test)]
+    if let Some(answer) = sysfs::fake::indexed() {
+        return answer;
+    }
     let mut out = Vec::new();
     unsafe {
         let list = libc::if_nameindex();
@@ -137,7 +141,7 @@ impl Network {
     pub fn sample(&mut self, group: &mut Group) -> (Value, Span) {
         use std::os::unix::fs::MetadataExt;
         let mut ns = None;
-        match std::fs::metadata(NETNS) {
+        match std::fs::metadata(&*sysfs::at(NETNS)) {
             Ok(st) => {
                 let key = (st.dev(), st.ino());
                 if self.ns.as_ref().map_or(true, |(k, _)| *k != key) {
@@ -260,7 +264,7 @@ fn valid_disk_name(name: &str) -> bool {
 
 /// disk_io.is_physical: Some(false) under devices/virtual, Some(true) otherwise, None without a link.
 pub fn is_physical(name: &str) -> io::Result<Option<bool>> {
-    match std::fs::read_link(format!("{}/{}", SYS_BLOCK, name)) {
+    match std::fs::read_link(&*sysfs::at(&format!("{}/{}", SYS_BLOCK, name))) {
         Ok(target) => Ok(Some(!format!("/{}", target.to_string_lossy()).contains("/devices/virtual/"))),
         Err(e) if e.raw_os_error() == Some(libc::ENOENT) => Ok(None),
         Err(e) => Err(e),
@@ -538,6 +542,7 @@ pub fn pressure(group: &mut Group) -> (Value, Span) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collect::linux::sysfs::fake::{self, Root};
 
     #[test]
     fn counters_like_python() {
@@ -563,6 +568,891 @@ mod tests {
     fn netns_id_matches_python() {
         // python3 -c 'import hashlib;print(hashlib.sha256(b"{\"dev\":4,\"ino\":4026531840,\"v\":1}").hexdigest())'
         assert_eq!(namespace_id(4, 4026531840), format!("netns1:{}", crate::sha256::hex(br#"{"dev":4,"ino":4026531840,"v":1}"#)));
+    }
+
+    // tests/collector/test_pressure.py, ported (docs/development/python-test-port.md).
+    const SOME: &str = "some avg10=1.25 avg60=0.50 avg300=0.10 total=123456";
+    const FULL: &str = "full avg10=0.00 avg60=0.00 avg300=0.00 total=0";
+    const T0: i64 = 1_000_000_000_000;
+
+    fn write_pressure(root: &Root, files: &[(&str, &str)]) {
+        root.mkdir(PRESSURE);
+        for (name, text) in files {
+            root.put(&format!("{}/{}", PRESSURE, name), text);
+        }
+    }
+
+    fn read_pressure(root: &Root) -> (Value, Span, Value) {
+        root.at(T0);
+        let mut g = Group::new("pressure", false);
+        let (out, span) = pressure(&mut g);
+        (out, span, g.status())
+    }
+
+    fn resource_names(out: &Value) -> Vec<String> {
+        match out.get("resources") { Some(Value::Obj(r)) => r.iter().map(|(k, _)| k.clone()).collect(), _ => vec![] }
+    }
+
+    #[test]
+    fn parse_some_and_full() {
+        let text = format!("{}\n{}\n", SOME, FULL);
+        let both = parse_pressure(&text).unwrap();
+        assert_eq!(both, [("some", [1.25, 0.5, 0.1], 123456), ("full", [0.0, 0.0, 0.0], 0)]);
+        assert_eq!(parse_pressure(SOME).unwrap(), [("some", [1.25, 0.5, 0.1], 123456)]); // before full existed
+    }
+
+    #[test]
+    fn parse_refuses_other_formats() {
+        for text in ["".to_string(), FULL.into(), format!("{}\n{}", SOME, SOME), "some avg10=1 avg60=0.00 avg300=0.00 total=1".into(),
+                     "some avg10=-1.00 avg60=0.00 avg300=0.00 total=1".into(), "some avg10=1.00 total=1".into(),
+                     format!("{} extra=1", SOME), "partial avg10=0.00 avg60=0.00 avg300=0.00 total=0".into()] {
+            assert!(parse_pressure(&text).is_none(), "{:?}", text);
+        }
+    }
+
+    #[test]
+    fn all_three_with_cpu_full_left_out() {
+        let root = Root::new(T0);
+        let both = format!("{}\n{}\n", SOME, FULL);
+        write_pressure(&root, &[("cpu", &both), ("memory", &both), ("io", &both)]);
+        let (out, span, status) = read_pressure(&root);
+        let some = r#"{"avg10":1.25,"avg60":0.5,"avg300":0.1,"total_us":123456}"#;
+        let full = r#"{"avg10":0.0,"avg60":0.0,"avg300":0.0,"total_us":0}"#;
+        assert_eq!(out.to_string(false), format!(
+            r#"{{"scope":{{"kind":"host"}},"provider":"proc_pressure","resources":{{"cpu":{{"some":{s},"full":null}},"memory":{{"some":{s},"full":{f}}},"io":{{"some":{s},"full":{f}}}}},"read":null}}"#,
+            s = some, f = full)); // cpu's full is undefined at the system level, not a measured 0
+        assert!(span.is_some());
+        assert_eq!(status.get("state").unwrap().to_string(false), r#""ok""#);
+    }
+
+    #[test]
+    fn no_pressure_directory_opens_nothing() {
+        let root = Root::new(T0);
+        let (out, span, status) = read_pressure(&root);
+        assert!(resource_names(&out).is_empty() && span.is_none());
+        assert_eq!(status.to_string(false), r#"{"state":"unavailable","reason":"not_exposed","issues":[],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn one_unreadable_file_keeps_the_others() {
+        for (case, state, reason) in [("missing", "ok", None), ("unreadable", "partial", Some("permission_denied")),
+                                      ("garbage", "partial", Some("invalid_data"))] {
+            if case == "unreadable" && unsafe { libc::geteuid() } == 0 {
+                continue; // root reads a file of mode 000
+            }
+            let root = Root::new(T0);
+            write_pressure(&root, &[("cpu", SOME), ("io", SOME)]);
+            match case {
+                "unreadable" => { root.put("/proc/pressure/memory", SOME); root.chmod("/proc/pressure/memory", 0) }
+                "garbage" => root.put("/proc/pressure/memory", "garbage"),
+                _ => {}
+            }
+            let (out, _, status) = read_pressure(&root);
+            assert_eq!(resource_names(&out), ["cpu", "io"], "{}", case);
+            assert_eq!(status.get("state").unwrap().to_string(false), format!("{:?}", state), "{}", case);
+            if let Some(reason) = reason {
+                assert!(status.get("issues").unwrap().to_string(false).contains(&format!(r#""reason":"{}""#, reason)), "{}", case);
+            }
+        }
+    }
+
+    #[test]
+    fn all_unreadable_is_an_error_without_a_read() {
+        let root = Root::new(T0);
+        write_pressure(&root, &[("cpu", "x"), ("memory", "x"), ("io", "x")]);
+        let (out, span, status) = read_pressure(&root);
+        assert!(resource_names(&out).is_empty() && span.is_none());
+        assert_eq!(status.get("state").unwrap().to_string(false), r#""error""#);
+    }
+
+    #[test]
+    fn the_read_spans_the_three_files() {
+        let root = Root::new(T0);
+        write_pressure(&root, &[("cpu", SOME), ("memory", SOME), ("io", SOME)]);
+        let (_, span, _) = read_pressure(&root);
+        assert_eq!(span, Some((T0, T0 + 3 * crate::metadata::FAKE_TICK))); // before the first read to after the last
+    }
+
+    #[test]
+    fn disabled_reads_nothing() {
+        let root = Root::new(T0);
+        root.required();
+        write_pressure(&root, &[("cpu", SOME), ("memory", SOME), ("io", SOME)]);
+        let stats = crate::collect::linux::Collector::new(5.0, [false, false, false]).collect().ok().unwrap().stats;
+        assert!(stats.get("pressure").is_none() && stats.get("collectors").unwrap().get("pressure").is_none());
+        root.at(T0);
+        let stats = crate::collect::linux::Collector::new(5.0, [false, false, true]).collect().ok().unwrap().stats;
+        assert_eq!(stats.get("collectors").unwrap().get("pressure").unwrap().get("state").unwrap().to_string(false), r#""ok""#);
+    }
+
+    #[test]
+    fn real_host_pressure() {
+        let mut g = Group::new("pressure", false);
+        let (out, span) = pressure(&mut g);
+        let Some(Value::Obj(resources)) = out.get("resources") else { panic!("no resources") };
+        if !std::path::Path::new(PRESSURE).is_dir() {
+            assert!(resources.is_empty());
+            return; // no /proc/pressure on this host (PSI not built in or disabled)
+        }
+        assert!(span.is_some() && resources.iter().all(|(k, _)| ["cpu", "memory", "io"].contains(&k.as_str())));
+        for (_, r) in resources {
+            let Some(Value::Float(avg)) = r.get("some").and_then(|s| s.get("avg10")) else { panic!("avg10") };
+            assert!((0.0..=100.0).contains(avg));
+        }
+    }
+
+    // tests/collector/test_disk_io.py, ported. A disk is physical, virtual or a partition by its /sys/block
+    // link, as the kernel makes them.
+    const S: i64 = 1_000_000_000;
+
+    /// One /proc/diskstats line: r/w = (ios, merges, sectors, ms); then in flight, io ms, weighted ms, 4 more.
+    fn row(major: u64, minor: u64, name: &str, r: [u64; 4], w: [u64; 4], in_flight: u64, io_ms: u64) -> String {
+        format!("{:4} {:7} {} {} {} {} {} {} {} {} {} {} {} 0 0 0 0 0 0 0", major, minor, name, r[0], r[1], r[2], r[3], w[0], w[1], w[2], w[3], in_flight, io_ms)
+    }
+
+    fn plain(major: u64, minor: u64, name: &str) -> String {
+        row(major, minor, name, [0; 4], [0; 4], 0, 0)
+    }
+
+    /// /sys/block/<name>: Some(true) a physical disk, Some(false) a virtual one, None no entry (a partition).
+    fn kind(root: &Root, name: &str, physical: Option<bool>) {
+        let link = format!("{}/{}", SYS_BLOCK, name);
+        if root.path(&link).symlink_metadata().is_ok() {
+            root.remove(&link);
+        }
+        match physical {
+            Some(true) => root.link(&link, &format!("../devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block/{}", name)),
+            Some(false) => root.link(&link, &format!("../devices/virtual/block/{}", name)),
+            None => {}
+        }
+    }
+
+    fn diskstats(root: &Root, rows: &[String]) {
+        root.put(DISKSTATS, rows.iter().map(|r| format!("{}\n", r)).collect::<String>());
+    }
+
+    fn sample_disks(d: &mut Disks, root: &Root, t: i64) -> (Value, Span, Value) {
+        root.at(t);
+        let mut g = Group::new("disk_io", false);
+        let (out, span) = d.sample(&mut g);
+        (out, span, g.status())
+    }
+
+    fn disk_named(out: &Value, name: &str) -> Value {
+        match out.get("disks") { Some(Value::Arr(d)) => d.iter().find(|x| x.get("name") == Some(&Value::from(name))).cloned().unwrap_or(Value::Null), _ => Value::Null }
+    }
+
+    fn names(out: &Value) -> Vec<String> {
+        match out.get("disks") { Some(Value::Arr(d)) => d.iter().map(|x| x.get("name").unwrap().to_string(false)).collect(), _ => vec![] }
+    }
+
+    fn reason(out: &Value, name: &str) -> String {
+        disk_named(out, name).get("reason").map_or("absent".into(), |r| r.to_string(false))
+    }
+
+    #[test]
+    fn only_physical_disks_with_rates_over_the_observed_window() {
+        let root = Root::new(T0);
+        for (n, k) in [("nvme0n1", Some(true)), ("nvme0n1p1", None), ("loop0", Some(false)), ("zram0", Some(false))] {
+            kind(&root, n, k);
+        }
+        diskstats(&root, &[plain(259, 0, "nvme0n1"), plain(259, 1, "nvme0n1p1"), plain(7, 0, "loop0"), plain(252, 0, "zram0")]);
+        let mut d = Disks::new(Some(5.0));
+        let (out, span, status) = sample_disks(&mut d, &root, T0);
+        assert_eq!((names(&out), reason(&out, "nvme0n1")), (vec![r#""nvme0n1""#.to_string()], r#""warmup""#.to_string()));
+        assert_eq!(out.get("scope").unwrap().to_string(false), r#"{"kind":"host_block_devices"}"#);
+        assert_eq!((out.get("provider").unwrap().to_string(false), out.get("read").unwrap().to_string(false)), (r#""proc_diskstats""#.into(), "null".into()));
+        assert_eq!(span, Some((T0, T0 + crate::metadata::FAKE_TICK)));
+        assert_eq!(status.get("state").unwrap().to_string(false), r#""ok""#);
+        diskstats(&root, &[row(259, 0, "nvme0n1", [10, 1, 80, 4], [20, 2, 160, 6], 3, 500), plain(259, 1, "nvme0n1p1"), plain(7, 0, "loop0")]);
+        let (out, _, _) = sample_disks(&mut d, &root, T0 + 2 * S);
+        assert_eq!(disk_named(&out, "nvme0n1").to_string(false), concat!(r#"{"name":"nvme0n1","major":259,"minor":0,"#,
+            r#""read":{"ios":10,"merges":1,"bytes":40960,"time_ms":4},"write":{"ios":20,"merges":2,"bytes":81920,"time_ms":6},"#,
+            r#""in_flight":3,"io_time_ms":500,"rates":{"read_bytes_per_s":20480.0,"write_bytes_per_s":40960.0,"reads_per_s":5.0,"#,
+            r#""writes_per_s":10.0,"io_time_ratio":0.25},"window_ms":2000.0,"reason":null}"#));
+        let (out, _, _) = sample_disks(&mut d, &root, T0 + 3 * S); // idle: measured 0, not missing
+        assert_eq!(disk_named(&out, "nvme0n1").get("rates").unwrap().get("write_bytes_per_s").unwrap().to_string(false), "0.0");
+    }
+
+    #[test]
+    fn confirmed_kinds_are_reused_and_missing_links_retried() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        kind(&root, "loop0", Some(false));
+        diskstats(&root, &[plain(8, 0, "sda"), plain(8, 1, "sda1"), plain(7, 0, "loop0")]);
+        let mut d = Disks::new(Some(5.0));
+        sample_disks(&mut d, &root, T0);
+        kind(&root, "sda", Some(false)); // a confirmed kind is not looked up again: sda stays a disk
+        kind(&root, "loop0", Some(true));
+        kind(&root, "sda1", Some(true)); // an entry that was missing is looked up again
+        let (out, _, _) = sample_disks(&mut d, &root, T0 + S);
+        assert_eq!(names(&out), [r#""sda""#, r#""sda1""#]);
+        diskstats(&root, &[plain(7, 0, "loop0")]);
+        sample_disks(&mut d, &root, T0 + 2 * S);
+        assert_eq!(d.kind.iter().map(|(k, _)| k.2.as_str()).collect::<Vec<_>>(), ["loop0"]); // names that are gone are not kept
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[plain(8, 0, "sda"), plain(7, 0, "loop0")]); // back: looked up again, and a new baseline
+        assert_eq!(reason(&sample_disks(&mut d, &root, T0 + 3 * S).0, "sda"), r#""warmup""#);
+    }
+
+    #[test]
+    fn a_failed_lookup_is_reported_and_retried() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        root.put("/sys/block/sdb", "not a link"); // readlink fails (EINVAL): Python's PermissionError stands for any
+        diskstats(&root, &[plain(8, 0, "sda"), plain(8, 16, "sdb")]);
+        let mut d = Disks::new(Some(5.0));
+        let (out, _, status) = sample_disks(&mut d, &root, T0);
+        assert_eq!(names(&out), [r#""sda""#]);
+        assert_eq!(status.to_string(false), r#"{"state":"partial","reason":"some_unreadable","issues":[{"target":"sdb","reason":"io_error"}],"issues_truncated":0}"#);
+        root.remove("/sys/block/sdb");
+        kind(&root, "sdb", Some(true));
+        let (out, _, status) = sample_disks(&mut d, &root, T0 + S);
+        assert_eq!((reason(&out, "sdb"), status.get("state").unwrap().to_string(false)), (r#""warmup""#.into(), r#""ok""#.into()));
+    }
+
+    #[test]
+    fn any_counter_going_down_gives_no_rate_but_in_flight_may() {
+        for field in [0, 1, 2, 3, 4, 5, 6, 7, 9] {
+            let root = Root::new(T0);
+            kind(&root, "sda", Some(true));
+            let v = [100u64; 10];
+            diskstats(&root, &[row(8, 0, "sda", [v[0], v[1], v[2], v[3]], [v[4], v[5], v[6], v[7]], v[8], v[9])]);
+            let mut d = Disks::new(Some(5.0));
+            sample_disks(&mut d, &root, T0);
+            let mut l = v;
+            l[field] -= 1;
+            diskstats(&root, &[row(8, 0, "sda", [l[0], l[1], l[2], l[3]], [l[4], l[5], l[6], l[7]], l[8], l[9])]);
+            let x = disk_named(&sample_disks(&mut d, &root, T0 + S).0, "sda");
+            assert_eq!(["reason", "rates", "window_ms"].map(|k| x.get(k).unwrap().to_string(false)), [r#""counter_regressed""#, "null", "1000.0"], "{}", field);
+            diskstats(&root, &[row(8, 0, "sda", [l[0], l[1], l[2], l[3]], [l[4], l[5], l[6], l[7]], 0, l[9])]); // in flight drops: fine
+            assert_eq!(reason(&sample_disks(&mut d, &root, T0 + 2 * S).0, "sda"), "null", "{}", field);
+        }
+    }
+
+    #[test]
+    fn gap_boundary_and_bad_intervals() {
+        for (window, why) in [(5 * S, "null"), (5 * S + 1, r#""gap""#), (0, r#""invalid_interval""#), (-S, r#""invalid_interval""#)] {
+            let root = Root::new(T0);
+            kind(&root, "sda", Some(true));
+            diskstats(&root, &[plain(8, 0, "sda")]);
+            let mut d = Disks::new(Some(5.0));
+            sample_disks(&mut d, &root, T0);
+            let x = disk_named(&sample_disks(&mut d, &root, T0 + window).0, "sda");
+            assert_eq!(x.get("reason").unwrap().to_string(false), why, "{}", window);
+            assert_eq!(x.get("rates").unwrap().is_null(), why != "null");
+            assert_eq!(reason(&sample_disks(&mut d, &root, T0 + window + S).0, "sda"), "null");
+        }
+    }
+
+    #[test]
+    fn a_new_device_number_under_the_same_name_starts_over() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[row(8, 0, "sda", [100, 0, 0, 0], [0; 4], 0, 0)]);
+        let mut d = Disks::new(Some(5.0));
+        sample_disks(&mut d, &root, T0);
+        diskstats(&root, &[row(8, 32, "sda", [200, 0, 0, 0], [0; 4], 0, 0)]);
+        assert_eq!(reason(&sample_disks(&mut d, &root, T0 + S).0, "sda"), r#""warmup""#);
+    }
+
+    #[test]
+    fn bad_rows_are_left_out_and_others_kept() {
+        let root = Root::new(T0);
+        for n in ["sda", "sdb", "sdc", "sdd", "sde", "dup", "sdf"] {
+            kind(&root, n, Some(true));
+        }
+        let text = [plain(8, 0, "sda"), "   8  16 sdb 1 2 3".into(), // short
+                    plain(8, 32, "sdc").replacen(" 0 ", " -1 ", 1), // signed
+                    plain(8, 48, "sdd").replacen(" 0 ", &format!(" {} ", 1u128 << 64), 1), // too large
+                    plain(8, 64, "sde") + " x", // a later field not a counter
+                    plain(8, 80, "dup"), plain(8, 96, "dup"), plain(8, 112, "a/b"), "8 128".into(),
+                    "   8     144 sdf 0 0 0 0 0 0 0 0 0 0 0".into(), "".into()].join("\n"); // 11 fields: an old kernel, fine
+        let mut g = Group::new("disk_io", false);
+        let (rows, bad, _) = Disks::new(None).parse(&text, &mut g).unwrap();
+        assert_eq!(rows.iter().map(|(k, _)| k.2.as_str()).collect::<Vec<_>>(), ["sda", "sdf"]);
+        assert_eq!(bad.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["sdb", "sdc", "sdd", "sde", "dup", "line8", "line9"]);
+        assert!(bad.iter().all(|(_, r)| *r == "invalid_data"));
+    }
+
+    #[test]
+    fn rows_of_left_out_devices_are_not_converted_or_reported() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        kind(&root, "loop0", Some(false));
+        root.put(DISKSTATS, format!("{}\n7 0 loop0 x y\n8 1 sda1 -1\n", plain(8, 0, "sda")));
+        let (out, _, status) = sample_disks(&mut Disks::new(Some(5.0)), &root, T0);
+        assert_eq!(names(&out), [r#""sda""#]);
+        assert_eq!(status.to_string(false), r#"{"state":"ok","reason":null,"issues":[],"issues_truncated":0}"#);
+        let mut g = Group::new("disk_io", false);
+        let (rows, bad, _) = Disks::new(None).parse("7 0 loop0 x y\n", &mut g).unwrap(); // listed, so not empty, but nothing to collect
+        assert!(rows.is_empty() && bad.is_empty());
+    }
+
+    #[test]
+    fn a_broken_file_gives_nothing_and_clears_baselines() {
+        for text in [&b"\xff\xfe"[..], b"", b"\n\n"] {
+            let root = Root::new(T0);
+            kind(&root, "sda", Some(true));
+            diskstats(&root, &[plain(8, 0, "sda")]);
+            let mut d = Disks::new(Some(5.0));
+            sample_disks(&mut d, &root, T0);
+            root.put(DISKSTATS, text);
+            let (out, span, status) = sample_disks(&mut d, &root, T0 + S);
+            assert!(names(&out).is_empty() && span.is_none());
+            assert_eq!(status.to_string(false), r#"{"state":"error","reason":"invalid_data","issues":[{"target":"diskstats","reason":"invalid_data"}],"issues_truncated":0}"#);
+            diskstats(&root, &[plain(8, 0, "sda")]);
+            assert_eq!(reason(&sample_disks(&mut d, &root, T0 + 2 * S).0, "sda"), r#""warmup""#);
+        }
+    }
+
+    #[test]
+    fn unreadable_file() {
+        for (errno, state, why) in [(libc::ENOENT, "unavailable", "not_exposed"), (libc::EACCES, "error", "permission_denied"), (libc::EIO, "error", "io_error")] {
+            let root = Root::new(T0);
+            kind(&root, "sda", Some(true));
+            diskstats(&root, &[plain(8, 0, "sda")]);
+            let mut d = Disks::new(Some(5.0));
+            sample_disks(&mut d, &root, T0);
+            fake::answers(DISKSTATS, vec![Err(errno)]);
+            let (out, span, status) = sample_disks(&mut d, &root, T0 + S);
+            assert!(names(&out).is_empty() && span.is_none() && d.last.is_none());
+            assert_eq!((status.get("state").unwrap().to_string(false), status.get("reason").unwrap().to_string(false)),
+                       (format!("{:?}", state), format!("{:?}", why)));
+        }
+    }
+
+    #[test]
+    fn no_physical_disk_is_not_detected_not_an_error() {
+        let root = Root::new(T0);
+        kind(&root, "loop0", Some(false));
+        kind(&root, "ram0", Some(false));
+        diskstats(&root, &[plain(7, 0, "loop0"), plain(1, 0, "ram0")]);
+        let (out, span, status) = sample_disks(&mut Disks::new(Some(5.0)), &root, T0);
+        assert!(names(&out).is_empty() && span.is_some());
+        assert_eq!(status.to_string(false), r#"{"state":"unavailable","reason":"not_detected","issues":[],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn many_devices_and_capped_issues() {
+        let root = Root::new(T0);
+        let mut rows: Vec<String> = (0..200).map(|n| { kind(&root, &format!("loop{}", n), Some(false)); plain(7, n, &format!("loop{}", n)) }).collect();
+        kind(&root, "sda", Some(true));
+        rows.push(plain(8, 0, "sda"));
+        rows.extend((0..100).map(|n| { kind(&root, &format!("bad{}", n), Some(true)); format!("8 {} bad{} 1", n + 1, n) }));
+        diskstats(&root, &rows);
+        let (out, _, status) = sample_disks(&mut Disks::new(Some(5.0)), &root, T0);
+        assert_eq!(names(&out), [r#""sda""#]);
+        assert!(status.get("issues").unwrap().get_index(31).is_some() && status.get("issues").unwrap().get_index(32).is_none());
+        assert_eq!(status.get("issues_truncated").unwrap().to_string(false), "68");
+    }
+
+    #[test]
+    fn changing_the_output_does_not_touch_the_baseline() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[row(8, 0, "sda", [10, 0, 0, 0], [0; 4], 0, 0)]);
+        let mut d = Disks::new(Some(5.0));
+        let (mut out, _, _) = sample_disks(&mut d, &root, T0);
+        *out.get_mut("disks").unwrap() = Value::Arr(vec![]);
+        assert_eq!(disk_named(&sample_disks(&mut d, &root, T0 + S).0, "sda").get("rates").unwrap().get("reads_per_s").unwrap().to_string(false), "0.0");
+    }
+
+    #[test]
+    fn is_physical_follows_the_sysfs_link() {
+        let root = Root::new(T0);
+        kind(&root, "nvme0n1", Some(true));
+        kind(&root, "loop0", Some(false));
+        assert_eq!((is_physical("nvme0n1").unwrap(), is_physical("loop0").unwrap()), (Some(true), Some(false)));
+        assert_eq!(is_physical("nvme0n1p1").unwrap(), None); // a partition has no /sys/block entry
+    }
+
+    #[test]
+    fn on_unless_disabled_and_disabled_never_reads() {
+        let root = Root::new(T0);
+        root.required();
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[plain(8, 0, "sda")]);
+        let stats = crate::collect::linux::Collector::new(5.0, [false, false, false]).collect().ok().unwrap().stats;
+        assert!(stats.get("disk_io").is_none() && stats.get("collectors").unwrap().get("disk_io").is_none());
+        let mut c = crate::collect::linux::Collector::new(5.0, [false, true, false]);
+        assert_eq!(c.disks.as_ref().unwrap().max_gap, Some(5 * S));
+        root.at(T0);
+        let stats = c.collect().ok().unwrap().stats;
+        assert_eq!(stats.get("collectors").unwrap().get("disk_io").unwrap().get("state").unwrap().to_string(false), r#""ok""#);
+        assert_eq!(stats.get("disk").unwrap().to_string(false).matches(':').count(), 2); // the filesystem usage: total and used, unchanged
+    }
+
+    #[test]
+    fn real_host_reading() {
+        let mut g = Group::new("disk_io", false);
+        let (out, span) = Disks::new(None).sample(&mut g);
+        assert!(["\"ok\"", "\"partial\"", "\"unavailable\""].contains(&g.status().get("state").unwrap().to_string(false).as_str()));
+        if std::path::Path::new(DISKSTATS).exists() {
+            assert!(span.is_some());
+            if let Some(Value::Arr(disks)) = out.get("disks") {
+                for d in disks {
+                    let Some(Value::Str(name)) = d.get("name") else { panic!() };
+                    assert_eq!(is_physical(name).unwrap(), Some(true));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn changed_device_number_rechecks_classification() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[plain(8, 0, "sda")]);
+        let mut d = Disks::new(Some(5.0));
+        assert_eq!(reason(&sample_disks(&mut d, &root, T0).0, "sda"), r#""warmup""#);
+        kind(&root, "sda", Some(false));
+        diskstats(&root, &[plain(8, 32, "sda")]);
+        assert!(names(&sample_disks(&mut d, &root, T0 + S).0).is_empty());
+    }
+
+    #[test]
+    fn missing_sysfs_entry_is_retried_while_diskstats_name_remains() {
+        let root = Root::new(T0);
+        diskstats(&root, &[plain(8, 0, "sda")]);
+        let mut d = Disks::new(Some(5.0));
+        assert!(names(&sample_disks(&mut d, &root, T0).0).is_empty());
+        kind(&root, "sda", Some(true));
+        assert_eq!(reason(&sample_disks(&mut d, &root, T0 + S).0, "sda"), r#""warmup""#);
+    }
+
+    #[test]
+    fn file_failure_discards_classification_cache() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[plain(8, 0, "sda")]);
+        let mut d = Disks::new(Some(5.0));
+        sample_disks(&mut d, &root, T0);
+        fake::answers(DISKSTATS, vec![Err(libc::EIO)]);
+        sample_disks(&mut d, &root, T0 + S);
+        kind(&root, "sda", Some(false));
+        assert!(names(&sample_disks(&mut d, &root, T0 + 2 * S).0).is_empty());
+    }
+
+    // tests/collector/test_network.py, ported. The interface indexes are injected (fake::indexes); the
+    // namespace is the file /proc/self/ns/net links to in the test tree.
+    const HEAD: &str = "Inter-|   Receive                                                |  Transmit\n \
+                        face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n";
+
+    /// One /proc/net/dev line: rx/tx = (bytes, packets, errors, dropped); the other counters 7.
+    fn net_row(name: &str, rx: [u64; 4], tx: [u64; 4]) -> String {
+        format!("{:>6}: {} {} {} {} 7 7 7 7 {} {} {} {} 7 7 7 7", name, rx[0], rx[1], rx[2], rx[3], tx[0], tx[1], tx[2], tx[3])
+    }
+
+    struct Net {
+        root: Root,
+        ifaces: Vec<(String, u32, [u64; 4], [u64; 4])>,
+    }
+
+    impl Net {
+        fn new(ifaces: &[(&str, u32, [u64; 4], [u64; 4])]) -> Net {
+            let root = Root::new(T0);
+            root.put("/ns/a", "");
+            root.put("/ns/b", "");
+            root.link(NETNS, &root.path("/ns/a").to_string_lossy());
+            let n = Net { root, ifaces: ifaces.iter().map(|(a, b, c, d)| (a.to_string(), *b, *c, *d)).collect() };
+            n.write();
+            n
+        }
+
+        fn write(&self) {
+            self.root.put(NET_DEV, format!("{}{}", HEAD, self.ifaces.iter().map(|(n, _, rx, tx)| net_row(n, *rx, *tx) + "\n").collect::<String>()));
+            fake::indexes(Some(Ok(self.ifaces.iter().map(|(n, i, _, _)| (*i, n.as_str())).collect())));
+        }
+
+        fn set(&mut self, name: &str, index: u32, rx: [u64; 4], tx: [u64; 4]) {
+            self.ifaces.retain(|(n, ..)| n != name);
+            self.ifaces.push((name.into(), index, rx, tx));
+            self.write();
+        }
+
+        fn namespace(&self, file: &str) {
+            self.root.remove(NETNS);
+            self.root.link(NETNS, &self.root.path(file).to_string_lossy());
+        }
+    }
+
+    fn sample_net(n: &mut Network, root: &Root, t: i64) -> (Value, Span, Value) {
+        root.at(t);
+        let mut g = Group::new("network", false);
+        let (out, span) = n.sample(&mut g);
+        (out, span, g.status())
+    }
+
+    fn iface(out: &Value, name: &str) -> Value {
+        match out.get("interfaces") { Some(Value::Arr(d)) => d.iter().find(|x| x.get("name") == Some(&Value::from(name))).cloned().unwrap_or(Value::Null), _ => Value::Null }
+    }
+
+    fn iface_names(out: &Value) -> Vec<String> {
+        match out.get("interfaces") { Some(Value::Arr(d)) => d.iter().map(|x| x.get("name").unwrap().to_string(false)).collect(), _ => vec![] }
+    }
+
+    fn why(out: &Value, name: &str) -> String {
+        iface(out, name).get("reason").map_or("absent".into(), |r| r.to_string(false))
+    }
+
+    fn ns_id(out: &Value) -> String {
+        out.get("scope").unwrap().get("id").unwrap().to_string(false)
+    }
+
+    const Z: [u64; 4] = [0; 4];
+
+    #[test]
+    fn warmup_then_rates_over_the_observed_window() {
+        let mut h = Net::new(&[("eth0", 2, [1000, 10, 0, 0], [2000, 20, 0, 0]), ("lo", 1, [5, 1, 0, 0], [5, 1, 0, 0])]);
+        let mut n = Network::new(Some(5.0));
+        let (out, span, status) = sample_net(&mut n, &h.root, T0);
+        assert_eq!(iface_names(&out), [r#""eth0""#, r#""lo""#]); // deterministic: by name
+        for name in ["eth0", "lo"] {
+            let i = iface(&out, name);
+            assert_eq!(["rates", "reason", "window_ms"].map(|k| i.get(k).unwrap().to_string(false)), ["null", r#""warmup""#, "null"]);
+        }
+        assert!(ns_id(&out).starts_with(r#""netns1:"#));
+        assert_eq!(out.get("scope").unwrap().get("kind").unwrap().to_string(false), r#""process_network_namespace""#);
+        assert_eq!((out.get("provider").unwrap().to_string(false), out.get("read").unwrap().to_string(false)), (r#""proc_net_dev""#.into(), "null".into()));
+        assert_eq!(span, Some((T0, T0 + crate::metadata::FAKE_TICK)));
+        assert_eq!(status.to_string(false), r#"{"state":"ok","reason":null,"issues":[],"issues_truncated":0}"#); // warmup counts as values
+        h.set("eth0", 2, [1200, 14, 1, 2], [2600, 26, 0, 3]);
+        let (out, _, _) = sample_net(&mut n, &h.root, T0 + 2 * S); // 2 s actually passed, whatever the configured interval
+        assert_eq!(iface(&out, "eth0").to_string(false), concat!(r#"{"name":"eth0","ifindex":2,"rx":{"bytes":1200,"packets":14,"errors":1,"dropped":2},"#,
+            r#""tx":{"bytes":2600,"packets":26,"errors":0,"dropped":3},"rates":{"rx_bytes_per_s":100.0,"tx_bytes_per_s":300.0,"#,
+            r#""rx_packets_per_s":2.0,"tx_packets_per_s":3.0},"window_ms":2000.0,"reason":null}"#));
+        let lo = iface(&out, "lo"); // counters did not move: measured 0, not missing
+        assert_eq!(lo.get("rates").unwrap().to_string(false), r#"{"rx_bytes_per_s":0.0,"tx_bytes_per_s":0.0,"rx_packets_per_s":0.0,"tx_packets_per_s":0.0}"#);
+        assert!(lo.get("reason").unwrap().is_null());
+    }
+
+    #[test]
+    fn rate_uses_the_read_start_and_integer_ns() {
+        let mut h = Net::new(&[("eth0", 2, Z, Z)]);
+        let mut n = Network::new(Some(5.0));
+        sample_net(&mut n, &h.root, T0);
+        h.set("eth0", 2, [3, 0, 0, 0], Z);
+        let eth = iface(&sample_net(&mut n, &h.root, T0 + 3).0, "eth0"); // 3 ns: no float rounding of the window
+        assert_eq!((eth.get("rates").unwrap().get("rx_bytes_per_s").unwrap().to_string(false), eth.get("window_ms").unwrap().to_string(false)),
+                   ("1000000000.0".into(), "0.0".into()));
+    }
+
+    #[test]
+    fn wall_clock_is_not_used() {
+        for step in [0, -5_000_000, 3_600_000_000] {
+            let mut h = Net::new(&[("eth0", 2, Z, Z)]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            h.set("eth0", 2, [100, 0, 0, 0], Z);
+            h.root.at(T0 + S);
+            crate::metadata::set_clocks(T0 + S, 1_000_000_000_000_000 + step); // the wall clock jumps; the elapsed one does not
+            let mut g = Group::new("network", false);
+            let (out, _) = n.sample(&mut g);
+            assert_eq!(iface(&out, "eth0").get("rates").unwrap().get("rx_bytes_per_s").unwrap().to_string(false), "100.0");
+        }
+    }
+
+    #[test]
+    fn any_counter_going_down_gives_no_rate_and_a_new_baseline() {
+        for field in 0..8 {
+            let start = [100u64; 8];
+            let mut h = Net::new(&[("eth0", 2, [100; 4], [100; 4])]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            let mut lower = start;
+            lower[field] = 99;
+            h.set("eth0", 2, [lower[0], lower[1], lower[2], lower[3]], [lower[4], lower[5], lower[6], lower[7]]);
+            let eth = iface(&sample_net(&mut n, &h.root, T0 + S).0, "eth0");
+            assert_eq!(["rates", "reason", "window_ms"].map(|k| eth.get(k).unwrap().to_string(false)), ["null", r#""counter_regressed""#, "1000.0"]);
+            assert_eq!(eth.get("rx").unwrap().get("bytes").unwrap().to_string(false), lower[0].to_string()); // as read, not clamped
+            let up: Vec<u64> = lower.iter().map(|v| v + 10).collect();
+            h.set("eth0", 2, [up[0], up[1], up[2], up[3]], [up[4], up[5], up[6], up[7]]);
+            let eth = iface(&sample_net(&mut n, &h.root, T0 + 2 * S).0, "eth0");
+            assert_eq!(eth.get("rates").unwrap().get("rx_bytes_per_s").unwrap().to_string(false), "10.0"); // from the regressed reading
+        }
+    }
+
+    #[test]
+    fn network_gap_boundary_and_bad_intervals() {
+        for (window, reason) in [(5 * S, "null"), (5 * S + 1, r#""gap""#), (0, r#""invalid_interval""#), (-S, r#""invalid_interval""#)] {
+            let h = Net::new(&[("eth0", 2, Z, Z)]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            let eth = iface(&sample_net(&mut n, &h.root, T0 + window).0, "eth0");
+            assert_eq!(eth.get("reason").unwrap().to_string(false), reason);
+            assert_eq!(eth.get("rates").unwrap().is_null(), reason != "null");
+            assert_eq!(why(&sample_net(&mut n, &h.root, T0 + window + S).0, "eth0"), "null"); // every valid reading is the next baseline
+        }
+    }
+
+    #[test]
+    fn interfaces_come_go_and_are_renamed_or_reindexed() {
+        let mut h = Net::new(&[("eth0", 2, Z, Z), ("wlan0", 3, Z, Z)]);
+        let mut n = Network::new(Some(5.0));
+        sample_net(&mut n, &h.root, T0);
+        h.ifaces.retain(|(x, ..)| x != "wlan0");
+        h.set("usb0", 4, Z, Z);
+        let out = sample_net(&mut n, &h.root, T0 + S).0;
+        assert_eq!(iface_names(&out), [r#""eth0""#, r#""usb0""#]);
+        assert_eq!((why(&out, "usb0"), why(&out, "eth0")), (r#""warmup""#.into(), "null".into()));
+        h.set("wlan0", 3, [5, 0, 0, 0], Z); // back after one reading without it: no old baseline
+        h.set("eth0", 9, Z, Z); // same name, another device
+        h.ifaces.retain(|(x, ..)| x != "usb0");
+        h.set("usb1", 4, Z, Z); // same index, renamed
+        let out = sample_net(&mut n, &h.root, T0 + 2 * S).0;
+        assert_eq!(["eth0", "usb1", "wlan0"].map(|x| why(&out, x)), [r#""warmup""#; 3]);
+        assert_eq!(n.last.as_ref().unwrap().2.len(), 3); // only what the last reading saw
+    }
+
+    #[test]
+    fn namespace_change_restarts_every_baseline() {
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        let mut n = Network::new(Some(5.0));
+        let first = ns_id(&sample_net(&mut n, &h.root, T0).0);
+        h.namespace("/ns/b");
+        let out = sample_net(&mut n, &h.root, T0 + S).0;
+        assert!(ns_id(&out) != first && why(&out, "eth0") == r#""namespace_changed""#);
+        assert_eq!(why(&sample_net(&mut n, &h.root, T0 + 2 * S).0, "eth0"), "null");
+    }
+
+    #[test]
+    fn identity_lookup_failures_keep_counters_without_rates() {
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root passes a directory of mode 000
+        }
+        let mut h = Net::new(&[("eth0", 2, [1, 0, 0, 0], Z)]);
+        let mut n = Network::new(Some(5.0));
+        sample_net(&mut n, &h.root, T0);
+        h.root.chmod("/proc/self/ns", 0);
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + S);
+        h.root.chmod("/proc/self/ns", 0o755);
+        let eth = iface(&out, "eth0");
+        assert_eq!((ns_id(&out), eth.get("rx").unwrap().get("bytes").unwrap().to_string(false), eth.get("rates").unwrap().to_string(false)),
+                   ("null".into(), "1".into(), "null".into()));
+        assert_eq!(why(&out, "eth0"), r#""identity_unavailable""#);
+        assert_eq!(status.to_string(false), r#"{"state":"partial","reason":"some_unreadable","issues":[{"target":"netns","reason":"permission_denied"}],"issues_truncated":0}"#);
+        fake::indexes(Some(Err(libc::EIO)));
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + 2 * S);
+        assert_eq!((iface(&out, "eth0").get("ifindex").unwrap().to_string(false), why(&out, "eth0")), ("null".into(), r#""identity_unavailable""#.into()));
+        assert_eq!(status.get("issues").unwrap().to_string(false), r#"[{"target":"ifindex","reason":"io_error"}]"#);
+        h.write();
+        assert_eq!(why(&sample_net(&mut n, &h.root, T0 + 3 * S).0, "eth0"), r#""warmup""#); // unknown identity was no baseline
+        h.ifaces.clear(); // in the file but gone from the index list: unknown, not an error
+        h.write();
+        h.root.put(NET_DEV, format!("{}{}\n", HEAD, net_row("eth0", Z, Z)));
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + 4 * S);
+        assert_eq!((why(&out, "eth0"), status.get("state").unwrap().to_string(false)), (r#""identity_unavailable""#.into(), r#""ok""#.into()));
+    }
+
+    #[test]
+    fn network_bad_rows_are_left_out_and_others_kept() {
+        let lines = [net_row("eth0", [10, 1, 0, 0], Z), net_row("lo", Z, Z), "  bad: 1 2 3".into(), // short row
+                     net_row("neg", Z, Z).replacen(" 0 ", " -1 ", 1), net_row("dec", Z, Z).replacen(" 0 ", " 1.5 ", 1),
+                     net_row("big", Z, Z).replacen(" 0 ", &format!(" {} ", 1u128 << 64), 1),
+                     net_row("max", Z, Z).replacen(" 0 ", &format!(" {} ", u64::MAX), 1),
+                     net_row("uni", Z, Z).replacen(" 0 ", " \u{663} ", 1), // an Arabic-Indic digit is not a counter
+                     net_row("dup", Z, Z), net_row("dup", Z, Z), net_row("x/y", Z, Z), "eth1 1 2 3".into(),
+                     format!("\x1b[2J: {}", ["0"; 16].join(" ")), net_row(&"long".repeat(4), Z, Z), net_row("toolong", Z, Z) + " 0", "".into()];
+        let (rows, bad) = parse_net_dev(&format!("{}{}", HEAD, lines.join("\n"))).unwrap();
+        let mut names: Vec<&str> = rows.iter().map(|(n, _)| n.as_str()).collect();
+        names.sort();
+        assert_eq!(names, ["eth0", "lo", "max"]);
+        assert_eq!(rows.iter().find(|(n, _)| n == "eth0").unwrap().1[..2], [10, 1]);
+        assert_eq!(rows.iter().find(|(n, _)| n == "max").unwrap().1[0], u64::MAX);
+        assert!(bad.iter().all(|(_, r)| *r == "invalid_data"));
+        assert_eq!(bad.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+                   ["bad", "neg", "dec", "big", "uni", "dup", "line13", "line14", "line15", "line16", "toolong"]); // never a path or control character
+    }
+
+    #[test]
+    fn a_malformed_duplicate_still_makes_the_name_ambiguous() {
+        let (rows, bad) = parse_net_dev(&format!("{}  dup: 1 2\n{}\n", HEAD, net_row("dup", Z, Z))).unwrap();
+        assert!(rows.is_empty());
+        assert_eq!(bad.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["dup", "dup"]);
+    }
+
+    #[test]
+    fn bad_rows_in_the_counters_report_and_keep_the_rest() {
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        h.root.put(NET_DEV, format!("{}{}\n{}\n{}\n", HEAD, net_row("eth0", Z, Z), net_row("dup", Z, Z), net_row("dup", Z, Z)));
+        let (out, span, status) = sample_net(&mut Network::new(Some(5.0)), &h.root, T0);
+        assert_eq!(iface_names(&out), [r#""eth0""#]);
+        assert!(span.is_some());
+        assert_eq!(status.to_string(false), r#"{"state":"partial","reason":"some_unreadable","issues":[{"target":"dup","reason":"invalid_data"}],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn network_a_broken_file_gives_nothing_and_clears_baselines() {
+        for text in [[&b"\xff\xfe"[..], HEAD.as_bytes()].concat(), b"Inter-|\n face |bytes packets\n".to_vec(), vec![]] {
+            let h = Net::new(&[("eth0", 2, Z, Z)]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            h.root.put(NET_DEV, &text);
+            let (out, span, status) = sample_net(&mut n, &h.root, T0 + S);
+            assert!(iface_names(&out).is_empty() && span.is_none());
+            assert_eq!(status.to_string(false), r#"{"state":"error","reason":"invalid_data","issues":[{"target":"net_dev","reason":"invalid_data"}],"issues_truncated":0}"#);
+            h.write();
+            assert_eq!(why(&sample_net(&mut n, &h.root, T0 + 2 * S).0, "eth0"), r#""warmup""#);
+        }
+    }
+
+    #[test]
+    fn network_unreadable_file() {
+        for (errno, state, reason) in [(libc::ENOENT, "unavailable", "not_exposed"), (libc::EACCES, "error", "permission_denied"), (libc::EIO, "error", "io_error")] {
+            let h = Net::new(&[("eth0", 2, Z, Z)]);
+            let mut n = Network::new(Some(5.0));
+            sample_net(&mut n, &h.root, T0);
+            fake::answers(NET_DEV, vec![Err(errno)]);
+            let (out, span, status) = sample_net(&mut n, &h.root, T0 + S);
+            assert!(iface_names(&out).is_empty() && span.is_none() && n.last.is_none());
+            assert_eq!((status.get("state").unwrap().to_string(false), status.get("reason").unwrap().to_string(false)),
+                       (format!("{:?}", state), format!("{:?}", reason)));
+        }
+    }
+
+    #[test]
+    fn an_empty_list_is_not_a_broken_file() {
+        let h = Net::new(&[]);
+        let (out, span, status) = sample_net(&mut Network::new(Some(5.0)), &h.root, T0);
+        assert!(iface_names(&out).is_empty() && span.is_some());
+        assert_eq!(status.to_string(false), r#"{"state":"unavailable","reason":"not_detected","issues":[],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn many_interfaces_and_capped_issues() {
+        let ifaces: Vec<(String, u32)> = (0..300).map(|n| (format!("veth{}", n), n + 10)).collect();
+        let list: Vec<(&str, u32, [u64; 4], [u64; 4])> = ifaces.iter().map(|(n, i)| (n.as_str(), *i, [*i as u64, *i as u64, 0, 0], [*i as u64, *i as u64, 0, 0])).collect();
+        let h = Net::new(&list);
+        let text = std::fs::read_to_string(h.root.path(NET_DEV)).unwrap() + &(0..100).map(|n| format!("  bad{}: 1\n", n)).collect::<String>();
+        h.root.put(NET_DEV, text);
+        let (out, _, status) = sample_net(&mut Network::new(Some(5.0)), &h.root, T0);
+        assert_eq!(iface_names(&out).len(), 300); // nothing left out for being virtual or many
+        assert!(status.get("issues").unwrap().get_index(31).is_some() && status.get("issues").unwrap().get_index(32).is_none());
+        assert_eq!(status.get("issues_truncated").unwrap().to_string(false), "68");
+    }
+
+    #[test]
+    fn network_changing_the_output_does_not_touch_the_baseline() {
+        let h = Net::new(&[("eth0", 2, [100, 0, 0, 0], Z)]);
+        let mut n = Network::new(Some(5.0));
+        let (mut out, _, _) = sample_net(&mut n, &h.root, T0);
+        *out.get_mut("interfaces").unwrap() = Value::Arr(vec![]);
+        assert_eq!(iface(&sample_net(&mut n, &h.root, T0 + S).0, "eth0").get("rates").unwrap().get("rx_bytes_per_s").unwrap().to_string(false), "0.0");
+    }
+
+    #[test]
+    fn network_real_host_reading() {
+        let mut g = Group::new("network", false);
+        let (out, span) = Network::new(None).sample(&mut g);
+        let names = iface_names(&out);
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
+        assert!(["\"ok\"", "\"partial\"", "\"unavailable\""].contains(&g.status().get("state").unwrap().to_string(false).as_str()));
+        if std::path::Path::new(NET_DEV).exists() {
+            assert!(names.contains(&r#""lo""#.to_string()) && span.is_some());
+        }
+    }
+
+    #[test]
+    fn namespace_a_b_a_and_a_failure_in_between() {
+        use std::os::unix::fs::MetadataExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root passes a directory of mode 000
+        }
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        let mut n = Network::new(Some(5.0));
+        let a = ns_id(&sample_net(&mut n, &h.root, T0).0);
+        h.namespace("/ns/b");
+        let out = sample_net(&mut n, &h.root, T0 + S).0;
+        let st = std::fs::metadata(h.root.path("/ns/b")).unwrap();
+        assert_eq!(ns_id(&out), format!("{:?}", namespace_id(st.dev(), st.ino())));
+        assert!(ns_id(&out) != a && why(&out, "eth0") == r#""namespace_changed""#);
+        h.namespace("/ns/a");
+        let out = sample_net(&mut n, &h.root, T0 + 2 * S).0;
+        assert!(ns_id(&out) == a && why(&out, "eth0") == r#""namespace_changed""#);
+        h.root.chmod("/proc/self/ns", 0);
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + 3 * S);
+        h.root.chmod("/proc/self/ns", 0o755);
+        assert_eq!((ns_id(&out), why(&out, "eth0")), ("null".into(), r#""identity_unavailable""#.into())); // never the old id
+        assert_eq!(status.get("issues").unwrap().to_string(false), r#"[{"target":"netns","reason":"permission_denied"}]"#);
+        let (out, _, status) = sample_net(&mut n, &h.root, T0 + 4 * S);
+        assert_eq!((ns_id(&out), why(&out, "eth0"), status.get("state").unwrap().to_string(false)), (a, r#""warmup""#.into(), r#""ok""#.into()));
+        assert_eq!(why(&sample_net(&mut n, &h.root, T0 + 5 * S).0, "eth0"), "null");
+    }
+
+    #[test]
+    fn the_namespace_id_is_kept_per_instance() {
+        let h = Net::new(&[]);
+        let (mut one, mut two) = (Network::new(None), Network::new(None));
+        let a = ns_id(&sample_net(&mut one, &h.root, T0).0);
+        h.namespace("/ns/b");
+        let b = ns_id(&sample_net(&mut two, &h.root, T0).0);
+        h.namespace("/ns/a");
+        assert!(a != b && ns_id(&sample_net(&mut one, &h.root, T0 + S).0) == a && one.ns != two.ns);
+    }
+
+    #[test]
+    fn counter_accepts_exactly_what_it_did() {
+        for (text, expected) in [("0", Some(0)), ("00", Some(0)), ("7", Some(7)), ("18446744073709551615", Some(u64::MAX)),
+                                 ("18446744073709551616", None), ("1000000000000000000000000000000", None), ("-1", None), ("+1", None),
+                                 ("1.5", None), ("1e3", None), ("", None), (" ", None), ("abc", None), ("\u{663}", None), ("\u{b2}", None),
+                                 ("0x10", None), ("1_000", None), ("\u{ff11}", None)] {
+            assert_eq!(counter(text), expected, "{:?}", text);
+        }
+    }
+
+    // tests/collector/test_network_integration.py, ported: the network in the collection. Its checks in the
+    // Sampler are runtime_fixture.py's provenance scenario.
+    #[test]
+    fn network_on_unless_disabled_and_never_read_when_off() {
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        h.root.required();
+        h.root.at(T0);
+        let stats = crate::collect::linux::Collector::new(5.0, [false, false, false]).collect().ok().unwrap().stats;
+        assert!(stats.get("network").is_none() && stats.get("collectors").unwrap().get("network").is_none());
+        let mut c = crate::collect::linux::Collector::new(5.0, [true, false, false]);
+        assert_eq!(c.network.as_ref().unwrap().max_gap, Some(5 * S));
+        h.root.at(T0);
+        let stats = c.collect().ok().unwrap().stats;
+        assert_eq!(stats.get("network").unwrap().get("read").unwrap().to_string(false), "null"); // no read time outside the Sampler
+        assert_eq!(stats.get("collectors").unwrap().get("network").unwrap().get("state").unwrap().to_string(false), r#""ok""#);
+    }
+
+    #[test]
+    fn a_core_failure_reads_no_network() {
+        let h = Net::new(&[("eth0", 2, Z, Z)]);
+        h.root.required();
+        h.root.put("/proc/meminfo", "garbage");
+        fake::answers(NET_DEV, vec![Err(libc::EIO)]);
+        h.root.at(T0);
+        assert!(crate::collect::linux::Collector::new(5.0, [true, false, false]).collect().is_err());
+        assert!(sysfs::fake::answer_left(NET_DEV)); // the collection failed before the network part: nothing read
+    }
+
+    #[test]
+    fn a_lasting_failure_is_logged_once() {
+        let mut logged = Vec::new();
+        let mut g = Group::new("network", false);
+        g.note("net_dev", "permission_denied", Some("/proc/self/net/dev: Permission denied".into()));
+        crate::metadata::summarize(std::slice::from_ref(&g), &mut logged);
+        let first = logged.clone();
+        crate::metadata::summarize(std::slice::from_ref(&g), &mut logged); // the same details: not logged again
+        assert_eq!(logged, first);
+        assert_eq!(logged, [("network".to_string(), vec!["net_dev: permission_denied (/proc/self/net/dev: Permission denied)".to_string()])]);
+        crate::metadata::summarize(&[Group::new("network", false)], &mut logged); // readable again: logged once, then quiet
+        assert_eq!(logged, [("network".to_string(), vec![])]);
+    }
+
+    #[test]
+    fn real_service_reading() {
+        let mut c = crate::collect::linux::Collector::new(5.0, [true, false, false]);
+        let col = c.collect().ok().unwrap();
+        assert!(col.passive[0].is_some()); // the read the Sampler checks
+        if std::path::Path::new(NET_DEV).exists() {
+            assert!(iface_names(col.stats.get("network").unwrap()).contains(&r#""lo""#.to_string()));
+        }
     }
 
     #[test]
