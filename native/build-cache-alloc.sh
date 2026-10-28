@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The cache-alloc build, kept as the record of the 2026-10-18/19 measurements (README); not a candidate:
+# The cache-alloc build, kept as the record of the 2026-10-18/19 measurements (native/README.md as of b96aba8); not a release build:
 #   native/build-cache-alloc.sh   -> native/target/cache-alloc/{x86_64,aarch64}-unknown-linux-musl/release/platmon-native
 set -euo pipefail
 cd "$(dirname "$0")"

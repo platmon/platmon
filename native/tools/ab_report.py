@@ -1,7 +1,7 @@
 """The A B B A results of service_ab.py, per host: each window's numbers for the first variant of the order
 (the baseline: A, Python, in 3C; S, the system allocator, against M, mimalloc) and the other, the two runs of
 each and their mean, the other against the baseline, and the rules README set for it (3C; System against
-mimalloc).
+mimalloc: native/README.md as of b96aba8; the final comparison: README, "Final comparison (candidate 1)").
 
 Each run is first checked for completeness (complete()): a run that did not do its load cannot pass, it
 is invalid. The self-test runs first: synthetic runs the judgement must pass, refuse as invalid, or find
@@ -173,7 +173,7 @@ def slower(r, a_runs):
 
 
 def rules(r, a_runs, final=False):
-    """README's 3C rules for B; also applied to A, so a broken run of either shows. A rule can only pass on a
+    """The 3C rules (native/README.md as of b96aba8) for B; also applied to A, so a broken run of either shows. A rule can only pass on a
     complete run (complete()). final (the final comparison, judge()): the absolute PSS budget instead of the
     25 % memory rule, the release CPU target, and response p95 above the baseline's reported as performance
     exceptions, not broken rules."""

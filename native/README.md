@@ -1,44 +1,40 @@
-# platmon-native (experimental)
+# platmon-native
 
 > **TL;DR**
-> - `platmon-native`: the Rust server that the Debian package runs since 1.4.0, built as static musl
->   binaries (x86_64, aarch64, armhf) and checked against the Python service on fake trees,
->   configurations, the runtime and live HTTP.
-> - The text below is the development record from its prototype (2026-10-18) onwards; its opening
->   paragraph predates the switch.
+> - The Rust server the Debian package runs since 1.4.0: static musl binaries for x86_64, aarch64 and
+>   armhf, a port of the Python service with the same HTTP API, `platmon.ini` and `/text`.
+> - Checked against the Python service on fake trees, configurations, the runtime and live HTTP (CI's
+>   `native` job), then as a service on the boards and with the released Hub.
 > - The Windows build collects every group except pressure, NPU, power, fans, power mode and board info,
->   but is not released (see Windows below).
+>   but is not released ([Windows](#windows-not-released)).
 
-A Rust port of the core of `collector.collect_recorded`, to measure what a native collector would cost
-and to check whether it can produce the same output. It is next step 1 of
-[rust-feasibility.md](../docs/performance/rust-feasibility.md). Step 3 (below) builds a Rust service
-candidate on it that keeps the service's contracts, to compare the whole process. **Not part of the
-product:** the service, the packages and the source archive do not include it, and nothing here changes
-the release.
+The platmon server the Debian package runs: a port of the Python service (`platmon.py`, `collector/`,
+`runtime/`) that keeps its contracts, so that the two give the same answers. It began on 2026-10-18 as
+next step 1 of [rust-feasibility.md](../docs/performance/rust-feasibility.md); candidate 1
+([CANDIDATE.md](CANDIDATE.md)) passed the [final comparison](#final-comparison-candidate-1) and became the
+packaged server in 1.4.0. The Python service, deprecated since 1.5.0, stays the reference it is compared
+with. The development record of the steps before candidate 1 (the step plans, the CPU runs of steps 1 and
+2, the whole-service A/B of step 3C, the replay cost split and the allocator comparison) is in this file
+as of `b96aba8`.
 
 ## Scope
 
-Ported, with the same output as the Python collector:
+The whole default service, with the same output as the Python one:
 
-- CPU usage per core and `cpu_sampling`
-- CPU clocks, thermal zones, hwmon temperatures, power (including INA3221 rails) and fans
-- memory, disk, `system`, `model`
-- the Jetson extension: GPU load and clocks, nvpmodel power mode, pwm_tach, L4T release
-- the DRM GPU (i915, amdgpu, other drivers by name), then the nvidia-smi fallback, and the accel NPU
-  (intel_vpu)
-- `collectors` states, reasons and issues
-- sensor source ids (SHA-256 descriptors), the JSON Pointers of `sensor_meta`, every value's read span and
-  the required reads' spans
-- the passive groups, wired as the service enables them by default (max_gap 5 s): Network
-  (`/proc/self/net/dev`, the namespace id, ifindex from `if_nameindex`), Disk I/O (`/proc/diskstats`, physical
-  disks by their `/sys/block` link) and Pressure (`/proc/pressure`), with their read spans
+- the core collection: CPU usage per core and `cpu_sampling`; CPU clocks, thermal zones, hwmon
+  temperatures, power (including INA3221 rails) and fans; memory, disk, `system`, `model`; the Jetson
+  extension (GPU load and clocks, nvpmodel power mode, pwm_tach, L4T release); the DRM GPU (i915, amdgpu,
+  other drivers by name), then the nvidia-smi fallback, and the accel NPU (intel_vpu)
+- `collectors` states, reasons and issues; sensor source ids (SHA-256 descriptors), the JSON Pointers of
+  `sensor_meta`, every value's read span and the required reads' spans
+- the passive groups: Network (`/proc/self/net/dev`, the namespace id, ifindex from `if_nameindex`), Disk
+  I/O (`/proc/diskstats`, physical disks by their `/sys/block` link) and Pressure (`/proc/pressure`)
+- the slow groups: storage, Wi-Fi, battery and the TCP connect probe
+- the runtime: the Sampler, history, replay, the HTTP API, the web page's files, `/text`, `platmon.ini`
+  and `--frontends` ([Runtime](#runtime))
 
-Not ported in steps 1 and 2: the slow groups (storage, Wi-Fi, battery, probe), the nvidia-smi fallback,
-and everything in `runtime/` (Sampler, history, replay, HTTP). So the collector of steps 1 and 2 is the 1 s
-core collection used on the three hosts checked, extended with Network, Disk I/O and Pressure, with the
-same output on the fixtures defined here; not the whole default collection of the product. Step 3 (below)
-adds the slow groups and `runtime/`, and the support scope step the nvidia-smi fallback and `--frontends`
-([Support scope](#support-scope)).
+The `platmon` command (`frontends/cli.py`) stays the Python client; the package installs it, so it needs
+the host's Python 3.9+.
 
 Behaviour kept from Python where bypassing std made it explicit:
 
@@ -62,182 +58,27 @@ Dependencies: `libc` (MIT or Apache-2.0, no dependencies of its own) for system 
 struct layouts per target. On Windows only, `windows-sys` (MIT or Apache-2.0, with `windows-link`, the
 same, its only dependency) for the Win32 declarations of `src/platform/windows.rs` and `src/collect/windows/`;
 the Linux builds do not compile it, so the packaged binaries contain neither. JSON output and SHA-256 are implemented here, because the output has to match
-Python's float repr and key order exactly, and both are tested against Python. Builds target `x86_64` and
-`aarch64-unknown-linux-musl` as static binaries.
+Python's float repr and key order exactly, and both are tested against Python. Builds target `x86_64`,
+`aarch64` and `arm` (`musleabihf`) Linux musl as static binaries, and `x86_64-pc-windows-msvc`.
 
-The allocator cache measured on 2026-10-18 (`src/alloc.rs`) is behind the `cache-alloc` feature, and
-mimalloc, compared on 2026-10-20, behind the `mimalloc` feature (`build-mimalloc.sh`); neither is a
-candidate. The default build uses the system allocator; see [Results](#results).
+The released build uses the system allocator. Two others were measured and kept as records, built
+only by their own scripts: the size-class cache of 2026-10-18 (`src/alloc.rs`, the `cache-alloc`
+feature, `build-cache-alloc.sh`) and mimalloc, compared on 2026-10-20 (the `mimalloc` feature,
+`build-mimalloc.sh`), which did not beat the system allocator by the rules set for it.
 
-## Step 3: the runtime
+## Runtime
 
-The goal is a Rust service candidate that keeps the existing contracts, so that the whole process can be
-compared with the Python service, not a switch to Rust. The Python service and its packages stay as they
-are; nothing changes in the product until the comparison is in and decided. Default system allocator, the
-same dependency policy (only `libc`); the `cache-alloc` build is not part of step 3.
-
-| Stage | Scope | Done when |
-| --- | --- | --- |
-| 3A, publication and live API | Sampler (one writer, immutable publications, states and freshness, data age from the read records), live HTTP (`/api/stats`, `/api/status`, `/api/observations`, the web page), the slow groups' execution structure (one thread each, a blocked read stalls only its group) | the publication, failure, recovery and concurrent request contracts hold with set collections and clocks; slow readers may be fakes |
-| 3B, service features | history, replay, the real slow readers, `/api/history`, `/api/samples`, `/api/observation-samples`, `/text`, `platmon.ini`; compatible with the existing clients | every feature of the default configuration to be compared exists on both sides |
-| 3C, whole-service A/B | Python service against the Rust candidate, same configuration and request load | CPU, memory, response times, collection cadence, retention and recovery, judged together |
-
-Status (2026-10-22, #93; the candidate under verification: [CANDIDATE.md](CANDIDATE.md)): 3A, 3B and 3C done ([results](#whole-service-ab-step-3c)), 3C judged again and the PC's replay cost split ([results](#replay-cost-after-3c)); the system allocator kept against mimalloc, which breaks the memory rule on every host ([results](#system-against-mimalloc)); the nvidia-smi fallback and `--frontends` ported, the support scope written down ([Support scope](#support-scope)); candidate 1 passes the final comparison on every host ([results](#final-comparison-candidate-1)) and the deployed form (service checks on three hosts, 24 h on both boards; [results](#final-comparison-candidate-1)); nvidia-smi checked on a GPU through WSL2. No switch decided.
-With 3B the candidate has every feature of
-the default configuration on the three hosts compared (x86 PC, Orin, Raspberry Pi), checked against the
-Python service below. Missing then, ported since: the nvidia-smi fallback of the GPU and the `--frontends`
-option.
-
-**Contracts 3B must keep** (from the Python service and docs/reference): requests never collect; a slow
-group has its own id and times, and a blocked read neither blocks the core nor queues more work for its
-group. History keeps failures, gaps and counter resets as null and broken segments, never 0; a changed
-device identity starts a new series; series that went away are dropped after the retention. Replay keeps
+**Contracts kept** (from the Python service and docs/reference): requests never collect; a slow group has
+its own id and times, and a blocked read neither blocks the core nor queues more work for its group.
+History keeps failures, gaps and counter resets as null and broken segments, never 0; a changed device
+identity starts a new series; series that went away are dropped after the retention. Replay keeps
 `instance_id`, a cursor per stream, `gap_before`, `missing_ranges` and `next_after`, answers 409 after a
-restart, and moves the cursor on also when everything asked for has expired. Published data can be reused,
-but never a finished answer: ages and `stale` are computed per answer, also for replayed samples.
+restart, and moves the cursor on also when everything asked for has expired. Published data can be
+reused, but never a finished answer: ages and `stale` are computed per answer, also for replayed samples.
 
-**3C, set before it was run (2026-10-20).** `tools/service_ab.py`, one A B B A round per host:
-- A: the Python service of v1.3.0 (`e767176`, the code the 1.3.0-1 package runs), `python3 platmon.py
-  INI` from a `git archive` of the tag, with the host's own python3. B: `platmon-native serve INI --web
-  TREE/frontends/web --app-version 1.3.0`, native source `35cdbdf`, rebuilt to the same sha256 as recorded
-  for 3B, default system allocator. Both as the same login user, one at a time, on 127.0.0.1:19797, with the
-  same INI: the defaults with `[core] interval = 1.0`. The packaged service and the production Hub keep
-  running beside it, as in the 1.3.0 board runs.
-- Load: 0-150 s the budget client (`/api/stats` every 1 s), w1 = 30-150 s, the release window as
-  budget.md has it; the same client until w2 = 1290-1410 s, the release window again with history and
-  replay full and expiring (two retention periods in); then a poller doing what platmon-hub does for one
-  node (status and stats every 5 s, observations every 10 s, replay turns of 100 over every stream), w3 =
-  1440-1560 s; then no client for 480 s (idle window 1590-1710 s); then the poller reconnects from its
-  cursors and fetches the 480 s backlog, five times from the same cursors, then polls 120 s more.
-- Recorded: CPU over each window (whole process, /proc ticks), response times, the cadence from the
-  published samples and the replayed records, requests, records and bytes the poller got, its data lag,
-  every replay page checked by `walk.py`; VmRSS every 5 s (50 ms during the reconnect) and smaps_rollup
-  RSS/PSS with the replay ranges and history points held at w1's end, with full buffers, after the poller,
-  before and after the reconnect and at the end.
-- Judged per host, never averaged, A against B: w1 and w2 against the 2.5 % release target each; the
-  proposed gates of docs/performance/rust-feasibility.md (whole-service CPU at least 30 % lower, RSS/PSS
-  at least 50 % lower) from w2 and w3 and the full-buffer memory, w1 shown beside them, not used alone; the
-  reconnect by its time, CPU seconds and peak memory for the same backlog.
-- Not allowed for B, whatever the CPU: an error answer, a loss (a missing range after a stream's first
-  page, or in the backlog), a walk problem, a missing collection id, `gap_before`, a cadence step over
-  1.5 s, a response p95 above A's in the same window by more than 1 ms.
-- Budget: one round per host, about 2.5 h, the three hosts at once. A run is repeated once at most, and
-  only when it is invalid (the tool failed, the host was disturbed); the candidate is not changed during
-  3C. If B breaks a rule above, 3C stops there and is reported, not fixed inside 3C.
-- Not in 3C: the 24 h stability gate, other hosts (a PC with nvidia-smi), the `cache-alloc` build.
+`platmon-native serve [platmon.ini] [--frontends LIST] --web DIR --app-version V`:
 
-**After 3C, set before it was run (2026-10-20, after the sixth review).** The 3C judgement first, then the
-PC's replay cost.
-- The judgement: `ab_report.py` passed a run whose poller thread had died (`join()` never re-raises), a
-  window with one answer, a reconnect with no collection seen, and never compared w3's `/api/stats` p95.
-  Now a run is first checked for completeness: the threads' end (`tools/worker.py`, shared with
-  `live_http.py`), the requests, answers, collections and records each phase implies, every reconnect
-  round done, every memory point; an incomplete run is invalid, not passed. The stored 3C runs are judged
-  again with it; what they did not record (the threads' end) is named, not assumed.
-- The PC's replay: `platmon-native replay-cost FILE` against `tools/replay_cost_py.py FILE TREE`, on the
-  same core publications: one page from each host's service (Orin and Pi: the 1.3.0 packages, default
-  settings; PC: its local service), 80 records each, kept outside the repository with their hashes. Per
-  record, the median of 7 rounds of 20 pages: decoding, decoding and writing back, a whole page (B:
-  `Replay.view`; A: `Replay.view` and the server's `json.dumps`). Every input on every host.
-- Hypothesis: on the PC's 20 KB records B decodes or writes slower than A; the split says which. If
-  neither is slower, stop: the cost is elsewhere and is not guessed at.
-- Candidates, at most three, in this order and only where the split points: an object written without a
-  temporary list of its members when the keys are not sorted; a float written without a temporary
-  string; the parser's search for a repeated key. Each must keep every answer byte for byte (the same
-  key order, numbers, ages and `stale` per answer, the 2 MiB limit), checked on the three inputs, with
-  `cargo test` and `live_http.py`. No other JSON library, no allocator change, no cached answers.
-- Target: B's page at most A's per record on the PC's input, without a slower page on the boards' inputs;
-  then one PC A B B A run of `service_ab.py` with the changed candidate, judged as 3C was (its reconnect
-  CPU per round against A's). The boards' A/B and the 24 h run wait for the final candidate.
-- Budget: the three candidates and that one PC run (about 2.5 h). If B is still above A after them, stop
-  and report what is left.
-
-**System against mimalloc, set before it was run (2026-10-20, after the seventh review).** One outside
-allocator, compared with the default; the default build stays the system allocator, and `cache-alloc`
-stays a diagnosis, never a candidate. Nothing else changes: no JSON or replay change meanwhile.
-- The allocator: mimalloc 3.3.2 (MIT) through the `mimalloc` crate `=0.1.52` (MIT; `libmimalloc-sys`
-  0.1.49, MIT; built with `cc` 1.5.1, `find-msvc-tools` 0.1.14, `shlex` 2.0.1, MIT OR Apache-2.0; every
-  version at least two weeks old, pinned in Cargo.lock), as `#[global_allocator]` behind the `mimalloc`
-  feature (Rust's allocations; libc's own malloc is not replaced). Its defaults: no crate feature, no
-  `MIMALLOC_*` setting, no purge or huge page tuning. Its C is compiled by `musl-gcc` (Debian's
-  `musl-tools`) in the same `rust:1.88-slim` image, natively on each architecture (aarch64 on the
-  Orin's docker), with the compiler's default CPU baseline (x86-64, armv8-a), never `-march=native`; the
-  compile commands are recorded.
-- Stage 1, the measure: `replay-cost` and `replay_cost_py.py` decode a page keeping the 80 records alive
-  and free them together on both sides, and time writing alone on records decoded beforehand (same
-  data on both sides); the whole page stays as it is. Elapsed times; the inputs of the replay cost run.
-- Stage 2, fixed pages: System against mimalloc on the three inputs, on the three hosts, twice each.
-  On to stage 3 only if the PC's page on the PC input gets faster by more than the larger of 5 % and the
-  spread of the two repeats, and no host and input gets slower by more than its spread.
-- Stage 3, the whole service: `service_ab.py` with the two binaries (S = system, M = mimalloc), S M M S
-  per host, the three at once, the 3C phases plus, after the reconnect rounds, three rounds of four
-  pollers fetching the same backlog at once, and 120 s with no client to settle. Recorded as in 3C, plus
-  threads and open file descriptors at every point. Rules for M against S: the 3C rules (complete, no
-  error, loss, missing id, `gap_before`, cadence step over 1.5 s, p95 more than 1 ms above S's in the
-  same window, the concurrent pages too); threads and descriptors back to their count before the
-  reconnect after settling; PSS with full buffers, at the concurrent peak and after settling at most
-  25 % above S's (the memory saving against Python is part of why Rust).
-- Decision: mimalloc only if stage 3 keeps every rule and its CPU (w2, w3, reconnect, concurrent) is
-  lower than S's beyond the spread of the repeats; otherwise the system allocator stays. Either way, the
-  3C results and the PC's earlier misses stay as recorded; nothing is estimated from page numbers.
-- Budget: one allocator, one configuration, stage 2 once, stage 3 one round per host (about 2.8 h).
-  If a stage fails its condition, stop and report; no tuning, no JSON redesign, no `cache-alloc`.
-
-**Support scope and the features not ported, set before the work (2026-10-20, after the eighth review).**
-The system allocator is the candidate's; allocator and JSON experiments end here. In order: the support
-scope written down (below, [Support scope](#support-scope)), the two features not ported, then the
-candidate fixed (features, build configuration), then the integrated comparison and the deployed form's
-long run, install, upgrade and recovery. This step is the first two.
-- nvidia-smi: the Python behaviour, nothing new (no NVML). Done when, on fake trees with a fake command
-  against `collector/gpu.py`, equal for: discovery (absent, on PATH, a DRM reader first), several GPUs
-  (the smallest UUID), numbers and their rounding, units, `N/A` and not supported, source ids and read
-  spans; a timeout, a nonzero exit, a signal, output that is not UTF-8 or not the CSV expected, a command
-  no longer executable or gone; the next collection after a failure recovers without the old values; no
-  child process left behind. Mutants of each of these must be caught. Without an NVIDIA GPU here: "fixture
-  verified, not verified on NVIDIA hardware".
-- `--frontends`: the order of `platmon.load_config` kept (defaults, the file and its checks, then
-  `--frontends`, then "nothing to run"); compared with the same inputs: precedence over `enabled =`,
-  unknown and empty names, an empty value, the file's own errors first; and the refusals of the two
-  servers as processes (exit 2, the same message). No new frontend system.
-- The `platmon` command (`frontends/cli.py`) stays the Python client; it is not rewritten.
-- Build: the release path builds the system allocator only (`build.sh`: no features, `--locked`, both musl
-  targets, SHA-256, and a check of the allocator each binary carries); `cache-alloc` and `mimalloc` are
-  built only by their own scripts, as records.
-
-**Final comparison, set before it was run (2026-10-20, after the ninth review).** Candidate 1
-([CANDIDATE.md](CANDIDATE.md): commit `7f066f0`, x86_64 `027e35b1c9251b9d`, aarch64 `ff97aa9ad4e9dd28`)
-against the Python service 1.3.0, `service_ab.py` as there, A B B A on each host, the three at once (about
-3 h). Nothing in the candidate or the tools changes during the runs; what comes out is the result. Each
-run is judged on its own, each host on its own; no averaging hides one run.
-- Complete, else invalid (no verdict): `complete()` as before, now also the collections during the
-  concurrent rounds from the after walk (`collected`: as many as the seconds less 4).
-- Contracts (a breach fails the run): no error answer, loss, walk problem, missing id, `gap_before` or
-  cadence step over 1.5 s in any window, the concurrent rounds included (`collected`, which closes the
-  step that stayed unverified in the allocator runs); every reconnect round done; threads and open
-  descriptors back to their count before the reconnect 120 s after the rounds.
-- Budgets of the candidate (a breach fails the run): the release target, w1 and w2 at most 2.5 % of one
-  core; PSS at most the budget of [Support scope](#support-scope) with full buffers, at the four pollers'
-  peak and 120 s after (PC 22 / 87 / 24, Orin 13 / 46 / 14, Pi 7 / 27 / 8 MiB). Judged only with the
-  same data: replay records per stream and history points as the Python runs held them (one record per
-  stream and one point per series fewer at most, for the moment of reading), the same history series,
-  the same concurrent backlog; otherwise the run is invalid for the budget. The peak is the highest
-  reading: one before round 1, samples every 50 ms (at least 5 a second on average, else invalid), one
-  after each round; a sampled peak, not a bound in continuous time. Python's runs are not held to it.
-  The 25 % rule against a baseline is not used here (it chose the allocator).
-- Reported, not pass or fail: CPU and PSS against Python (the proposed −30 % / −50 % gates), response p95
-  more than 1 ms above Python's (as performance exceptions), the reconnect cost.
-- Changed from 3C, and seen before it was set: in 3C, a p95 more than 1 ms above Python's broke a rule.
-  Here it is reported as a performance exception, following the review's classification (contracts,
-  completeness and budgets are pass or fail; relative performance is reported). A short `--quick` run on
-  the PC (A B, to try the budget judgement) had already shown the candidate's concurrent page p95 above
-  Python's (108 against 65 ms, smaller backlog).
-- Budget: one round per host. A run that is invalid because of the tools: fix the tool, record it, run
-  that host again once. Then the deployed form (a service unit, 24 h, install, upgrade, recovery), only
-  for this same candidate.
-
-**What the candidate has** (`platmon-native serve [platmon.ini] [--frontends LIST] --web DIR --app-version V`):
-
-3A (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
+Publication and the live API (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
 - One writer thread collects every interval. A publication is immutable: its stats (with the passive
   groups' `read` set from the records), `collectors` and `sensor_meta` are serialized once, before it is
   published. Each answer writes only what depends on its moment around them: `sample` with the ages,
@@ -256,7 +97,7 @@ run is judged on its own, each host on its own; no averaging hides one run.
 - Slow groups: one thread each, the next observation an interval after the last one started; their entries
   as `runtime/slow.py` writes them.
 
-3B:
+Service features:
 - History (`src/history.rs`): one point per publication from its publisher, after it is published and
   outside the Sampler's lock; gaps as null (failed or stalled publishers, values without a rate, missing
   identities), identities as series ids, the 64-series priority, expiry, gap-keeping downsampling; reads
@@ -275,24 +116,24 @@ run is judged on its own, each host on its own; no averaging hides one run.
 
 ## Support scope
 
-Written down 2026-10-20 (after the eighth review), for the candidate as it is on #93: `platmon-native serve`
-built by `build.sh`, the system allocator. Four kinds: **implemented** (in the source, compared with the
+Written down 2026-10-20 for candidate 1 and kept for the released server: `platmon-native serve` built by
+`build.sh`, the system allocator. Four kinds: **implemented** (in the source, compared with the
 Python service on fixtures), **verified on hardware** (also run live on a host below), **unverified**
-(implemented, not shown on hardware or not by a fixture either), **unsupported** (not in the candidate).
+(implemented, not shown on hardware or not by a fixture either), **unsupported** (not implemented).
 
 | area | implemented and compared | verified on hardware | unverified / unsupported |
 | --- | --- | --- | --- |
-| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM (`arm-unknown-linux-musleabihf`, released as armhf) built by `build-armhf.sh`, checked on the Raspberry Pi 4 in 32-bit mode and its package under QEMU in CI ([below](#32-bit-arm)), no 32-bit kernel or ARMv6/ARMv7 board verified; `x86_64-pc-windows-msvc` builds, passes its unit tests and serves the required data in CI but is not released ([below](#windows-collects-the-required-data-not-released)), so unsupported; other architectures unsupported |
+| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM (`arm-unknown-linux-musleabihf`, released as armhf) built by `build-armhf.sh`, checked on the Raspberry Pi 4 in 32-bit mode and its package under QEMU in CI ([below](#32-bit-arm)), no 32-bit kernel or ARMv6/ARMv7 board verified; `x86_64-pc-windows-msvc` builds, passes its unit tests and serves the required data in CI but is not released ([below](#windows-not-released)), so unsupported; other architectures unsupported |
 | core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`) | the fixtures' "not covered" lists below |
 | GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first; **the fallback on a real NVIDIA GPU under WSL2** (GeForce RTX 4070 Ti, Windows driver 610.88, `/usr/lib/wsl/lib/nvidia-smi`; [results](#nvidia-smi-on-an-nvidia-gpu-wsl2)) | the nvidia-smi fallback with a native Linux NVIDIA driver on a PC or server: **not verified on such hardware** (WSL2 and the fixtures only; NVIDIA does not promise a stable nvidia-smi output); amdgpu fixture only; NVML unsupported; clocks of 2^128 Hz and more refused (below) |
 | slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
 | configuration | `platmon.ini` as `load_config` reads and checks it, `--frontends` after it (67 cases, also the two servers' refusals) | on the three hosts (Python 3.14, 3.10, 3.13) | Unicode digits and whitespace in numbers, non-UTF-8 file names and files; argparse's abbreviations (`--front`) and a value that starts with `-` are unsupported |
 | HTTP API, web page, `/text`, history, replay | as `live_http.py` and `runtime_fixture.py` check them | the three hosts, no difference | which connections of a burst are refused (timing); Python versions' error page markup |
-| clients | the HTTP contracts the Hub and the web page use | the Hub-like poller of 3C | the `platmon` command (`frontends/cli.py`) stays the Python client and is not rewritten: the daemon runs without Python, a package that also installs the command still needs Python 3 for it (packaging decides later) |
+| clients | the HTTP contracts the Hub and the web page use | the Hub-like poller of the final comparison; the released Hub ([below](#the-released-hub-p1-1)) | the `platmon` command (`frontends/cli.py`) stays the Python client and is not rewritten: the server runs without Python; the package installs the command, which needs the host's Python 3.9+ |
 
-**Load and memory.** Verified: the default configuration with the 3C load (1 s collections, a Hub-like
-poller, a 480 s reconnect backlog fetched five times) and four pollers fetching the same backlog at once,
-three rounds (the allocator comparison). Not verified: more concurrent replays. The HTTP server's limit of
+**Load and memory.** Verified: the default configuration with the final comparison's load (1 s
+collections, a Hub-like poller, a 480 s reconnect backlog fetched five times) and four pollers fetching
+the same backlog at once, three rounds. Not verified: more concurrent replays. The HTTP server's limit of
 32 handler threads bounds threads, not the memory 32 replay pages at once would hold; it is not a
 verified load. The candidate's PSS there (system allocator, 2026-10-20, mean of two runs), and the budget
 for the integrated run, set now, before it (measured + 25 %, to the MiB above; the owner may change it
@@ -304,24 +145,22 @@ before that run):
 | four pollers' peak | 69.6 / 87 | 36.7 / 46 | 21.4 / 27 |
 | 120 s after | 18.7 / 24 | 10.7 / 14 | 5.9 / 8 |
 
-The 25 % rule against S chose an allocator; these absolute numbers are the candidate's own budget for
-the load above. Python's PSS with full buffers was 32.8 / 25.4 / 21.8 MiB (3C); its four-poller peak was
-not measured.
+Python's PSS with full buffers was 32.8 / 25.4 / 21.8 MiB; its four-poller peak was not measured.
 
 **Python versions.** The comparisons run against the Python service on 3.14 (PC), 3.10 (Orin) and 3.13
-(Pi). Where Python itself differs, the candidate follows 3.11 and later: a NUL inside nvidia-smi's CSV is a
+(Pi). Where Python itself differs, the server follows 3.11 and later: a NUL inside nvidia-smi's CSV is a
 character (3.10's `csv` refuses the whole answer, 3.11 and later refuse only that field's number).
 
 **A deliberate difference.** A clock nvidia-smi gives as 2^128 Hz or more (over 3.4 × 10^32 MHz) is null
-with `invalid_data`; Python publishes the integer. No GPU reports such a clock; the candidate refuses it
+with `invalid_data`; Python publishes the integer. No GPU reports such a clock; the server refuses it
 rather than publish a number it cannot hold (a float to integer cast saturates).
 
-**Build.** `build.sh` is the candidate's build: the system allocator only (`--no-default-features`; `--all-features`
+**Build.** `build.sh` is the release build: the system allocator only (`--no-default-features`; `--all-features`
 is never a build of it, and the two allocator features cannot be built together), `Cargo.lock` as
 committed (`--locked`), both musl targets, each binary checked to carry the system allocator's mark
 (`platmon-native build-info` prints it), then the SHA-256. `build-cache-alloc.sh` and
-`build-mimalloc.sh` build the two records, never the candidate. The candidate under verification, with
-its source, build, binaries, running conditions and comparison, is fixed in [CANDIDATE.md](CANDIDATE.md).
+`build-mimalloc.sh` build the two records, never a release. Candidate 1, with its source, build,
+binaries, running conditions and comparison, is fixed in [CANDIDATE.md](CANDIDATE.md).
 
 ## Use
 
@@ -392,7 +231,7 @@ with the package's Python server; `uninstall.sh` still removes that unit where a
 - `live_http.py`: **a live check of the service.** Starts the Python service and `platmon-native serve`
   with the same platmon.ini (the defaults, each on its own local port), checks both the same way and
   compares them (see its docstring). It stops only the two processes it started, by their handles.
-- `service_ab.py` / `ab_report.py`: **the whole-service A/B of 3C** (see their docstrings). Each run is
+- `service_ab.py` / `ab_report.py`: **the whole-service A/B** of the final comparison (see their docstrings). Each run is
   judged complete first (its threads' end through `worker.py`, the counts its phases imply), then by
   the rules; an incomplete run is invalid. Both, `walk.py` and `worker.py` run their self-tests first.
 - `replay-cost` / `replay_cost_py.py`: what a replay page costs per record, by stage, on fixed core
@@ -402,10 +241,9 @@ with the package's Python server; `uninstall.sh` still removes that unit where a
 
 ### Equivalence on fake trees
 
-`fixture.sh`, 2026-10-20 with the nvidia-smi scenarios: 11 of 11 scenarios, 72 collections and observations
-equal and the 2 expected failures on both sides (the x86_64 build of the support scope step). Before, 2026-10-19, x86_64 build: 8 of 8 scenarios, no difference: 40 collections and observations
-equal and the 2 expected failures (below) failed on both sides; every side exited with 0. Harness
-self-test: 15 of 15 controls reported as they must be.
+`fixture.sh`: 11 of 11 scenarios, 72 collections and observations equal and the 2 expected failures
+(below) on both sides, every side exiting with 0 (2026-10-20; CI runs it on every change, and each
+release gate records it). Harness self-test: 15 of 15 controls reported as they must be.
 
 | scenario | what it covers |
 | --- | --- |
@@ -454,82 +292,12 @@ used `boottime`, had the same network namespace id, and timed the same passive r
 
 Every interface and disk had a rate on both sides (the second collection, 1 s after the first).
 
-### CPU with the passive groups
+### Runtime equivalence
 
-2026-10-19 (step 2B), the 1 s collection the service makes by default without the slow groups: the core
-groups plus Network, Disk I/O and Pressure. A B C C B A, 30 s warmup and 120 s windows; A the Python collector, B platmon-native with the
-system allocator (the default build), C the `cache-alloc` build. User + system % of one core from each
-program's own `getrusage`. The board services (platmon 1.3.0-1) and the Hub polling them kept running.
-Every window: 120 collections, none failed, no 1 s deadline missed, no group changed state, nothing logged,
-and one read scope throughout, the same on all six windows of a host (source ids, 9 / 3 / 4 interfaces,
-the disks, the pressure resources; the Orin's kernel has no PSI).
-
-| host | Python (A, A) | Rust, system allocator (B, B) | Rust, cache-alloc (C, C) |
-| --- | --- | --- | --- |
-| Orin | 1.436, 1.432 | 0.570, 0.569: −60 % | 0.505, 0.513: −65 % |
-| Raspberry Pi 4 | 1.103, 0.943 | 0.402, 0.406: −61 % | 0.369, 0.369: −64 % |
-| x86 PC | 0.756, 0.756 | 0.521, 0.562: −28 % | 0.491, 0.436: −39 % |
-
-Collection time (p50 / p95, ms) and memory (VmRSS at the end of the window):
-
-| host | Python | Rust, system allocator | Rust, cache-alloc |
-| --- | --- | --- | --- |
-| Orin | 18.7 / 19.6–19.8, 16.0 MiB | 9.8–9.9 / 10.5, 0.7 MiB | 9.3 / 9.8–9.9, 0.9 MiB |
-| Raspberry Pi 4 | 10.2–11.8 / 11.2–12.0, 20.1 MiB | 4.2 / 4.4–4.5, 0.7 MiB | 3.9 / 3.9–4.0, 0.8 MiB |
-| x86 PC | 18.9–21.6 / 24.4–25.0, 22.1 MiB | 15.7–16.9 / 21.5, 0.9 MiB | 15.4–16.1 / 20.5–21.0, 1.2 MiB |
-
-- **The saving holds with the passive groups:** −60–61 % on the boards with the default build, as in 2A.
-  The means of 2B are above those of 2A by 0.08 (Orin) and 0.24 (Raspberry Pi) pp of one core for Python,
-  0.06 and 0.10 pp for Rust. That is a difference between two runs, not the groups' own cost: [budget.md](../docs/performance/budget.md)
-  measures a feature on one tree with only its setting changed, which was not done here.
-- **Every Rust window is below every Python window** on each host. The Raspberry Pi's two Python windows
-  differ by 0.16 pp, so its −61 % is from their mean.
-- **The allocator cache** lowers CPU by a further 0.06 pp of one core on the Orin and 0.035 pp on the
-  Raspberry Pi (5 and 3 percentage points more saving against Python). On x86 the two B windows differ by
-  0.04 pp and the two C windows by 0.06 pp, so its figure is not settled. It is not needed for the saving.
-- Collection only: no HTTP, no response JSON, no history or replay, no slow groups.
-
-### CPU, core groups only (step 2A)
-
-2026-10-19, A B C C B A, 30 s warmup and 120 s windows; A the Python collector, B platmon-native with the
-system allocator (the default build), C the `cache-alloc` build. User + system % of one core from each
-program's own `getrusage`; use the totals, the user/system split is tick-sampled on these kernels. The board
-services (platmon 1.3.0-1) and the Hub polling them kept running. 120 collections per window, none failed,
-no 1 s deadline missed, no group changed state in any window, no problem logged, and the last collection
-of every window had the same number of source ids (20 / 5 / 58). That the scope matched is shown by the
-fixtures and the live smoke test; during the bench only these counts were recorded, not the ids.
-
-| host | Python (A, A) | Rust, system allocator (B, B) | Rust, cache-alloc (C, C) |
-| --- | --- | --- | --- |
-| Orin | 1.266, 1.433 | 0.516, 0.510: −62 % | 0.434, 0.438: −68 % |
-| Raspberry Pi 4 | 0.774, 0.785 | 0.292, 0.310: −61 % | 0.260, 0.263: −66 % |
-| x86 PC | 0.613, 0.662 | 0.500, 0.379: −31 % | 0.327, 0.358: −46 % |
-
-Collection time (p50 / p95, ms) and memory (VmRSS at the end of the window):
-
-| host | Python | Rust, system allocator | Rust, cache-alloc |
-| --- | --- | --- | --- |
-| Orin | 17.2–18.6 / 17.5–19.6, 15.8 MiB | 9.4 / 9.7, 0.6 MiB | 8.6 / 9.0, 0.8 MiB |
-| Raspberry Pi 4 | 8.0 / 8.2, 19.9 MiB | 2.9 / 3.1–3.2, 0.6 MiB | 2.5–2.6 / 2.6, 0.7 MiB |
-| x86 PC | 16.5–17.8 / 22.7–23.2, 21.7 MiB | 16.1–17.2 / 20.3–21.1, 0.7–0.8 MiB | 12.8–14.9 / 19.3–20.6, 1.0–1.1 MiB |
-
-- **The default build already saves most of it.** The system allocator and the raw reads are enough for
-  −61–62 % on the boards. The allocator cache lowers CPU by a further 0.08 pp of one core on the Orin and
-  0.04 pp on the Raspberry Pi (the saving against Python grows by 5–6 percentage points). On x86 it is
-  0.10 pp, but the two B windows there differ by 0.12 pp (a desktop host, the noisiest of the three), so
-  that figure is not settled. It is not needed for the saving.
-- **Collection time** halves on the Orin and falls to about a third on the Raspberry Pi. On the x86 PC it is
-  about the same: there it is spent waiting for device reads (GPU, NPU, ACPI), not in the collector.
-- **RSS over the window** stays flat on every side (sampled every 30 collections). RSS of the cache-alloc
-  build is higher, as expected from a cache that keeps what it holds.
-- These figures cover collection without network, disk_io or pressure, and not the service: no HTTP, no
-  JSON for responses, no history or replay.
-
-### Runtime equivalence (steps 3A and 3B)
-
-`runtime_fixture.py`, 2026-10-19, on the x86_64 build and on the aarch64 build on the Orin and the
-Raspberry Pi: 7 of 7 scenarios, 317 answers the same text. Harness self-test: 6 of 6 controls.
-`config_fixture.py`: 49 of 49 configurations the same on all three hosts.
+`runtime_fixture.py`: 7 of 7 scenarios, 317 answers the same text, on the x86_64 build and on the aarch64
+build on the Orin and the Raspberry Pi (2026-10-19; CI runs it on every change). Harness self-test: 6 of
+6 controls. `config_fixture.py`: 67 of 67 cases (configurations, `--frontends` and the two servers'
+refusals as processes) the same on all three hosts.
 
 | Scenario | What it covers |
 | --- | --- |
@@ -565,7 +333,7 @@ its slot while collecting goes on; request-line, HEAD and header-limit answers a
 
 ### Live HTTP check
 
-3B, 2026-10-19, both services with the same platmon.ini (the defaults: every group, history and replay
+`live_http.py`, 2026-10-19, both services with the same platmon.ini (the defaults: every group, history and replay
 on), x86 PC once, Orin and Raspberry Pi twice each: no difference. Slow groups storage, Wi-Fi and battery
 in the same states on both (battery `unavailable` on the boards); the same `/api/history` series ids
 (64, 42, 20: the x86 PC at the limit) and cadences; replay walked from the start with every id returned or
@@ -573,30 +341,6 @@ missing; the `/text` sections the same; 320 concurrent requests verified on each
 raised the handler threads by 32 at most (6 → 38 Python, 5 → 37 Rust), the servers answered again about
 1 s after they closed, and the threads went back; after a restart the old cursor got 409
 `instance_changed` on both.
-
-3A, `live_http.py` with the slow groups, history and replay off, on the x86 PC, the Orin and the Raspberry
-Pi: no difference (3 runs each, and one more each after the fixes below). Every path gave the same status code, Content-Type and
-Cache-Control except `/text` (not ported); the web page and its files were the same bytes;
-`/api/stats`, `/api/status` and `/api/observations` had the same keys, order and types. Raw requests at the
-protocol's edges (HEAD, POST, HTTP/0.9 said or implied, HTTP/00.9, 2.0 and a bad version, 99 and 100
-headers, a long header, a long request line, an empty line, `//path`) gave the same answer shape. On both
-servers: 320 concurrent requests, all 320 verified with no client error (last run), one instance and no
-sequence going back, at most 2 snapshots published while they ran; of 40 idle connections 8 closed, a
-request refused while 32 were held and answered after; a cut-off request line closed after 10.0–10.2 s.
-
-Fixed after the fifth review (2026-10-20): the replay walk accepted duplicate ids, a cursor that stayed
-while `has_more`, a last page short of `latest_id`, a changed instance, an id both returned and missing,
-and ran out of pages without failing. `tools/walk.py` checks every page and fails a walk that does not end
-(17 synthetic cases; the old walker passed 8 of the 11 that must fail). Rerun on the x86 PC: no
-difference, both walks of 4 pages complete.
-
-Fixed after review: the concurrent check counted the requests it planned, and an exception in a client
-thread (a timeout, an answer that was not JSON or had no sample) was lost with that thread; it now counts
-attempted, verified and failed answers, collects every client's errors, and passes only with all verified.
-Its self-test feeds it each of those failures. The Sampler serialized a record under its state lock;
-HEAD got the 501 page; HTTP/0.9 said in the request line got headers; the blank line that ends the headers
-was not counted. 414's reason is `URI Too Long` (Python 3.13+; 3.10 says `Request-URI Too Long`, which the
-check treats as the same).
 
 Not covered: which connections of a burst are refused (timing: with 40 opened at once the Python server
 answered a request while the client held 40; the limit check opens them 20 ms apart, the burst check
@@ -608,239 +352,38 @@ configparser and
 `float()`/`int()` beyond the forms listed (Unicode digits, other whitespace), non-UTF-8 file names and
 config files, IPv6 scope ids and Python 3.10's text for IPv4-mapped addresses in probe targets.
 
-### Whole service A/B (step 3C)
-
-2026-10-20, `tools/service_ab.py` as set above, one A B B A round per host, the three at once; tables from
-`tools/ab_report.py`. A = Python 1.3.0, B = `platmon-native serve`; the mean of the two runs of each, % of
-one core.
-
-| | Orin A | Orin B | | Pi A | Pi B | | x86 A | x86 B | |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| w1, release window, buffers filling (CPU %) | 1.871 | 0.671 | −64 % | 2.042 | 0.829 | −59 % | 1.021 | 0.637 | −38 % |
-| w2, release window, buffers full (CPU %) | 1.970 | 0.783 | −60 % | 2.304 | 0.808 | −65 % | 1.058 | 0.754 | **−29 %** |
-| w3, Hub polling (CPU %) | 2.125 | 0.783 | −63 % | 2.784 | 1.021 | −63 % | 1.171 | 0.800 | −32 % |
-| idle, no client (CPU %) | 1.841 | 0.729 | −60 % | 1.909 | 0.675 | −65 % | 0.867 | 0.637 | −27 % |
-| reconnect, 480 s backlog, per round (s) | 0.502 | 0.433 | −14 % | 0.490 | 0.450 | −8 % | 0.247 | 0.263 | +6 % |
-| reconnect CPU per round (s) | 0.315 | 0.209 | −34 % | 0.375 | 0.286 | −24 % | 0.162 | 0.196 | **+21 %** |
-| reconnect peak VmRSS, highest sample¹ (MiB) | 41.7 | 16.8 | −60 % | 34.6 | 9.1 | −74 % | 56.0 | 29.9 | −47 % |
-| full buffers RSS / PSS (MiB) | 33.1 / 25.4 | 9.8 / 9.8 | −70 / −61 % | 30.6 / 21.8 | 5.4 / 5.4 | −82 / −75 % | 44.6 / 32.8 | 17.4 / 17.4 | −61 / **−47 %** |
-| end PSS (MiB) | 33.1 | 10.3 | −69 % | 25.1 | 5.6 | −78 % | 42.9 | 18.0 | −58 % |
-| w2 `/api/stats` p95 (ms) | 3.36 | 2.21 | | 5.64 | 3.02 | | 3.04 | 2.04 | |
-| w3 replay page p95 (ms) | 7.06 | 4.05 | | 12.49 | 10.57 | | 4.47 | 4.73 | |
-| w2 collection p95 (ms) | 20.4 | 10.7 | | 13.7 | 4.8 | | 24.7 | 22.1 | |
-
-¹ The highest value sampled, which may be below the true peak: the sampler missed the reconnect's first
-seconds (see "Found later" below). The fixed points (full buffers, end) and the CPU windows are not
-affected.
-
-These are the 3C candidate's numbers (source `35cdbdf`); the JSON writing changed after them (`fc63a02`),
-and nothing since compared Python with the current candidate, so the PC's +21 % reconnect is a record of
-that candidate, not the current one's rate.
-
-Repeats: A's two runs within 0.15 pp (the Pi's w1), B's within 0.06 pp except on the Orin, where the
-first B run was about 0.2 pp higher in w2, w3 and idle (0.883 / 0.683, 0.875 / 0.692, 0.825 / 0.633).
-
-- Release target (≤ 2.5 % in w1 and w2): both pass on every host; with full buffers the Pi's Python
-  service is at 2.30 %, the candidate at 0.81 %. Hub polling (w3) is not the release condition: the Pi's
-  Python service is at 2.78 % there.
-- Rules for B: the report as run found none broken on any host (no error answer, loss, walk problem,
-  missing collection id, `gap_before` or cadence step over 1.5 s; no response p95 more than 1 ms above
-  A's), nor for A. That report could miss a run that did not do its load; judged again below, all twelve
-  runs are complete.
-- The same data on both: 600 core, 20 storage, 120 Wi-Fi and 10 battery records held with full buffers,
-  the same history points (11 300 Orin, 4 700 Pi, 16 760 PC); the backlog was 483–485 core records and
-  3 065–3 068 records in all over the five rounds (Orin 25.9 MB, Pi 13.8 MB, PC 49.1 MB of answers).
-- Memory (VmRSS): flat on B once the buffers filled (Orin 9–10 MiB, Pi 5 MiB, PC 16–18 MiB from 600 s
-  on). A steps up once more when the poller starts (Orin 30–33 → 37–41, Pi 30 → 33–34, PC 44 → 53–56 MiB)
-  and is flat after; neither grows from round to round of the reconnect (after each round: Orin A 37–41,
-  B 9–10; Pi A 33–34, B 5; PC A 54–56, B 18 MiB).
-- The slowest collection while the backlog was fetched: Python 23 and 49 ms on the Orin, 61 and 74 ms on
-  the Pi (at most 24 and 15 ms in w3), the candidate 11–13 ms and 5 ms; on the PC 24–25 and 21–22 ms. No
-  cadence step over 1.02 s anywhere.
-- Proposed gates (docs/performance/rust-feasibility.md): CPU at least 30 % lower and RSS/PSS at least
-  50 % lower hold on the Orin and the Pi in every window. On the PC they do not quite: w2 −29 %, PSS with
-  full buffers −47 % (RSS −61 %), and fetching the backlog takes the candidate 21 % more CPU than Python
-  (the first round +22 %, rounds 2–5 +21 %: not a first-round effect). The PC's core records are the
-  largest (about 20 KB; 64 history series, at the limit); the replay cost below shows that the record
-  size alone does not explain the reversal.
-- Not measured here: 24 h, other hosts, the `cache-alloc` build, a candidate changed after these runs.
-
-Raw (outside the repository, `~/.local/state/platmon-measure/native-20261020-3c/`), SHA-256 first 16 hex
-digits: Orin `5aec9a9779e7f0ba`, Pi `60999a7d8e28e89d`, PC `0f6671002b378032`; tool `service_ab.py`
-`2ce211c8700b22c8` as run.
-
-**Judged again (after the sixth review).** `ab_report.py` as run passed synthetic runs it must not: a
-poller thread that died after one page, a window with one answer, a reconnect with no collection seen,
-and a w3 `/api/stats` p95 of 52 ms against A's 2 ms (w3's `/api/stats` p95 was not compared). With the
-completeness check and the w3 `/api/stats` rule (`python3 ab_report.py`: 14 synthetic runs, all judged as
-expected; of the ten that must not pass and that the old report could judge, it passed seven: the dead
-poller with and without thread states, the one-answer window, no collection seen, the w3 p95, too few
-reconnect records, a memory sampler that stopped), the twelve stored runs: all complete, no rule broken, w3 `/api/stats` p95 lower on B on every host (Orin 2.59 → 1.28, Pi
-4.78 → 2.56, PC 1.90 → 1.19 ms). What they cannot show: the threads' end was not recorded then; the
-counts stand for it (w3: 24 stats, 12 observations, 62 replay requests and 115–117 replayed collections
-in every run; the reconnect: 3 064–3 071 records for five rounds of a 604–608 record backlog, every round
-done). A short run of the new tool on the PC records the threads' end (`workers`).
-Found later (the seventh review's run): the memory sampler went from every 5 s to every 50 ms only when
-its wait under way ended, so the reconnect's first seconds (up to 5) were sampled only by the reading
-after each round. The reconnect peaks above may miss a peak there; fixed since (`Rss.speed`).
-
-### Replay cost (after 3C)
-
-2026-10-20, as set before it was run (above). µs per record, decoding / writing back / a whole page, the
-mean of two medians of 7 × 20 pages; every page of every binary byte for byte equal to Python's. Inputs:
-80 core records from each host's service (PC 19.7 KB, Orin 10.3 KB, Pi 5.4 KB a record). base = 3C's
-candidate with only `replay-cost` added; c2 = candidates 1 and 2 (now in the source).
-
-| host | input | A (Python) | base | c2 | c2, page vs A |
-| --- | --- | ---: | ---: | ---: | ---: |
-| PC (Python 3.14) | PC | 124 / 116 / 262 | 189 / 168 / 393 | 192 / 145 / 352 | +34 % |
-| | Orin | 72 / 69 / 153 | 110 / 93 / 217 | 112 / 78 / 201 | +32 % |
-| | Pi | 43 / 38 / 87 | 56 / 50 / 130 | 57 / 44 / 113 | +30 % |
-| Orin (Python 3.10) | PC | 333 / 307 / 813 | 280 / 219 / 552 | 283 / 179 / 505 | −38 % |
-| | Orin | 184 / 192 / 468 | 164 / 108 / 300 | 164 / 88 / 273 | −42 % |
-| | Pi | 105 / 112 / 266 | 83 / 58 / 161 | 83 / 45 / 146 | −45 % |
-| Pi (Python 3.13) | PC | 760 / 515 / 1548 | 689 / 493 / 1367 | 703 / 398 / 1259 | −19 % |
-| | Orin | 442 / 333 / 906 | 421 / 253 / 767 | 429 / 198 / 705 | −22 % |
-| | Pi | 265 / 187 / 537 | 205 / 135 / 427 | 210 / 102 / 391 | −27 % |
-
-- The relative cost follows where it runs: on the PC the candidate's page is slower than Python's for
-  every input tried, the Pi's 5 KB records too; on the boards it is faster for every input, the PC's
-  20 KB records too. So the PC's large records alone do not explain the reversal (the 3C note suggested
-  they did). Size and structure still set the absolute cost (on the PC 113 µs a Pi record, 352 µs a PC
-  record). "Where it runs" is the CPU and also the Python version and build (3.14, 3.10, 3.13) and the
-  system: not narrowed down to the instruction set.
-- How to read the stages: decoding / writing are not like for like. Python's decoding keeps a page of
-  80 decoded records alive and frees them together, the Rust one frees each record at once; writing is
-  (decoding and writing) − decoding, an estimate of what writing adds, not writing timed alone. All are
-  elapsed times, not CPU profiles. The whole page is like for like (each side's own Replay, the same
-  page byte for byte).
-- Candidate 1 (objects in order without a member list): about 4 % off the PC's writing, within the
-  runs' spread. Candidate 2 (floats written in place): with 1, writing 12–24 % less than base on every host and input.
-  Candidate 3 (repeated keys found by a key hash first): no change in decoding (199–200 µs both), so
-  taken out again; its test of nested repeated keys stays.
-- Target not met: c2's page is still 30–34 % above Python's on the PC, so, as set, no PC A/B run.
-  c2 keeps every answer: `cargo test` 23 passed, `live_http.py` no difference, the pages above equal.
-- Added after the three candidates, a diagnosis, not a candidate: the same c2 source built with
-  `cache-alloc` decodes the PC's input in 109 µs instead of 192 (page 254 µs, −3 % against Python;
-  −3 to −8 % on the PC for every input, −54 to −62 % on the Orin, −32 to −41 % on the Pi). So on the PC
-  the allocations the decoding asks for (one per key, string, object and array), with how the system
-  allocator (musl's) serves and frees them, are a large part of the cost. `cache-alloc` changes more than
-  the time of a malloc (size classes, blocks kept and reused, never returned), so this shows that
-  changing that path can help; it does not split the cost between the parser and the allocator. Nothing
-  here turns `cache-alloc` on.
-
-Raw (outside the repository, `~/.local/state/platmon-measure/native-20261020-replay/`): the inputs
-(`core-*.jsonl`, SHA-256 first 16 hex digits PC `30561610b9ca81e2`, Orin `f4a990e77926add0`, Pi
-`bc48e15822041bde`), `cost-{x86,orin,pi}.txt`. Binaries x86_64 / aarch64: base `334e5440ee866210` /
-`260de2a0d5c7082f`, c2 `93bc8944f1f4ccf4` / `f10dc3f46ec4f92e` (the source as committed rebuilds to these).
-
-### System against mimalloc
-
-2026-10-20, as set before it was run (above). Source `6c26614` (feature `mimalloc`), tools `56236c2`.
-S = system allocator, M = mimalloc; x86_64 S `40b6db573533e64c`, M `14dcca1967608f81`; aarch64 S
-`3b8369bb7d38c867` (cross-built as `build.sh` does), M `b88ec453038df9e6` (on the Orin's docker, then
-the image removed). mimalloc's C: `x86_64-linux-musl-gcc -O3 ... -m64` / `aarch64-linux-musl-gcc -O3 ...`,
-no `-march` (gcc 12.2 defaults x86-64 / armv8-a); `cargo test` 23 passed with M on both.
-
-Stage 1: decoding now keeps a page of records and frees them together on both sides, writing is timed
-on records decoded beforehand. Stage 2, fixed pages, µs per record (decoding / writing / whole page),
-the mean of two medians; every page byte for byte equal to Python's:
-
-| host | input | A (Python) | S | M | M page vs S |
-| --- | --- | ---: | ---: | ---: | ---: |
-| PC | PC | 123 / 126 / 260 | 208 / 133 / 345 | 107 / 121 / 234 | −32 % |
-| | Orin | 76 / 74 / 154 | 119 / 78 / 199 | 60 / 70 / 134 | −33 % |
-| | Pi | 42 / 42 / 86 | 66 / 42 / 111 | 32 / 38 / 74 | −34 % |
-| Orin | PC | 349 / 371 / 836 | 338 / 169 / 513 | 157 / 144 / 310 | −40 % |
-| | Orin | 190 / 224 / 482 | 185 / 88 / 277 | 86 / 74 / 166 | −40 % |
-| | Pi | 107 / 125 / 264 | 100 / 45 / 146 | 48 / 38 / 89 | −39 % |
-| Pi | PC | 781 / 728 / 1553 | 866 / 409 / 1251 | 418 / 351 / 783 | −37 % |
-| | Orin | 451 / 425 / 909 | 491 / 223 / 702 | 234 / 188 / 431 | −39 % |
-| | Pi | 265 / 243 / 536 | 274 / 119 / 387 | 132 / 98 / 238 | −39 % |
-
-- The condition to go on holds: the PC input on the PC −32 % (repeats 337 / 353 µs for S, 230 / 238
-  for M), every host and input faster, none slower.
-- With decoding freed a page at a time, S decodes slower than when each record was freed at once (PC
-  input on the PC 208 against 192 µs): the earlier stage numbers did depend on the lifetimes. M decodes
-  in about half S's time on every host and input; writing takes 9–18 % less.
-- On the PC, M's page is below Python's for every input (−10 to −14 %).
-
-Stage 3, the whole service, S M M S on each host, the three at once (each value the mean of two runs,
-M against S):
-
-| | PC | Orin | Pi |
-| --- | --- | --- | --- |
-| CPU %, buffers full (w2) | 0.750 → 0.650 (−13 %) | 0.696 → 0.587 (−16 %) | 0.804 → 0.692 (−14 %) |
-| CPU %, Hub-like polling (w3) | 0.792 → 0.688 (−13 %) | 0.700 → 0.617 (−12 %) | 0.975 → 0.837 (−14 %) |
-| reconnect, CPU s per fetch | 0.187 → 0.131 (−30 %) | 0.199 → 0.126 (−37 %) | 0.239 → 0.155 (−35 %) |
-| concurrent, CPU s per round (4 pollers) | 2.22 → 0.55 (−75 %) | 5.19 → 0.49 (−91 %) | 2.33 → 0.75 (−68 %) |
-| concurrent page p95 ms | 200 → 64 | 469 → 148 | 235 → 133 |
-| **PSS MiB, buffers full** | 17.3 → 32.2 (**+86 %**) | 9.7 → 23.3 (**+140 %**) | 5.4 → 6.7 (+24 %) |
-| **PSS MiB, concurrent peak** | 69.6 → 174.9 (**+151 %**) | 36.7 → 124.2 (**+239 %**) | 21.4 → 43.9 (**+105 %**) |
-| **PSS MiB, 120 s after** | 18.7 → 33.3 (**+78 %**) | 10.7 → 24.2 (**+127 %**) | 5.9 → 7.0 (+17 %) |
-| threads / fds, 120 s after | 5 / 4 → 5 / 4 | 5 / 4 → 5 / 4 | 5 / 4 → 5 / 4 |
-
-- **M breaks the memory rule on every host** (PC and Orin at all three points, Pi at the concurrent
-  peak). Of what was recorded, neither S nor M broke another rule; each collection step during the
-  concurrent rounds was not recorded in these runs and stays unverified (below). Leaving M out rests on
-  the memory breaches alone, which were recorded directly. S's memory is 3C's B again (17.4 / 9.8 /
-  5.4 MiB then).
-  M is lower in CPU everywhere, beyond the spread, and its replay pages are faster; but with full
-  buffers on the PC and the Orin it holds about what Python held in 3C (32.8 / 25.4 MiB, another day's
-  runs), which takes away most of what Rust saves in memory there.
-- **Decision: the system allocator stays.** In this version (mimalloc 3.3.2), its default configuration
-  and these loads, mimalloc lowered CPU and response times but does not fit platmon's memory budget, so
-  it is not adopted. That is a trade-off measured in this configuration, not a finding about mimalloc or
-  musl in general: memory settled and threads and descriptors came back (no leak seen), and the return
-  policy, fragmentation and caches were not separated. The `mimalloc` feature stays in the source only
-  as the record of this comparison, off by default; nothing was tuned (no purge, huge page or other
-  setting), and as set before the run, no second allocator, JSON redesign or `cache-alloc` follows from
-  it. The PC's misses (3C gates, the 3C candidate's +21 % reconnect, the replay page above Python's)
-  stay as recorded.
-- S itself, at the concurrent peak of four pollers, holds about four times its full-buffer PSS (PC 69.6,
-  Orin 36.7, Pi 21.4 against 17.3, 9.7, 5.4 MiB); that is a load the support scope has to state and give
-  a budget ([Support scope](#support-scope)). The 25 % rule chose between allocators; it is not the
-  product's memory limit.
-- A measuring defect found in these runs: the concurrent pollers stop at the ids they started for, so
-  the collections made during the rounds are not theirs to see; the completeness check counted them
-  there and refused both boards' S runs (5 collections over 13 s, where the PC's faster rounds passed).
-  `service_ab.py` now records them from the main poller's after walk (`concurrent.collected`), and
-  `ab_report.py` judges that. These runs predate it: for them the core sequence's advance over the
-  rounds (9 to 13 ids, as many as the seconds) and the after walk's losses (none) stand for it, marked
-  unverified. Judged that way, the six S runs (two per host) are complete with no recorded rule broken,
-  and the six M runs break only the memory rule. What the stand-in cannot show is each step: a 1.5 s
-  step could hide in an advance that matches the seconds. The candidate's integrated run records
-  `collected` and checks it.
-
-Raw: `~/.local/state/platmon-measure/native-20261020-mimalloc/`, `cost-{x86,orin,pi}.txt` (SHA-256 first
-16: `ba80e600bee7222d`, `57d46cc58e9667c5`, `e5b2635794a48d37`), `ab-{x86,orin,pi}.jsonl` (`ddac5318ddec7486`,
-`c97188ba3dab8c0b`, `48a16cebe2b28997`) with each run's stderr in `ab-*.err`.
-
-### Support scope step: nvidia-smi, `--frontends`, the build
-
-2026-10-20, as set before the work (above). Binaries from `build.sh`: x86_64 `30a8985e52dc15cb`, aarch64
-`dc1a281ccae9502b` (SHA-256, first 16), both with the system allocator's mark; `cargo test` 26 passed.
-- nvidia-smi: `fixture.sh` 11 of 11 scenarios, of them `nvidia`, `nvidia_alone` and `nvidia_drm_first`
-  with 32 collections equal; no process left after the timeout and the signal; every run with the
-  query's arguments. Ten mutants, all caught (two only after two steps were added; see
-  [Equivalence on fake trees](#equivalence-on-fake-trees)). **The fallback with a PC or server NVIDIA GPU
-  that answers normally: fixture verified, not verified on such hardware.** (Since checked on an NVIDIA
-  GPU under WSL2: [below](#nvidia-smi-on-an-nvidia-gpu-wsl2).) The Orin has nvidia-smi (`nvidia-l4t-nvml`): its answer, read by hand once (30 ms, exit 0),
-  is replayed in `nvidia`; the Jetson reader answers there first, so the fallback is not reached.
-- `--frontends`: `config_fixture.py` 67 of 67 (49 configurations as before, 12 with `--frontends`, 6
-  refusals of the two servers as processes) on the PC, the Orin and the Pi. Seven mutants: six caught
-  (sorting and repeats of unknown names, an empty value taken as a name, `--frontends` checked before
-  the file, the first value counting, `--frontends=` not read); one cannot be seen: with `http` the only
-  frontend, a valid list always names it, so leaving `enabled` alone for frontends not named changes
-  nothing. A live start with `[http] enabled = no` and `--frontends http`: 200 on `/api/status`.
-- `live_http.py` with the new binaries: no difference on the PC, the Orin and the Pi (the v1.3.0 tree as
-  the Python side on the boards). `runtime_fixture.py` 7 of 7.
-- `build.sh` refused a binary without the mark and the `cache-alloc` build (its mark names it).
-
-Raw: `~/.local/state/platmon-measure/native-20261020-scope/` (`live-orin.json` `ca5c7cccc48d00fc`,
-`live-pi.json` `8c8f289f71991e21`). The board copies were removed.
-
 ### Final comparison (candidate 1)
+
+**Final comparison, set before it was run (2026-10-20, after the ninth review).** Candidate 1
+([CANDIDATE.md](CANDIDATE.md): commit `7f066f0`, x86_64 `027e35b1c9251b9d`, aarch64 `ff97aa9ad4e9dd28`)
+against the Python service 1.3.0, `service_ab.py` as there, A B B A on each host, the three at once (about
+3 h). Nothing in the candidate or the tools changes during the runs; what comes out is the result. Each
+run is judged on its own, each host on its own; no averaging hides one run.
+- Complete, else invalid (no verdict): `complete()` as before, now also the collections during the
+  concurrent rounds from the after walk (`collected`: as many as the seconds less 4).
+- Contracts (a breach fails the run): no error answer, loss, walk problem, missing id, `gap_before` or
+  cadence step over 1.5 s in any window, the concurrent rounds included (`collected`, which closes the
+  step that stayed unverified in the allocator runs); every reconnect round done; threads and open
+  descriptors back to their count before the reconnect 120 s after the rounds.
+- Budgets of the candidate (a breach fails the run): the release target, w1 and w2 at most 2.5 % of one
+  core; PSS at most the budget of [Support scope](#support-scope) with full buffers, at the four pollers'
+  peak and 120 s after (PC 22 / 87 / 24, Orin 13 / 46 / 14, Pi 7 / 27 / 8 MiB). Judged only with the
+  same data: replay records per stream and history points as the Python runs held them (one record per
+  stream and one point per series fewer at most, for the moment of reading), the same history series,
+  the same concurrent backlog; otherwise the run is invalid for the budget. The peak is the highest
+  reading: one before round 1, samples every 50 ms (at least 5 a second on average, else invalid), one
+  after each round; a sampled peak, not a bound in continuous time. Python's runs are not held to it.
+  The 25 % rule against a baseline is not used here (it chose the allocator).
+- Reported, not pass or fail: CPU and PSS against Python (the proposed −30 % / −50 % gates), response p95
+  more than 1 ms above Python's (as performance exceptions), the reconnect cost.
+- A response p95 more than 1 ms above Python's, a broken rule in the earlier step 3C, is reported as a
+  performance exception, following the review's classification (contracts,
+  completeness and budgets are pass or fail; relative performance is reported). A short `--quick` run on
+  the PC (A B, to try the budget judgement) had already shown the candidate's concurrent page p95 above
+  Python's (108 against 65 ms, smaller backlog).
+- Budget: one round per host. A run that is invalid because of the tools: fix the tool, record it, run
+  that host again once. Then the deployed form (a service unit, 24 h, install, upgrade, recovery), only
+  for this same candidate.
 
 2026-10-20 23:29 to 2026-10-21 02:50 KST: candidate 1 ([CANDIDATE.md](CANDIDATE.md)) against the Python service
 1.3.0, A B B A on each host, the three at once, judged as set before ("Final comparison, set before it was
@@ -879,8 +422,7 @@ Reported, not pass or fail (the candidate against Python, the means of its two r
 - Performance exceptions (p95 more than 1 ms above Python's): the concurrent page on the PC (both runs)
   and the Orin (both runs). The other response p95 are lower than Python's on every host.
 - The cost of serving one large backlog to several clients at once is the candidate's weak side: 2.3 to 5.1
-  CPU seconds a round against 0.7 to 1.8 for Python, and on the PC the reconnect +20 % CPU (+21 % in 3C).
-  Not optimized here (the allocator and JSON work is closed); it is the input for a later decision.
+  CPU seconds a round against 0.7 to 1.8 for Python, and on the PC the reconnect +20 % CPU. Not optimized.
 
 Raw: `~/.local/state/platmon-measure/native-20261020-final/` (SHA-256, first 16 hex digits: `ab-x86.jsonl`
 `e0c4a83ba5c6cdd9`, `ab-orin.jsonl` `4b36f42d655d2d94`, `ab-pi.jsonl` `1d2fa6e601d5c096`; the `.err` logs
@@ -988,8 +530,7 @@ nvidia-smi on a native Linux NVIDIA driver, more than 24 h.
 Raw: `~/.local/state/platmon-measure/native-20261021-deploy/` (SHA-256, first 16 hex digits: `checks-pc.jsonl`
 `de7d4b0b005396ba`, `checks-orin.jsonl` `05c266b57571e433`, `checks-pi.jsonl` `10e544e660d08fef`,
 `soak-orin.jsonl` `c6a182c0cf493c18`, `soak-pi.jsonl` `598339ce2e0116f4`, the `.log` files beside them;
-the `--quick` try `quick-pi.jsonl` `eda2b1b1567d7fc4`). The board copies were removed; the installed
-candidate units stay until the owner runs `uninstall.sh`.
+the `--quick` try `quick-pi.jsonl` `eda2b1b1567d7fc4`). The board copies were removed.
 
 ### The released Hub (P1-1)
 
@@ -1048,8 +589,8 @@ Raw: `~/.local/state/platmon-measure/native-20261021-deploy/wsl/` (`live.json` `
 
 ### 32-bit ARM
 
-Released as armhf from the release after 1.5.0 (decided 2026-10-24, with no 32-bit test device: CI's QEMU
-check below and the 2026-10-23 run on the Raspberry Pi 4 are the evidence). 2026-10-23: `build-armhf.sh` builds
+Released as armhf since 1.6.0 (decided 2026-10-24, with no 32-bit test device: CI's QEMU check below
+and the 2026-10-23 run on the Raspberry Pi 4 are the evidence). 2026-10-23: `build-armhf.sh` builds
 `arm-unknown-linux-musleabihf` (ARMv6 with VFP, which runs on both Raspberry Pi OS's and Debian's armhf)
 with build.sh's image, flags and system allocator. GitHub's arm64 runners cannot run 32-bit code, so CI's
 `armhf-userspace` runs the package in Debian 13 and Ubuntu 24.04 armhf userspaces under QEMU: the extracted
@@ -1072,18 +613,17 @@ Python 3.13.5) against this tree's Python service:
   architecture is arm64.
 - What it does not show: `fixture.sh` (needs Docker; the Pi has none), a 32-bit kernel, an ARMv6 or
   ARMv7 board, install and upgrade through apt on a device, the service under systemd, CPU or memory. The
-  package's smoke check and dpkg lifecycle run only under QEMU in CI (`armhf-userspace`). The APT repository takes
-  an armhf package once its `apt/tools/update.sh` accepts the three packages (platmon.github.io).
+  package's smoke check and dpkg lifecycle run only under QEMU in CI (`armhf-userspace`).
 
 Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d085a30`, unit tests
 `bce4eb0a3e8886e8`; `sha256.txt`, `unit.txt`, ten `compare-*.json`, `config.txt`, `runtime.txt`, `live.json`,
 `smoke.txt`).
 
-### Windows (collects the required data, not released)
+### Windows (not released)
 
-2026-10-24. Not released, not in the support scope; the first steps towards a Windows agent. It stays
-unreleased until the real-PC checks pass, then becomes an experimental zip (the owner's decision,
-2026-10-25; checks and their status: [remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26)). `src/platform/`
+Not released and not in the support scope. It stays unreleased until the real-PC checks pass, then
+becomes an experimental zip (the owner's decision, 2026-10-25; the checks and their status:
+[remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26)). `src/platform/`
 holds what the service needs from the OS outside the collectors: the elapsed clocks, random bytes for the
 instance id, the listening socket and the exit on a stop request, one module per OS with the same
 functions. `platform/linux.rs` is the code `main.rs`, `metadata.rs`, `runtime.rs` and `http.rs` had,
@@ -1174,41 +714,7 @@ On `x86_64-pc-windows-msvc`:
   listens; a service is not asked about, so its port is open or closed by the firewall's existing rules.
   Set `bind = 127.0.0.1`, or allow the port only from trusted addresses
   ([deployment](../docs/guides/deployment.md)).
-- Not shown: a run on a Windows host outside CI, Windows on ARM, more than 64 CPUs, a sleep and resume,
-  the disk query without administrator rights, a GPU or drive temperature (the CI runner, a VM, has
-  neither), the CPU clock against Task Manager.
-
-The Linux servers behave the same (unit tests, `config_fixture.py` 67/67, `runtime_fixture.py` 7/7,
-`fixture.sh` 11/11, `live_http.py` with no difference, `pytest`), but moved code changes their bytes, and
-the start line no longer ends in "(step 3 runtime)": x86_64 `d7b491c5ce844222`, aarch64 `0acd11a091ffe094`,
-armhf `3bef02ec30fff437`, no longer 1.4.0's. The aarch64 build before that line changed (`a05da99e69cbe394`)
-ran on the Jetson Orin Nano as the candidate unit of the [deployed form](#final-comparison-candidate-1) (2026-10-24): `checks` passed
-the native unit's start, restart (ready 0.1 s, 409), SIGKILL (back in 5.14 s), the held port and every
-stop; the Python unit's checks could not run, since 1.4.0 removed the Python server from the package. No
-soak. The next release verifies them again ([readiness](../docs/releases/readiness.md)).
-
-### Earlier run (2026-10-18)
-
-The first prototype run, A B B A with the `cache-alloc` build only: Orin 1.273, 1.230 → 0.432, 0.431 %
-(−66 %), Raspberry Pi 0.797, 0.807 → 0.255, 0.262 % (−68 %), x86 0.620, 0.623 → 0.371, 0.391 % (−39 %).
-Peak RSS (`ru_maxrss`, a different binary) 15.8 / 20.0 / 21.1 MiB for Python, 1.5 / 1.7 / 1.5 MiB for Rust.
-
-Before that, with std file I/O and musl's allocator, Rust had used Orin 0.55, Raspberry Pi 0.37 and x86
-0.48 %: already about 55 % less than Python on the boards. `strace -c` over 23 x86 collections showed where
-the rest went:
-- 4233 `fcntl` calls: musl adds an `F_SETFD` after every `O_CLOEXEC` open.
-- About 1,500 `mmap`/`munmap` pairs: musl's allocator returns freed groups to the kernel.
-
-Raw `openat`/`read`/`readlinkat` with one reused buffer (`sysfs.rs`) removed the first. The allocator
-cache removed the second; the 2026-10-19 run above shows what each part is worth. A product build would
-compare vetted allocators instead of this cache (mimalloc: MIT; jemalloc: BSD-2-Clause; their Rust wrappers
-and bundled sources to be checked separately).
-
-Raw records are kept outside the repository (step 3A: the live check reports and the runtime mutants'
-outputs). SHA-256, first 16 hex digits:
-- 2026-10-19, with the passive groups: results Orin `bc7f4bfc203ca6a1`, Raspberry Pi `3840f075d3d1bc54`, x86
-  `924f307d60ae6ac6`
-- 2026-10-19, core groups only: results Orin `ecad202e537830f8`, Raspberry Pi `94a036d9804393e1`, x86 `d4128078aeb6597d`
-- 2026-10-18: results Orin `ecbd98eda8b499d9`, Raspberry Pi `d2290973d157211a`, x86 `e044f35c961b0856`
-
-The files used on the boards were removed afterwards.
+- Not shown in CI (a VM): a GPU or drive temperature, the CPU clock against Task Manager. Checked on a real
+  PC since, and still open (more than 64 CPUs, a sleep and resume, the service as administrator):
+  [remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26). Windows on ARM is not
+  built.
