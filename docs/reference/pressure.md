@@ -1,5 +1,11 @@
 # Pressure stall information (PSI)
 
+> **TL;DR**
+> - `pressure` in `/api/stats`: the kernel's PSI (`/proc/pressure/{cpu,memory,io}`) per collection; on by
+>   default.
+> - A kernel without PSI (e.g. the Jetson Orin's L4T) reports it `unavailable` / `not_exposed`.
+> - Windows has no stall accounting, so the group is left out there.
+
 `/api/stats` has a `pressure` object while `[pressure] enabled = yes`. It is **on by default**. It holds
 the kernel's pressure stall information from `/proc/pressure/{cpu,memory,io}`, read once per collection
 by the collector thread. Format and meaning: the kernel's Documentation/accounting/psi.rst.

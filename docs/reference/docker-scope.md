@@ -1,5 +1,12 @@
 # Docker observation scope
 
+> **TL;DR**
+> - What the container sees, checked on a Jetson Orin Nano (2026-10-09): CPU, memory, GPU, sensors and
+>   disks match the host with the supplied mounts.
+> - Compose uses `network_mode: host` to see host network and Wi-Fi; still non-root, read-only mounts, no
+>   privileged mode.
+> - Filesystem capacity through file bind mounts is partial or `null`.
+
 Checked on Orin Nano on 2026-10-09 with native Linux Docker Engine. The same collector was
 read on the host, in the production bridge container, and in an isolated host-network container.
 Dynamic readings differ in time; this comparison checks availability, identity and scope.

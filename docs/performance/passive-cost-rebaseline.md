@@ -1,5 +1,11 @@
 # Passive Network / Disk / PSI cost after D2 and D3
 
+> **TL;DR**
+> - Re-measured the passive Network / Disk / PSI prototype after the identity and snapshot-copy changes.
+> - It still adds about +0.16 pp (Orin), above the 0.1 pp per-feature hypothesis; its callback p95 stayed
+>   under 2 ms.
+> - Prototype only; the product collectors are measured in network-product.md and disk-io-product.md.
+
 Re-measurement, not a feature: what the passive prototype (`benchmarks/passive.py`) adds to the current
 product, after [identity-resolution.md](identity-resolution.md) (#28) and
 [snapshot-copy.md](snapshot-copy.md) (#29) made the collection and `/api/stats` cheaper. B0 and B1 are the

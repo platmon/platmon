@@ -1,5 +1,10 @@
 # platmon brand assets
 
+> **TL;DR**
+> - The `p_` symbol and lowercase `platmon` wordmark as SVGs in light and dark variants, plus a favicon
+>   and `brand-colors.json`.
+> - Use each variant on its intended background and keep the aspect ratio and solid fills; Apache-2.0.
+
 The `p_` symbol and lowercase `platmon` wordmark are the project's identity.
 The description is **Lightweight platform monitor**.
 

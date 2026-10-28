@@ -1,7 +1,14 @@
 # Low-frequency observations (`/api/observations`)
 
-Some data changes slowly or is slow to read: filesystem capacity today, later possibly others. Such a
-group is observed on its own cadence by its own thread, apart from the core Sampler, and served at
+> **TL;DR**
+> - Slow groups (storage, Wi-Fi, battery, probe) run on their own threads and cadences and are served at
+>   `/api/observations`, never in `/api/stats`.
+> - Each group has its own state, interval and age, so a slow or stuck one cannot make the core snapshot
+>   stale.
+> - Envelope `schema_version` 2: Wi-Fi `connected` can be `null` (unknown); test `connected === true`.
+
+Some data changes slowly or is slow to read: [storage](storage.md), [Wi-Fi](wifi.md),
+[battery](battery.md) and the [TCP connect probe](probe.md). Each such group is observed on its own cadence by its own thread, apart from the core Sampler, and served at
 `/api/observations` with its own id, times and age. `/api/stats` (the 1 s snapshot) is unchanged and never
 contains these groups, so an old or blocked observation can never make the core snapshot stale or 503.
 
@@ -46,7 +53,7 @@ contains these groups, so an old or blocked observation can never make the core 
   and never changed afterwards.
 
 Clients ask for `/api/observations` on the groups' cadence, not every second: the web page and the
-`platmon` command ask at most every 10 s (the page only while visible with Network or Storage selected) and add the time since that
+`platmon` command ask at most every 10 s (the page only while visible with Network, Storage or Power & battery selected) and add the time since that
 answer to the ages shown. A server without the endpoint (404) is not asked again.
 
 Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `battery` ([battery.md](battery.md)), `probe` ([probe.md](probe.md)).

@@ -1,5 +1,11 @@
 # CLI and web interfaces
 
+> **TL;DR**
+> - The terminal client (`platmon [host] [interval]`, `--once`, `--view`) and the web dashboard show the
+>   same seven views of the published snapshot and share the `[thresholds]` levels.
+> - Neither triggers a collection: they read what the service last published; `/text` gives the plain
+>   screen over HTTP.
+
 The collector publishes a snapshot in the background. The standalone terminal client,
 web dashboard and plain-text endpoint display those published values without launching
 new metric reads for each request.

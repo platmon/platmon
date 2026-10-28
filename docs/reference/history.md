@@ -1,5 +1,11 @@
 # Recent history (`/api/history`)
 
+> **TL;DR**
+> - `/api/history` keeps the last `retention` seconds (600 by default) of selected numbers, in memory
+>   only; on by default.
+> - Bounded: at most 64 series and a per-series point cap; extra series are counted in `dropped_series`.
+> - Gaps are kept as `null`, and series of devices that disappear expire.
+
 With `[history] enabled = yes`, the service keeps the last `retention` seconds (600 by default, 60 to
 3600) of selected numbers from its published snapshots, **in memory only** (no file, no database; a
 restart starts empty), and serves them at `/api/history` for trend graphs. **On by default**;

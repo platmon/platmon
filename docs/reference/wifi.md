@@ -1,5 +1,11 @@
 # Wi-Fi signal
 
+> **TL;DR**
+> - The `wifi` observation: each wireless interface's link quality and signal from `/proc/net/wireless`,
+>   every 5 s by default; on by default.
+> - Passive: never scans or changes settings, and reads no SSID or BSSID; traffic stays in `network`.
+> - On Windows: the WLAN service's interface state and RSSI.
+
 A low-frequency group ([observations.md](observations.md)) named `wifi`: what the kernel last knew about
 each wireless interface's link, read from `/proc/net/wireless` every `[wifi] interval` seconds (5 by
 default). **On by default** (`[wifi] enabled = no` turns it off). Passive: platmon never scans,

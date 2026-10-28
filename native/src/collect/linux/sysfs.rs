@@ -28,9 +28,10 @@ pub enum ReadError {
 
 // Raw system calls: musl's open() adds an fcntl(F_SETFD) after every O_CLOEXEC open, and a fresh buffer per
 // file makes its allocator map and unmap pages every collection. Measured on x86 (strace -c): 4233 fcntl and
-// ~1500 mmap/munmap pairs in 23 collections before this; see native/README.md. syscall() is variadic and reads
-// C longs: pass c_long, never i64 (on 32-bit ARM an i64 takes two registers and shifts the rest). Without std's
-// EINTR handling, open and read retry an interrupted call as Python and std::fs do; close never does (Linux frees it).
+// ~1500 mmap/munmap pairs in 23 collections before this; see native/README.md as of b96aba8 ("Earlier run").
+// syscall() is variadic and reads C longs: pass c_long, never i64 (on 32-bit ARM an i64 takes two registers and
+// shifts the rest). Without std's EINTR handling, open and read retry an interrupted call as Python and std::fs
+// do; close never does (Linux frees it).
 
 fn retry(mut call: impl FnMut() -> libc::c_long) -> io::Result<libc::c_long> {
     loop {

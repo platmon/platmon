@@ -11,7 +11,7 @@ description = "The platmon server the Debian package runs (native/README.md)"
 # instead of hand-written ones (statvfs, utsname, rusage, O_PATH, errno)
 libc = "=0.2.172"
 # MIT (mimalloc 3.3.2's C, built by its sys crate with cc; Cargo.lock pins every version): the outside
-# allocator compared with the system one (README, System against mimalloc); off by default
+# allocator compared with the system one (native/README.md as of b96aba8, System against mimalloc); off by default
 mimalloc = { version = "=0.1.52", optional = true, default-features = false }
 
 [target.'cfg(windows)'.dependencies]

@@ -1,5 +1,11 @@
 # Getting started
 
+> **TL;DR**
+> - Install the `.deb` from the signed APT repository (check the key fingerprint first) on an Ubuntu or
+>   Debian-derived host with systemd and Python 3.9+.
+> - Then run `platmon`, open `http://<device>:9797`, or `curl` `/api/status`.
+> - Settings live in `/etc/platmon/platmon.ini`; the API has no authentication.
+
 platmon is a device-side monitor: one background service reads host metrics and publishes
 snapshots. The `platmon` terminal client, web dashboard and HTTP clients all read the same
 published data. Collection is not triggered by requests.

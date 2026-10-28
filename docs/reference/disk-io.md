@@ -1,5 +1,12 @@
 # Disk I/O counters
 
+> **TL;DR**
+> - `disk_io` in `/api/stats`: read and write counters and rates of each whole, non-virtual disk from
+>   `/proc/diskstats`; on by default.
+> - Partitions and virtual devices (loop, ram, zram, ...) are left out; `disk` (root filesystem usage) is
+>   separate.
+> - On Windows: `IOCTL_DISK_PERFORMANCE` per `PhysicalDriveN`, without device numbers or merges.
+
 `/api/stats` has a `disk_io` object while `[disk_io] enabled = yes` (the default). It holds the read and
 write counters of each selected **whole disk** visible to the process, read from `/proc/diskstats` once per collection by
 the collector thread, and rates over the time between two such readings. Nothing is written, probed or

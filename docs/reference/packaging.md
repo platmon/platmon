@@ -1,5 +1,12 @@
 # Packaging and releases
 
+> **TL;DR**
+> - One `.deb` per architecture (amd64, arm64, armhf) with the static native server; the `platmon` command
+>   needs the host's Python 3.9+.
+> - `VERSION` in `runtime/__init__.py` is the single version source; releases are built once in CI and
+>   published to GitHub Releases and the APT repository.
+> - Covers install, upgrade, migration from source or Docker installs, rollback and the release procedure.
+
 The primary distribution is a Debian package for Ubuntu and Debian-derived Linux hosts
 (including supported Jetson and Raspberry Pi systems), one per architecture: `amd64`, `arm64` and `armhf`.
 The service is a static native server built from `native/` (Rust, musl, the system allocator); the

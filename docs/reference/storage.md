@@ -1,5 +1,12 @@
 # Storage capacity
 
+> **TL;DR**
+> - The `storage` observation: partitions of the physical disks and the size, use and free space of local
+>   disk filesystems, every 30 s by default; on by default.
+> - Only `/dev/` mounts of local disk filesystems are read; network, FUSE, tmpfs, overlay, squashfs and
+>   pseudo filesystems never are. `disk` in `/api/stats` and `disk_io` are separate.
+> - On Windows: volumes by GUID and each drive's partitions.
+
 A low-frequency group ([observations.md](observations.md)): the partitions of the physical disks and the
 size, use and free space of the local disk filesystems, every `[storage] interval` seconds (30 by
 default). **On by default** (`[storage] enabled = no` turns it off). It is separate from:
@@ -142,8 +149,8 @@ but not readable by the service is reported unavailable with `permission_denied`
 This pins the filesystem being measured, not a mount-table transaction. A same-device remount or
 replacement reusing the same device number cannot always be distinguished; mount options and mount
 list remain the earlier mountinfo observation. Blocking remains isolated to the existing single storage
-worker. No new thread or raw device access is introduced. The [resumed integration report](../performance/archive/resumed-integration-results.md) measures this descriptor
-path; its call p95 still exceeds 2 ms. It is now enabled by default by user policy;
+worker. No new thread or raw device access is introduced. The 2026-10-09 resumed integration run (`docs/performance/archive/` as of `b96aba8`)
+measured this descriptor path; its call p95 still exceeds 2 ms. It is now enabled by default by user policy;
 this does not change the measured result or the 2 ms target.
 
 Directory bind mounts are supported under the same identity check. If a file bind appears first,

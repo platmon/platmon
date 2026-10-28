@@ -1,5 +1,12 @@
 # Low-overhead measurement and sampling cadence
 
+> **TL;DR**
+> - What the service costs per collection interval (2026-10-08), and what passive Network / Disk / PSI
+>   would add.
+> - Neither 1 s nor 2 s collection met the 1 % budget then in force; collection and client polling are
+>   separate cost knobs.
+> - Recommended next: break the 1 s cost down rather than observe less.
+
 A measurement study, not a feature: what the current platmon service costs per collection interval, what
 a minimal passive Network / Disk / PSI collection would add, and which interval the numbers support.
 Nothing here changes the product, its API or its defaults. The passive collection exists only as a

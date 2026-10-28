@@ -1,5 +1,14 @@
 # HTTP API
 
+> **TL;DR**
+> - `/api/stats` is the latest snapshot (503 before the first one), `/api/status` the runtime state
+>   (always 200: check `ready`); `/api/observations`, `/api/history`, `/api/samples` and `/text` cover the
+>   rest.
+> - Requests never trigger a collection; at most 32 connections, 10 s read and write timeouts, no
+>   authentication.
+> - Optional groups report their state and reason in `collectors`; sensor values carry their source and
+>   read time.
+
 platmon answers on port 9797 (`[http]` in `platmon.ini`). There is no authentication: run it on trusted
 networks only. Every answer of `/api/stats`, `/api/status`, `/api/observations`, `/api/history`, `/api/samples`, `/api/observation-samples` and `/text`
 carries `Cache-Control: no-store`.
@@ -8,7 +17,7 @@ carries `Cache-Control: no-store`.
 | --- | --- |
 | `/api/stats` | the current snapshot as JSON; 503 when there is none |
 | `/api/status` | the collector's runtime status as JSON; always 200, also without the web page |
-| `/api/observations` | low-frequency groups (storage capacity, Wi-Fi signal, TCP connect probe) with their own ages; always 200 ([observations.md](observations.md)) |
+| `/api/observations` | low-frequency groups (storage capacity, Wi-Fi signal, battery, TCP connect probe) with their own ages; always 200 ([observations.md](observations.md)) |
 | `/api/history` | recent numbers of the published snapshots, when `[history]` is on; 404 otherwise ([history.md](history.md)) |
 | `/api/samples` | full published core snapshots after a cursor; bounded memory replay ([replay.md](replay.md)) |
 | `/api/observation-samples` | full publications of one slow group after its own cursor ([replay.md](replay.md)) |

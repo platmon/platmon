@@ -1,5 +1,11 @@
 # Rust feasibility: what a native collector could save
 
+> **TL;DR**
+> - Exploratory study (2026-10-18): replaying a collection's file reads in Rust used 53–76 % less CPU than
+>   the Python collector, with caveats in Limits.
+> - Proposed a Rust collector prototype and gates; that work became the native server the Debian package
+>   runs since 1.4.0 (see `native/README.md`).
+
 Exploratory study, 2026-10-18. It asks how much CPU and memory the service could save if it were written in
 Rust, and whether one native binary per CPU architecture can serve the supported boards. Nothing here
 changes the product, and no decision to rewrite has been made. Every number is a measurement unless it is

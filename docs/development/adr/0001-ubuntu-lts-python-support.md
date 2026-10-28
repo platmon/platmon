@@ -1,5 +1,10 @@
 # ADR 0001: Ubuntu LTS and Python support policy
 
+> **TL;DR**
+> - Accepted 2026-10-17: Python 3.8 / Ubuntu 20.04 are CI observation targets only, not official support.
+> - The package keeps its Python 3.9 minimum; Ubuntu 22.04, 24.04 and 26.04 are native support targets
+>   subject to qualification.
+
 - Date: 2026-10-17
 - Status: Accepted; CI evidence and official support are separate
 - Scope: platmon service, web viewer, terminal client and distribution artifacts

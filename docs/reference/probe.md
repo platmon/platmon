@@ -1,5 +1,12 @@
 # TCP connect probe
 
+> **TL;DR**
+> - The `probe` observation: TCP connect time to at most 4 configured targets, every 10 s by default; the
+>   only feature that sends packets.
+> - On by default but idle without `targets`; never picks a target itself, and the API cannot add or
+>   trigger one.
+> - Not ICMP ping; `interval` must exceed `timeout × number of targets`.
+
 A low-frequency group ([observations.md](observations.md)) named `probe`: the time to open a TCP
 connection to each configured target, every `[probe] interval` seconds (10 by default). This is the only
 **active** feature: it sends packets. It is **enabled by default**, probes nothing without configured targets,

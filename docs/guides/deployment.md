@@ -1,5 +1,12 @@
 # Deployment and operations
 
+> **TL;DR**
+> - Pick one deployment: the Debian package (recommended), a source install under systemd, or a locally
+>   built Docker image; all listen on port 9797.
+> - The source install and the container run the deprecated Python server.
+> - Expose the unauthenticated API only to trusted networks. The repository ships a Dockerfile, not an
+>   image: publishing a built image distributes its GPL/LGPL base userland.
+
 platmon runs one collector service on the monitored device. Choose
 **one** of these deployment methods: a Debian package, source systemd
 installation, or Docker. The systemd and Docker startup scripts refuse

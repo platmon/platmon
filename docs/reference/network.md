@@ -1,5 +1,12 @@
 # Network counters
 
+> **TL;DR**
+> - `network` in `/api/stats`: per-interface counters of platmon's own network namespace from
+>   `/proc/self/net/dev`, with rates between two collections; on by default.
+> - Interfaces are identified by namespace, ifindex and name; a missing rate carries a reason (`warmup`,
+>   `gap`, `counter_regressed`, ...).
+> - On Windows: `GetIfTable2`, host scope.
+
 `/api/stats` has a `network` object while `[network] enabled = yes` (the default; see
 [Configuration](#configuration-and-direct-calls)). It holds the
 per-interface counters of **platmon's own network namespace**, read from `/proc/self/net/dev` once per

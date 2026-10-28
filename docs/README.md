@@ -1,5 +1,10 @@
 # Documentation
 
+> **TL;DR**
+> - Guides for using platmon, references for its API and metric contracts, and engineering records for
+>   architecture, validation and performance.
+> - New here: [getting started](guides/getting-started.md); building a client: [HTTP API](reference/api.md).
+
 The repository [README](../README.md) gives a short overview and quick start.
 Choose a guide for practical usage, a reference for behavior contracts, or an engineering
 document for implementation and validation evidence.
@@ -36,9 +41,8 @@ document for implementation and validation evidence.
   — official support qualification and CI-only observation of Python 3.8 / Ubuntu 20.04.
 - [Ubuntu LTS qualification](development/ubuntu-lts-qualification.md) — implementation progress,
   local interpreter and container evidence, and remaining native OS release gates.
-- [Remaining work](development/remaining-work.md) and
-  [post-integration validation](development/post-integration-validation.md) —
-  development checkpoints and validation scope.
+- [Remaining work](development/remaining-work.md) — what is still open: the Windows build's
+  real-PC checks, Linux release gaps and the Python server's removal.
 - [Release readiness](releases/readiness.md) — acceptance gates and release evidence.
 - [Performance reports](performance/README.md) — budgets, current measurements,
-  background studies and an index of superseded evidence in `performance/archive/`.
+  and background studies.
