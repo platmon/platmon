@@ -483,4 +483,18 @@ mod tests {
         assert!(load(Some(path.to_str().unwrap()), None).err().unwrap().contains("out of range"));
         let _ = std::fs::remove_file(&path);
     }
+
+    #[test]
+    fn storage_section() {
+        // tests/collector/test_storage.py test_storage_is_on_by_default_and_its_interval_is_checked
+        let cfg = load(None, None).ok().unwrap();
+        assert!(cfg.flag("storage", "enabled") && cfg.float("storage", "interval") == 30.0);
+        let path = std::env::temp_dir().join(format!("platmon-native-storage-{}.ini", std::process::id()));
+        for (text, error) in [("[storage]\ninterval = 1\n", "out of range"), ("[storage]\nenabled = sometimes\n", "valid bool")] {
+            std::fs::write(&path, text).unwrap();
+            let e = load(Some(path.to_str().unwrap()), None).err().unwrap();
+            assert!(e.contains(error), "{}: {}", text, e);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 }

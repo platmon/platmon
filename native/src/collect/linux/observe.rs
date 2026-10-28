@@ -623,7 +623,7 @@ mod tests {
     }
 
     // tests/collector/test_battery.py, ported.
-    use crate::collect::linux::sysfs::fake::Root;
+    use crate::collect::linux::sysfs::fake::{self, Root};
 
     const CHARGE_BATTERY: &[(&str, &str)] = &[ // as read on an ACPI laptop: the charge family, no energy_* and no power_now
         ("type", "Battery"), ("present", "1"), ("capacity", "89"), ("status", "Not charging"), ("capacity_level", "Normal"),
@@ -1055,5 +1055,255 @@ mod tests {
         assert_eq!((item.get("connection_state").unwrap().to_string(false), item.get("connected").unwrap().to_string(false)),
                    (r#""unavailable""#.into(), "null".into()));
         assert!(!(out.to_string(false) + &status.to_string(false)).contains("/sys"));
+    }
+
+    // tests/collector/test_storage.py, ported. Capacity is the kernel's statvfs of the test's own tree, so the
+    // tree's device number stands in for the partition's (as fixture.py's slow scenario does).
+    fn mi(major_minor: &str, path: &str, fstype: &str, source: &str, opts: &str, optional: &str, super_opts: &str) -> String {
+        format!("25 1 {} / {} {} {} - {} {} {}", major_minor, path, opts, optional, fstype, source, super_opts)
+    }
+
+    fn mounts_text() -> String {
+        [mi("259:1", "/", "ext4", "/dev/nvme0n1p1", "rw,relatime", "shared:1", "rw"),
+         mi("259:1", "/srv/bind\\040dir", "ext4", "/dev/nvme0n1p1", "ro,relatime", "shared:2 master:1", "rw"), // a bind mount
+         mi("0:25", "/dev/shm", "tmpfs", "tmpfs", "rw,relatime", "shared:1", "rw"),
+         mi("7:0", "/snap/core/1", "squashfs", "/dev/loop0", "rw,relatime", "", "rw"),
+         mi("0:50", "/mnt/nfs", "nfs4", "server:/export", "rw,relatime", "shared:1", "rw"),
+         mi("0:51", "/mnt/fuse", "fuse.sshfs", "user@host:", "rw,relatime", "shared:1", "rw"),
+         mi("0:30", "/", "overlay", "overlay", "rw,relatime", "shared:1", "rw")].join("\n") + "\n"
+    }
+
+    fn mount_tuple(m: &Mount) -> (i64, i64, &str, bool, &str, &str) {
+        (m.major, m.minor, m.path.as_str(), m.read_only, m.fstype.as_str(), m.source.as_str())
+    }
+
+    #[test]
+    fn parse_mountinfo_escapes_optional_fields_and_bad_lines() {
+        let (mounts, bad) = parse_mountinfo(&(mounts_text() + "garbage line\n26 1 x:y / /a rw - ext4 /dev/a rw\n"));
+        // only the local filesystem types are kept (Python's parse_mountinfo(text, LOCAL_FS))
+        assert_eq!(mounts.iter().map(mount_tuple).collect::<Vec<_>>(),
+                   [(259, 1, "/", false, "ext4", "/dev/nvme0n1p1"), (259, 1, "/srv/bind dir", false, "ext4", "/dev/nvme0n1p1")]); // ro bind of an rw filesystem
+        assert_eq!(bad, ["line8", "line9"]);
+        // a broken line of a type that is never read is not reported (test_only_local_filesystem_lines_are_converted)
+        assert!(parse_mountinfo(&(mounts_text() + "26 1 x:y / /odd rw - tmpfs tmpfs rw\n")).1.is_empty());
+        assert_eq!(unescape("a\\040b\\011c\\012d\\134e"), "a b\tc\nd\\e");
+    }
+
+    #[test]
+    fn read_only_is_the_filesystem_not_this_process_mount() {
+        // a sandboxed service sees the host's writable filesystems as read-only mounts in its own namespace
+        let ro = |text: &str| parse_mountinfo(text).0.first().map(|m| m.read_only);
+        assert_eq!(ro(&mi("259:1", "/", "ext4", "/dev/nvme0n1p1", "ro,relatime", "shared:1", "rw")), Some(false));
+        assert_eq!(ro(&mi("259:1", "/", "ext4", "/dev/nvme0n1p1", "ro,relatime", "shared:1", "ro")), Some(true));
+        assert_eq!(ro(&mi("259:1", "/", "ext4", "/dev/nvme0n1p1", "rw,relatime", "shared:1", "ro,noatime")), Some(true));
+        let missing = "25 1 259:1 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p1"; // no super-options: not a mountinfo line
+        assert_eq!(parse_mountinfo(missing).1, ["line1"]);
+        assert!(parse_mountinfo(missing).0.is_empty());
+    }
+
+    #[test]
+    fn parse_partitions_rows() {
+        let parts = "major minor  #blocks  name\n\n 259        0  976762584 nvme0n1\n 259        1  975237540 nvme0n1p1\n 259        2     131072 nvme0n1p2\n";
+        assert!(parse_partitions(parts).contains(&((259, 2), ("nvme0n1p2".to_string(), 131072 * 1024))));
+    }
+
+    /// nvme0n1 with partitions p1 (the tree's own device number, mounted at /mnt/root and, read-only bound,
+    /// at "/mnt/bind dir") and p2 (not mounted), as /proc/partitions, /sys/class/block and /sys/block show them.
+    fn storage_tree(root: &Root) -> (i64, i64) {
+        use std::os::unix::fs::MetadataExt;
+        let dev = std::fs::metadata(&root.dir).unwrap().dev();
+        let (a, b) = (libc::major(dev) as i64, libc::minor(dev) as i64);
+        root.put(PARTITIONS, format!("major minor  #blocks  name\n\n 259        0  976762584 nvme0n1\n {} {}  975237540 nvme0n1p1\n \
+                                     259        2     131072 nvme0n1p2\n   7        0     100000 loop0\n", a, b));
+        let disk = "devices/pci0000:00/0000:00:1d.0/nvme/nvme0/nvme0n1";
+        for p in ["nvme0n1p1", "nvme0n1p2"] {
+            root.put(&format!("/sys/{}/{}/partition", disk, p), "1\n");
+            root.link(&format!("/sys/class/block/{}", p), &format!("../../{}/{}", disk, p));
+        }
+        root.link("/sys/block/nvme0n1", &format!("../{}", disk));
+        root.mkdir("/mnt/root");
+        root.mkdir("/mnt/bind dir");
+        root.put(MOUNTINFO, [mi(&format!("{}:{}", a, b), "/mnt/root", "ext4", "/dev/nvme0n1p1", "rw,relatime", "shared:1", "rw"),
+                             mi(&format!("{}:{}", a, b), "/mnt/bind\\040dir", "ext4", "/dev/nvme0n1p1", "ro,relatime", "shared:2 master:1", "rw"),
+                             mi("0:25", "/dev/shm", "tmpfs", "tmpfs", "rw", "", "rw"), mi("0:50", "/mnt/nfs", "nfs4", "server:/export", "rw", "", "rw")]
+                 .join("\n") + "\n");
+        (a, b)
+    }
+
+    fn observe_storage() -> (Value, Value) {
+        let mut g = Group::new("storage", false);
+        let out = storage(&mut g);
+        (out, g.status())
+    }
+
+    #[test]
+    fn local_block_filesystems_once_each_with_all_mount_points() {
+        let root = Root::new(0);
+        let (a, b) = storage_tree(&root);
+        let (out, status) = observe_storage();
+        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        let c = std::ffi::CString::new(root.path("/mnt/root").to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::statvfs(c.as_ptr(), &mut st) }, 0);
+        let mut fs = out.get("filesystems").unwrap().clone();
+        let mut numbers = Vec::new();
+        for k in ["total_bytes", "used_bytes", "available_bytes"] { // the tree's filesystem is in use: used and free move
+            let Value::Arr(items) = &mut fs else { panic!() };
+            numbers.push(std::mem::replace(items[0].get_mut(k).unwrap(), Value::Null));
+        }
+        assert_eq!(fs.to_string(false), format!(
+            r#"[{{"device":"nvme0n1p1","major":{},"minor":{},"fstype":"ext4","source":"/dev/nvme0n1p1","mount_points":[{{"path":"/mnt/root","read_only":false}},{{"path":"/mnt/bind dir","read_only":false}}],"total_bytes":null,"used_bytes":null,"available_bytes":null}}]"#,
+            a, b)); // nfs and tmpfs are never statvfs'ed
+        assert_eq!(numbers[0], Value::Big(st.f_blocks as u128 * st.f_frsize as u128));
+        assert!(numbers[1..].iter().all(|n| matches!(n, Value::Big(_))));
+        assert_eq!(out.get("partitions").unwrap().to_string(false), format!(
+            r#"[{{"name":"nvme0n1p1","disk":"nvme0n1","major":{},"minor":{},"size_bytes":{},"mount_points":["/mnt/root","/mnt/bind dir"]}},{{"name":"nvme0n1p2","disk":"nvme0n1","major":259,"minor":2,"size_bytes":{},"mount_points":[]}}]"#,
+            a, b, 975237540i64 * 1024, 131072 * 1024)); // not mounted: a size, no capacity made up
+        assert_eq!(status.get("state").unwrap().to_string(false), r#""ok""#);
+    }
+
+    #[test]
+    fn statvfs_failure_keeps_the_entry_without_numbers() {
+        for (case, reason) in [("gone", "disappeared"), ("denied", "permission_denied"), ("replaced", "mount_changed")] {
+            if case == "denied" && unsafe { libc::geteuid() } == 0 {
+                continue; // root passes a directory of mode 000
+            }
+            let root = Root::new(0);
+            let (a, b) = storage_tree(&root);
+            match case {
+                "gone" => { root.remove("/mnt/root"); root.remove("/mnt/bind dir"); }
+                "denied" => root.chmod("/mnt", 0),
+                // another filesystem mounted there meanwhile: never queried as the old one
+                _ => root.put(PARTITIONS, format!("major minor  #blocks  name\n\n {} {}  975237540 nvme0n1p1\n", a, b + 1)),
+            }
+            if case == "replaced" {
+                let text = std::fs::read_to_string(root.path(MOUNTINFO)).unwrap().replace(&format!("{}:{}", a, b), &format!("{}:{}", a, b + 1));
+                root.put(MOUNTINFO, text);
+            }
+            let (out, status) = observe_storage();
+            root.chmod("/mnt", 0o755);
+            let fs = out.get("filesystems").unwrap().get_index(0).unwrap();
+            assert_eq!(["total_bytes", "used_bytes", "available_bytes"].map(|k| fs.get(k).unwrap().to_string(false)), ["null"; 3], "{}", case);
+            assert_eq!(status.get("state").unwrap().to_string(false), r#""partial""#, "{}", case);
+            assert_eq!(status.get("issues").unwrap().to_string(false), format!(r#"[{{"target":"nvme0n1p1","reason":"{}"}}]"#, reason), "{}", case);
+        }
+    }
+
+    #[test]
+    fn unreadable_mountinfo_or_partitions() {
+        let root = Root::new(0);
+        storage_tree(&root);
+        fake::answers(MOUNTINFO, vec![Err(libc::EACCES)]);
+        let (out, status) = observe_storage();
+        assert_eq!(out.get("filesystems").unwrap().to_string(false), "[]");
+        assert!(out.get("partitions").unwrap().get_index(1).is_some() && status.get("state").unwrap().to_string(false) == r#""partial""#);
+        fake::answers(MOUNTINFO, vec![Err(libc::EACCES)]);
+        root.remove(PARTITIONS);
+        let (out, status) = observe_storage();
+        assert_eq!(out.to_string(false), r#"{"partitions":[],"filesystems":[]}"#);
+        assert_eq!(status.get("state").unwrap().to_string(false), r#""error""#);
+    }
+
+    #[test]
+    fn nothing_found_is_unavailable() {
+        let root = Root::new(0);
+        root.put(PARTITIONS, "major minor  #blocks  name\n\n");
+        root.put(MOUNTINFO, "");
+        let (out, status) = observe_storage();
+        assert_eq!(out.to_string(false), r#"{"partitions":[],"filesystems":[]}"#);
+        assert_eq!(status.to_string(false), r#"{"state":"unavailable","reason":"not_detected","issues":[],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn a_device_number_without_a_name_is_kept() {
+        use std::os::unix::fs::MetadataExt;
+        let root = Root::new(0);
+        root.put(PARTITIONS, "major minor  #blocks  name\n\n");
+        root.mkdir("/data");
+        let dev = std::fs::metadata(&root.dir).unwrap().dev();
+        // btrfs: an anonymous device number that /proc/partitions does not list
+        root.put(MOUNTINFO, mi(&format!("{}:{}", libc::major(dev), libc::minor(dev)), "/data", "btrfs", "/dev/sdb", "rw", "", "rw") + "\n");
+        let (out, _) = observe_storage();
+        let fs = out.get("filesystems").unwrap().get_index(0).unwrap();
+        assert!(fs.get("device").unwrap().is_null() && !fs.get("total_bytes").unwrap().is_null());
+    }
+
+    #[test]
+    fn real_host_observation() {
+        let (out, status) = observe_storage();
+        assert!(["\"ok\"", "\"partial\"", "\"unavailable\""].contains(&status.get("state").unwrap().to_string(false).as_str()));
+        if let Some(Value::Arr(fs)) = out.get("filesystems") {
+            for f in fs {
+                assert!(LOCAL_FS.iter().any(|t| f.get("fstype").unwrap().to_string(false) == format!("{:?}", t)));
+            }
+        }
+    }
+
+    fn tree_dev(root: &Root) -> (i64, i64) {
+        use std::os::unix::fs::MetadataExt;
+        let dev = std::fs::metadata(&root.dir).unwrap().dev();
+        (libc::major(dev) as i64, libc::minor(dev) as i64)
+    }
+
+    #[test]
+    fn storage_skips_file_binds_before_a_directory() {
+        for files in [vec!["/usr/sbin/docker-init"], vec!["/etc/hostname", "/etc/hosts"]] {
+            let root = Root::new(0);
+            let (a, b) = tree_dev(&root);
+            root.put(PARTITIONS, format!("major minor  #blocks  name\n\n {} {}  975237540 nvme0n1p1\n", a, b));
+            for f in &files {
+                root.put(f, "x");
+            }
+            root.mkdir("/host/root");
+            root.mkdir("/another-dir");
+            let paths: Vec<&str> = files.iter().copied().chain(["/host/root", "/another-dir"]).collect();
+            root.put(MOUNTINFO, paths.iter().map(|p| mi(&format!("{}:{}", a, b), p, "ext4", "/dev/nvme0n1p1", "rw", "", "rw")).collect::<Vec<_>>().join("\n"));
+            let (out, status) = observe_storage();
+            let fs = out.get("filesystems").unwrap().get_index(0).unwrap();
+            assert!(matches!(fs.get("total_bytes"), Some(Value::Big(_))));
+            assert_eq!(status.to_string(false), r#"{"state":"ok","reason":null,"issues":[],"issues_truncated":0}"#);
+            let points: Vec<String> = match fs.get("mount_points") { Some(Value::Arr(m)) => m.iter().map(|p| p.get("path").unwrap().to_string(false)).collect(), _ => vec![] };
+            assert_eq!(points, paths.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn only_file_binds_keep_unknown_capacity() {
+        let root = Root::new(0);
+        let (a, b) = storage_tree(&root); // the partitions are listed, as in Python's test
+        root.put("/file", "x");
+        root.put(MOUNTINFO, mi(&format!("{}:{}", a, b), "/file", "ext4", "/dev/nvme0n1p1", "rw", "", "rw"));
+        let (out, status) = observe_storage();
+        assert!(out.get("filesystems").unwrap().get_index(0).unwrap().get("total_bytes").unwrap().is_null());
+        assert_eq!(status.to_string(false), r#"{"state":"partial","reason":"some_unreadable","issues":[{"target":"nvme0n1p1","reason":"io_error"}],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn capacity_does_not_require_directory_read_permission() {
+        if unsafe { libc::geteuid() } == 0 {
+            return; // requires unprivileged permission enforcement
+        }
+        let root = Root::new(0);
+        root.mkdir("/mount");
+        let dev = tree_dev(&root);
+        root.chmod("/mount", 0);
+        let got = capacity("/mount", dev);
+        root.chmod("/mount", 0o700);
+        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        let c = std::ffi::CString::new(root.path("/mount").to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::statvfs(c.as_ptr(), &mut st) }, 0);
+        let (blocks, _, _, frsize) = got.unwrap();
+        assert_eq!((blocks, frsize), (st.f_blocks as u64, st.f_frsize as u64));
+    }
+
+    #[test]
+    fn capacity_rejects_symlinks_and_regular_files_and_other_filesystems() {
+        let root = Root::new(0);
+        let dev = tree_dev(&root);
+        root.put("/file", "x");
+        root.link("/link", root.dir.to_str().unwrap());
+        assert!(capacity("/file", dev).is_err() && capacity("/link", dev).is_err());
+        root.mkdir("/dir");
+        assert!(capacity("/dir", dev).is_ok());
+        assert_eq!(capacity("/dir", (dev.0, dev.1 + 1)).err().unwrap().raw_os_error(), Some(libc::ESTALE)); // never queried as the old one
     }
 }

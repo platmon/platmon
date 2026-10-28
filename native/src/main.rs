@@ -99,6 +99,11 @@ fn config_check(args: &[String]) {
     println!("{}", out.to_string(false));
 }
 
+/// The slow groups that run, in their order: each that is enabled, the probe only with targets.
+fn slow_groups(cfg: &config::Config) -> Vec<&'static str> {
+    observe::GROUPS.iter().copied().filter(|g| cfg.flag(g, "enabled") && (*g != "probe" || !cfg.targets.is_empty())).collect()
+}
+
 /// platmon.py: serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]. The configuration as
 /// platmon.py reads it; the slow groups are on as configured, with their readers (src/collect/linux/observe.rs).
 fn serve(args: &[String]) {
@@ -128,8 +133,7 @@ fn serve(args: &[String]) {
     println!("platmon-native: platform {}, version {}", c.platform, version);
     let source = metadata::clock_source();
     let mut sampler = runtime::Sampler::new(interval, None, runtime::uuid4(), source);
-    let slow_names: Vec<&str> = observe::GROUPS.iter().copied()
-        .filter(|g| cfg.flag(g, "enabled") && (*g != "probe" || !cfg.targets.is_empty())).collect();
+    let slow_names = slow_groups(&cfg);
     let replay = cfg.flag("replay", "enabled").then(|| std::sync::Arc::new(replay::Replay::new(
         sampler.instance_id.clone(), source, &slow_names, cfg.float("replay", "retention"), cfg.int("replay", "max_bytes") as usize)));
     // recent numbers of the published snapshots, in memory only (docs/reference/history.md)
@@ -159,4 +163,38 @@ fn serve(args: &[String]) {
     println!("platmon http on {}:{}", bind, port);
     let web = cfg.flag("http", "web").then_some(web_dir).flatten();
     std::sync::Arc::new(http::Server::new(sampler, observations, web, version, levels)).serve(listener);
+}
+
+// tests/collector/test_storage.py test_slow_groups_and_history_follow_configuration, ported
+// (docs/development/python-test-port.md).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slow_groups_and_history_follow_configuration() {
+        const BAT: (&str, f64) = ("battery", 60.0); // on by default, like storage and wifi
+        let cases: [(Option<&str>, Vec<(&str, f64)>, bool); 10] = [
+            (None, vec![("storage", 30.0), ("wifi", 5.0), BAT], true),
+            (Some("[storage]\ninterval = 60\n"), vec![("storage", 60.0), ("wifi", 5.0), BAT], true),
+            (Some("[storage]\nenabled = no\n"), vec![("wifi", 5.0), BAT], true),
+            (Some("[wifi]\nenabled = no\n"), vec![("storage", 30.0), BAT], true),
+            (Some("[battery]\nenabled = no\n"), vec![("storage", 30.0), ("wifi", 5.0)], true),
+            (Some("[battery]\ninterval = 120\n"), vec![("storage", 30.0), ("wifi", 5.0), ("battery", 120.0)], true),
+            (Some("[storage]\nenabled = no\n[wifi]\nenabled = no\n[battery]\nenabled = no\n[history]\nenabled = no\n"), vec![], false),
+            (Some("[probe]\ntargets = 127.0.0.1:9797\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT, ("probe", 10.0)], true),
+            (Some("[probe]\nenabled = no\ntargets = 127.0.0.1:9797\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT], true),
+            (Some("[probe]\ntargets = , ,\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT], true)];
+        let path = std::env::temp_dir().join(format!("platmon-native-slow-{}.ini", std::process::id()));
+        for (text, groups, history) in cases {
+            if let Some(t) = text {
+                std::fs::write(&path, t).unwrap();
+            }
+            let cfg = config::load(text.map(|_| path.to_str().unwrap()), None).ok().unwrap();
+            let got: Vec<(&str, f64)> = slow_groups(&cfg).into_iter().map(|g| (g, cfg.float(g, "interval"))).collect();
+            assert_eq!(got, groups, "{:?}", text);
+            assert_eq!(cfg.flag("history", "enabled"), history, "{:?}", text);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 }
