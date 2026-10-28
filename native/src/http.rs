@@ -663,7 +663,7 @@ mod tests {
         let (addr, _) = server(|s| { s.web = Some(web.clone()); s.write_timeout = Duration::from_millis(300); });
         let mut c = TcpStream::connect(addr).unwrap();
         c.write_all(b"GET /app.js HTTP/1.0\r\n\r\n").unwrap();
-        let (mut got, mut buf, t0) = (Vec::new(), vec![0u8; 256 << 10], std::time::Instant::now());
+        let (mut got, mut buf, t0) = (Vec::new(), vec![0u8; 64 << 10], std::time::Instant::now()); // 64 reads at least: over 1 s
         loop {
             let n = c.read(&mut buf).unwrap();
             if n == 0 {
