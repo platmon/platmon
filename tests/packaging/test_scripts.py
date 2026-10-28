@@ -76,8 +76,8 @@ def test_source_uninstall_removes_cli_from_relocated_checkout(tmp_path):
 
 
 @pytest.mark.parametrize("mode, listener, expected", [
-    ("host", "localhost 9797", "look at it with: platmon\n"),
-    ("host", "localhost 19799", "look at it with: platmon localhost:19799"),
+    ("host", "127.0.0.1 9797", "look at it with: platmon\n"),  # health prints 127.0.0.1 for a bind of 0.0.0.0
+    ("host", "127.0.0.1 19799", "look at it with: platmon localhost:19799"),
     ("host", "192.0.2.1 9797", "look at it with: platmon 192.0.2.1:9797"),
     ("bridge", "unused", "look at it with: platmon localhost:19800"),
 ])
@@ -98,7 +98,7 @@ if args[0] == "inspect":
 elif "ps" in args:
     print("candidate")
 elif "exec" in args:
-    assert "load_config" in args[-1] and "/opt/platmon/platmon.ini" in args[-1]
+    assert args[-3:] == ["/opt/platmon/platmon-native", "health", "/opt/platmon/platmon.ini"]
     print(os.environ["TEST_LISTENER"])
 elif "port" in args:
     assert os.environ["TEST_MODE"] != "host", "host mode must not query port mappings"
