@@ -455,7 +455,7 @@ mod tests {
         let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
         let p = std::ffi::CString::new(root.dir.to_str().unwrap()).unwrap();
         assert_eq!(unsafe { libc::statvfs(p.as_ptr(), &mut st) }, 0);
-        assert_eq!(stats.get("disk").unwrap().get("total").unwrap().to_string(false), (st.f_blocks * st.f_frsize).to_string());
+        assert_eq!(stats.get("disk").unwrap().get("total").unwrap().to_string(false), (st.f_blocks as u64 * st.f_frsize as u64).to_string());
     }
 
     #[test]
