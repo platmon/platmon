@@ -169,11 +169,14 @@ native/build.sh                     # in a rust:1.88 container; unit tests, then
 native/build-cache-alloc.sh         # the cache-alloc build (a record, for bench.sh's C), into target/cache-alloc
 native/build-armhf.sh               # the 32-bit ARM build (armhf) and its unit tests, not run here
 native/tools/fixture.sh             # deterministic equivalence on fake trees, in a container
+native/tools/fixture.sh --golden    # the same against the Python service's recorded answers (--record rewrites them)
 PYTHONPATH=. python3 native/tools/compare.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 PYTHONPATH=. native/tools/bench.sh native/target/x86_64-unknown-linux-musl/release/platmon-native out.jsonl \
     native/target/cache-alloc/x86_64-unknown-linux-musl/release/platmon-native
 python3 native/tools/runtime_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 PYTHONPATH=. python3 native/tools/config_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon-native
+python3 native/tools/runtime_fixture.py BINARY --golden native/tools/golden/runtime      # recorded answers, no Python service
+python3 native/tools/config_fixture.py BINARY --golden native/tools/golden/config.json   # the same
 PYTHONPATH=. python3 native/tools/live_http.py native/target/x86_64-unknown-linux-musl/release/platmon-native
 python3 native/tools/service_ab.py --tree PYTHON_TREE --binary BINARY --out ab.jsonl   # about 2.5 h; --quick to try it
 python3 native/tools/ab_report.py ab.jsonl
@@ -206,6 +209,13 @@ with the package's Python server; `uninstall.sh` still removes that unit where a
   output that is not JSON and an oversized line must each be reported. Interfaces are real ones in the
   container's own network namespace (empty bridges, created and removed by ioctl, so the kernel gives them
   their ifindex); the container has `NET_ADMIN` there and no network.
+- `golden.py` and `golden/`: **the Python service's answers, recorded** for `fixture.py`, `runtime_fixture.py`
+  and `config_fixture.py`, so that they can compare the server without the Python service once it is
+  removed. `--record` compares with the Python service as before and writes its answers; `--golden` replays
+  them as the Python side. A recording holds what depends on the tree and the requests alone: the host
+  name and tmpfs sizes are fixed (`fixture.sh`), the probe's ports are fixed, an HTTP response is kept
+  unstamped, and an interface's index, the network namespace's id and the tmpfs devices are tokens resolved
+  when replayed. CI records again and fails when the result is not the committed one, then replays.
 - `compare.py`: **a live smoke test** on a real host, both collectors at the same moment. Structure, types,
   identities, `collectors`, source ids, which values have a span, the clock source, and spans within 5 s of
   each other are exact. Readings that move between two reads are only checked to be plausible (a GPU clock

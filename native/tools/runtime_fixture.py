@@ -9,7 +9,10 @@ sensor_meta, the passive groups' read, and the slow groups' entries. Runs on the
 Before the scenarios, the harness is run against fake sides (CONTROLS): equal ones must pass, and a
 difference, an early exit, a nonzero exit or a hang must fail.
 
-  PYTHONPATH=<platmon tree> runtime_fixture.py BINARY [SCENARIO ...]
+With --record DIR, each scenario's Python answers are also written to DIR/<scenario>.jsonl, the responses
+unstamped; with --golden DIR, those recorded answers stand in for the Python side (golden.py).
+
+  PYTHONPATH=<platmon tree> runtime_fixture.py BINARY [--record DIR | --golden DIR] [SCENARIO ...]
   runtime_fixture.py --self-test"""
 import json
 import os
@@ -17,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 
+import golden
 from fixture import Broken, ask, diff
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -533,9 +537,10 @@ def show(name, a, b, out):
         out.append(f"/{name}: the same JSON, different text: {a!r:.200} / {b!r:.200}")
 
 
-def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
+def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT, record=None):
     """Runs the operations on both sides: (differences, report lines). Every answer must be the same; both
-    sides must exit with 0. A side that breaks ends the run."""
+    sides must exit with 0. A side that breaks ends the run. record: a golden.Recorder for the Python side's
+    answers."""
     logs = {n: tempfile.TemporaryFile("w+") for n in ("python", "rust")}
     procs = {"python": start(py_cmd, logs["python"]), "rust": start(rs_cmd, logs["rust"])}
     report, problems, equal = [], 0, 0
@@ -546,6 +551,8 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
                 res[n] = ask(p, json.dumps(op), timeout)
             except Broken as e:
                 out.append(f"{n}: {e}")
+        if record is not None and isinstance(res.get("python"), dict):
+            record.add(json.dumps(op), {k: unstamped(v) if k == "response" else v for k, v in res["python"].items()})
         if len(res) == 2:
             a, b = res["python"], res["rust"]
             if not isinstance(a, dict) or not isinstance(b, dict) or list(a) != list(b):
@@ -581,8 +588,17 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
     return problems, report
 
 
-def run(name, binary):
-    problems, report = compare(SCENARIOS[name](), [sys.executable, f"{HERE}/runtime_py.py"], [binary, "runtime-script"])
+def run(name, binary, mode=None, directory=None):
+    """One scenario; mode "record" also writes the Python answers to directory, "golden" replays them."""
+    path = directory and os.path.join(directory, f"{name}.jsonl")
+    py_cmd = [sys.executable, f"{HERE}/golden.py" if mode == "golden" else f"{HERE}/runtime_py.py"]
+    py_cmd += [path] if mode == "golden" else []
+    record = golden.Recorder(path) if mode == "record" else None
+    try:
+        problems, report = compare(SCENARIOS[name](), py_cmd, [binary, "runtime-script"], record=record)
+    finally:
+        if record is not None:
+            record.close()
     print(f"{name}: {'OK' if not problems else 'FAILED'}")
     print("\n".join(report))
     return problems
@@ -634,8 +650,11 @@ def main():
         sys.exit(0 if self_test() else 1)
     if not self_test():
         sys.exit(1)
-    binary, names = os.path.abspath(sys.argv[1]), sys.argv[2:] or list(SCENARIOS)
-    failed = sum(run(n, binary) > 0 for n in names)
+    binary, args, mode, directory = os.path.abspath(sys.argv[1]), sys.argv[2:], None, None
+    if args[:1] in (["--record"], ["--golden"]):
+        mode, directory, args = args[0][2:], os.path.abspath(args[1]), args[2:]
+    names = args or list(SCENARIOS)
+    failed = sum(run(n, binary, mode, directory) > 0 for n in names)
     print(f"{len(names) - failed}/{len(names)} scenarios equal")
     sys.exit(1 if failed else 0)
 
