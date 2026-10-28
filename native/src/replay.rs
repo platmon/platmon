@@ -195,3 +195,88 @@ impl Replay {
         Ok(body.to_py_compact())
     }
 }
+
+// tests/runtime/test_replay.py, ported where runtime_fixture.py's replay scenario does not show it
+// (docs/development/python-test-port.md).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const S: i64 = 1_000_000_000;
+
+    fn core(n: i64, pad: usize) -> Value {
+        json::parse(&format!(r#"{{"n": {}, "pad": "{}", "sample": {{"sequence": {}, "age_ms": 0.0, "data_age_ms": 0.0, "stale_after_ms": 5000.0}}}}"#,
+                             n, "x".repeat(pad), n)).unwrap()
+    }
+
+    fn page(r: &Replay, stream: &str, after: i64, limit: i64) -> Value {
+        json::parse(&r.view(stream, None, after, limit, || 10 * S).unwrap()).unwrap()
+    }
+
+    fn ids(p: &Value) -> Vec<i64> {
+        match p.get("records") { Some(Value::Arr(r)) => r.iter().map(|x| match x.get("id") { Some(Value::Int(i)) => *i, _ => -1 }).collect(), _ => vec![] }
+    }
+
+    #[test]
+    fn oversized_middle_and_tail_are_reported_and_the_cursor_progresses() {
+        let r = Replay::new("i".into(), "boottime", &[], 600.0, 2000);
+        for (n, pad) in [(1, 10), (2, 3000), (3, 10), (4, 3000)] { // 2 and 4 are larger than max_bytes: not kept
+            r.append("core", n, n * S, n * S, &core(n, pad), false, || n * S).unwrap();
+        }
+        let first = page(&r, "core", 0, 1);
+        assert_eq!((ids(&first), first.get("next_after").unwrap().to_string(false), first.get("has_more").unwrap().to_string(false)),
+                   (vec![1], "1".into(), "true".into()));
+        let last = page(&r, "core", 1, 100);
+        assert_eq!((ids(&last), last.get("next_after").unwrap().to_string(false), last.get("has_more").unwrap().to_string(false)),
+                   (vec![3], "4".into(), "false".into()));
+        assert_eq!(last.get("missing_ranges").unwrap().to_string(false),
+                   r#"[{"from":2,"to":2,"reason":"buffer_unavailable"},{"from":4,"to":4,"reason":"buffer_unavailable"}]"#);
+    }
+
+    #[test]
+    fn the_response_byte_budget_paginates_before_the_count_limit() {
+        let r = Replay::new("i".into(), "boottime", &[], 600.0, 64 * 1024 * 1024);
+        for n in 1..5 {
+            r.append("core", n, n * S, n * S, &core(n, 600_000), false, || n * S).unwrap();
+        }
+        let body = r.view("core", None, 0, 100, || 10 * S).unwrap();
+        let first = json::parse(&body).unwrap();
+        assert_eq!((ids(&first), first.get("has_more").unwrap().to_string(false)), (vec![1, 2, 3], "true".into()));
+        assert!(body.len() < MAX_RESPONSE_BYTES);
+    }
+
+    #[test]
+    fn the_record_cap_holds() {
+        let r = Replay::new("i".into(), "boottime", &["wifi"], 3600.0, 64 * 1024 * 1024);
+        let obs = json::parse(r#"{"observation": {"id": 1, "data_age_ms": 0.0, "stale_after_ms": 15000.0}, "data": null}"#).unwrap();
+        r.append("wifi", 1, 0, 0, &obs, false, || 0).unwrap();
+        for n in 1..=(MAX_RECORDS as i64 + 3) {
+            r.append("core", n, n, n, &core(n, 0), false, || n).unwrap();
+        }
+        assert!(r.inner.lock().unwrap().records.len() <= MAX_RECORDS);
+        let p = json::parse(&r.view("core", None, 0, 1, || MAX_RECORDS as i64 + 3).unwrap()).unwrap();
+        assert_ne!(p.get("missing_ranges").unwrap().to_string(false), "[]"); // the oldest went first
+    }
+
+    #[test]
+    fn a_serialization_failure_records_its_loss() {
+        let r = Replay::new("i".into(), "boottime", &[], 600.0, 1024 * 1024);
+        let mut nan = core(1, 0);
+        nan.set("value", Value::Float(f64::NAN));
+        assert!(r.append("core", 1, S, S, &nan, false, || S).is_err()); // not stored, but its id is known
+        let p = page(&r, "core", 0, 100);
+        assert_eq!((p.get("latest_id").unwrap().to_string(false), p.get("missing_ranges").unwrap().to_string(false)),
+                   ("1".into(), r#"[{"from":1,"to":1,"reason":"buffer_unavailable"}]"#.into()));
+    }
+
+    #[test]
+    fn an_observation_failure_is_archived() {
+        let r = Replay::new("i".into(), "boottime", &["battery"], 600.0, 1024 * 1024);
+        let failed = json::parse(r#"{"state": "error", "observation": {"id": 1, "data_age_ms": 0.0, "stale_after_ms": 180000.0},
+            "collector": {"state": "error", "reason": "internal_error"}, "data": null}"#).unwrap();
+        r.append("battery", 1, S, S, &failed, false, || S).unwrap();
+        let entry = page(&r, "battery", 0, 100).get("records").unwrap().get_index(0).unwrap().get("data").unwrap().clone();
+        assert!(entry.get("data").unwrap().is_null());
+        assert_eq!(entry.get("collector").unwrap().get("state").unwrap().to_string(false), r#""error""#);
+    }
+}
