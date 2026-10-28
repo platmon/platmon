@@ -215,8 +215,8 @@ with the package's Python server; `uninstall.sh` still removes that unit where a
   them as the Python side. A recording holds what depends on the tree and the requests alone: the host
   name and tmpfs sizes are fixed (`fixture.sh`), the probe's ports are fixed, an HTTP response is kept
   unstamped, and the kernel's release and machine, an interface's index, the network namespace's id and the
-  tmpfs devices are tokens resolved
-  when replayed. CI records again and fails when the result is not the committed one, then replays.
+  tmpfs devices are tokens resolved when replayed. CI records again and fails when the result is not the
+  committed one, then replays.
 - `compare.py`: **a live smoke test** on a real host, both collectors at the same moment. Structure, types,
   identities, `collectors`, source ids, which values have a span, the clock source, and spans within 5 s of
   each other are exact. Readings that move between two reads are only checked to be plausible (a GPU clock
