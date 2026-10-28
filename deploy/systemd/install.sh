@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Install or update platmon as a systemd service from this checkout, enable it at boot and start it,
-# and install the `platmon` command (/usr/local/bin) to look at it.
-#   deploy/systemd/install.sh        (run it again after a git pull to update)
-# Code:   /opt/platmon                       staged before replacing; previous install retained
+# and install the `platmon` command (/usr/local/bin) to look at it. The server is this checkout's native
+# build for this machine: native/build.sh (amd64, arm64) or native/build-armhf.sh (32-bit ARM) first.
+#   deploy/systemd/install.sh        (run it again after a git pull and a new build to update)
+# Code:   /opt/platmon                       the server and its web page; staged before replacing, previous
+#                                            install retained
 # Config: /etc/platmon/platmon.ini           created once from platmon.ini, never overwritten
 # Unit:   /etc/systemd/system/platmon.service
 set -euo pipefail
@@ -26,18 +28,27 @@ if command -v docker >/dev/null && [ -n "$(docker ps -q --filter label=com.docke
     exit 1
 fi
 
-# check the config with this checkout's code before replacing anything
+# the build for this machine (the Debian package's targets, scripts/packaging/package.py ARCHES)
+case "$(uname -m)" in
+    x86_64) target=x86_64-unknown-linux-musl build=native/build.sh ;;
+    aarch64 | arm64) target=aarch64-unknown-linux-musl build=native/build.sh ;;
+    armv6l | armv7l | armv8l) target=arm-unknown-linux-musleabihf build=native/build-armhf.sh ;;
+    *) echo "no native build for $(uname -m)" >&2; exit 1 ;;
+esac
+binary=$repo/native/target/$target/release/platmon-native
+if [ ! -x "$binary" ]; then
+    echo "no server built for this machine: run $build first (it needs Docker), then this again" >&2
+    exit 1
+fi
+version=$(python3 "$repo/scripts/packaging/package.py" --version)
+
+# check the config with this checkout's server before replacing anything
 candidate_config=$config
 [ -f "$config" ] || candidate_config=$repo/platmon.ini
-python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-from platmon import load_config
-try:
-    load_config(sys.argv[2])
-except ValueError as e:
-    sys.exit(f"invalid config: {e}")
-' "$repo" "$candidate_config"
+checked=$("$binary" config-check "$candidate_config")
+case $checked in
+    '{"error":'*) echo "invalid config: $(printf '%s' "$checked" | sed 's/^{"error":"//; s/"}$//')" >&2; exit 1 ;;
+esac
 
 # Prepare the entire candidate before stopping the service or moving its installed files.
 work=$(mktemp -d "$(dirname "$prefix")/.platmon-install.XXXXXX")
@@ -80,11 +91,13 @@ rollback() {
     exit "$status"
 }
 trap rollback EXIT
-mkdir "$work/code"
-cp -r "$repo/platmon.py" "$repo/collector" "$repo/runtime" "$repo/frontends" "$work/code/"
-find "$work/code" -name __pycache__ -prune -exec rm -rf {} +
+mkdir -p "$work/code/frontends"
+install -m 755 "$binary" "$work/code/platmon-native"
+cp -r "$repo/frontends/web" "$work/code/frontends/"
 chmod -R a+rX "$work/code"
-sed 's|/usr/share/platmon/|/opt/platmon/|g' "$repo/deploy/systemd/platmon.service" > "$work/unit.new"
+# the Debian package's unit, with this install's paths and version
+sed -e 's|/usr/lib/platmon/|/opt/platmon/|g' -e 's|/usr/share/platmon/|/opt/platmon/|g' -e "s|@VERSION@|$version|g" \
+    "$repo/packaging/debian/platmon.service" > "$work/unit.new"
 [ ! -f "$unit" ] || install -m 644 "$unit" "$work/unit.previous"
 
 if [ -f "$config" ]; then

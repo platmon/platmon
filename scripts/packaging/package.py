@@ -20,7 +20,7 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ("platmon.py", "platmon.ini", "deploy/systemd/platmon.service", "README.md", "LICENSE",
+SOURCE_FILES = ("platmon.py", "platmon.ini", "README.md", "LICENSE",
                 "CHANGELOG.md", "pytest.ini", "deploy/docker/Dockerfile",
                 "deploy/docker/compose.yaml", "deploy/docker/compose.jetson.yaml", ".dockerignore", ".gitignore")
 SOURCE_DIRS = ("collector", "runtime", "frontends", "native", "scripts", "packaging", "deploy", "benchmarks", "docs",

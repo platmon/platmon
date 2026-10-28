@@ -36,11 +36,17 @@ def source_install(tmp_path):
     config.write_text("custom config")
     unit = tmp_path / "etc/platmon.service"
     unit.write_text("old unit\n")
-    (repo / "platmon.py").write_text("def load_config(path): return {}\n")
-    for name in ("collector", "runtime", "frontends"):
-        (repo / name).mkdir()
-        (repo / name / "new-code").write_text("candidate")
-    (repo / "deploy/systemd/platmon.service").write_text("new unit\n")
+    server = repo / "native/target/x86_64-unknown-linux-musl/release/platmon-native"  # uname -m is x86_64 below
+    server.parent.mkdir(parents=True)
+    server.write_text('#!/bin/sh\n[ "$1" = config-check ] && echo "${CONFIG_CHECK:-{\\"core\\": {}}}"\nexit 0\n')
+    server.chmod(0o755)
+    (repo / "frontends/web").mkdir(parents=True)
+    (repo / "frontends/web/new-code").write_text("candidate")
+    (repo / "packaging/debian").mkdir(parents=True)
+    (repo / "packaging/debian/platmon.service").write_text(
+        "ExecStart=/usr/lib/platmon/platmon-native serve --web /usr/share/platmon/frontends/web --app-version @VERSION@\n")
+    (repo / "scripts/packaging").mkdir(parents=True)
+    (repo / "scripts/packaging/package.py").write_text("print('9.8.7')\n")
     installer = scripts / "install.sh"
     text = (ROOT / "deploy/systemd/install.sh").read_text()
     for old, new in (("prefix=/opt/platmon", f"prefix={prefix}"),
@@ -53,13 +59,13 @@ def source_install(tmp_path):
     start.write_text('#!/bin/sh\n[ "${START_FAIL:-0}" = 0 ]\n')
     start.chmod(0o755)
     cli = repo / "scripts/install-cli.sh"
-    cli.parent.mkdir()
     cli.write_text("#!/bin/sh\nexit 0\n")
     cli.chmod(0o755)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     commands = {
         "id": "echo 0\n",
+        "uname": "echo x86_64\n",
         "docker": "exit 1\n",
         "dpkg-query": "exit 1\n",
         "systemctl": 'echo "$*" >> "$SERVICE_CALLS"\n[ "$1" != is-active ]\n',
@@ -88,12 +94,22 @@ def test_source_update_success_retains_backup(source_install):
     installer, prefix, config, unit, env = source_install
     result = run("bash", str(installer), env=env)
     assert result.returncode == 0, result.stderr
-    assert (prefix / "frontends/new-code").read_text() == "candidate"
-    assert (prefix / "runtime/new-code").read_text() == "candidate"
+    assert (prefix / "frontends/web/new-code").read_text() == "candidate"
+    assert os.access(prefix / "platmon-native", os.X_OK)
     backups = list(prefix.parent.glob(".platmon-install.*/previous/old-code"))
     assert len(backups) == 1 and backups[0].read_text() == "previous release"
-    assert unit.read_text() == "new unit\n"
+    # the Debian package's unit, with the installed paths and the checkout's version
+    assert unit.read_text() == "ExecStart=/opt/platmon/platmon-native serve --web /opt/platmon/frontends/web --app-version 9.8.7\n"
     assert config.read_text() == "custom config"
+
+
+def test_source_install_without_a_build_says_how_to_make_one(source_install):
+    installer, prefix, config, unit, env = source_install
+    (installer.parents[2] / "native/target/x86_64-unknown-linux-musl/release/platmon-native").unlink()
+    result = run("bash", str(installer), env=env)
+    assert result.returncode != 0 and "run native/build.sh first" in result.stderr, result.stderr
+    assert (prefix / "old-code").read_text() == "previous release" and unit.read_text() == "old unit\n"
+    assert not list(prefix.parent.glob(".platmon-install.*"))
 
 
 def fake_server(path, arch, mark=ALLOCATOR_MARK):
@@ -339,10 +355,9 @@ def test_source_installer_refuses_dpkg_owned_install(source_install):
 
 def test_source_update_validates_before_changing_files(source_install):
     installer, prefix, config, unit, env = source_install
-    repo = installer.parent.parent.parent
-    (repo / "platmon.py").write_text("def load_config(path): raise ValueError('invalid config')\n")
-    result = run("bash", str(installer), env=env)
-    assert result.returncode != 0 and "invalid config" in result.stderr
+    message = "[core] interval = 0.0 is out of range (0.1 to 3600)"  # as the server's config-check gives it
+    result = run("bash", str(installer), env=dict(env, CONFIG_CHECK='{"error":"%s"}' % message))
+    assert result.returncode != 0 and f"invalid config: {message}" in result.stderr, result.stderr
     assert (prefix / "old-code").read_text() == "previous release"
     assert unit.read_text() == "old unit\n"
     assert config.read_text() == "custom config"
