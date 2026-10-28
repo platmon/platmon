@@ -657,10 +657,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")] // the send buffer is set through libc
     fn a_slow_but_steady_reader_gets_the_whole_answer() {
         // the write timeout is a limit on no progress, not on the whole answer: /api/history can be large
         let web = web_dir("steady", &[("app.js", &vec![b'x'; 4 << 20])]);
-        let (addr, _) = server(|s| { s.web = Some(web.clone()); s.write_timeout = Duration::from_millis(300); });
+        let sampler = Arc::new(Sampler::new(1.0, None, "test".into(), "boottime"));
+        let obs = Arc::new(Observations { groups: vec![], instance_id: "test".into(), clock_source: "boottime" });
+        let mut srv = Server::new(sampler, obs, Some(web.clone()), "0".into(), Value::obj());
+        srv.write_timeout = Duration::from_millis(300);
+        let listener = bind("127.0.0.1", 0).unwrap();
+        // a small send buffer, as Python's test sets it: the kernel wakes a blocked writer once a third of the
+        // buffer is free, so with the buffers it grows to by itself one wait could outlast a short timeout
+        let size: libc::c_int = 4096;
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&listener);
+        assert_eq!(unsafe { libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_SNDBUF, (&size as *const libc::c_int).cast(), 4) }, 0);
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || Arc::new(srv).serve(listener));
         let mut c = TcpStream::connect(addr).unwrap();
         c.write_all(b"GET /app.js HTTP/1.0\r\n\r\n").unwrap();
         let (mut got, mut buf, t0) = (Vec::new(), vec![0u8; 64 << 10], std::time::Instant::now()); // 64 reads at least: over 1 s
