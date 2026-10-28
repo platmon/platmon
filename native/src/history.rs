@@ -449,4 +449,181 @@ mod tests {
             ("observation/storage/Volume{c722dea1-cc0a-40ca-99a0-911c7e3bfdc6}/available_bytes".to_string(), Value::Int(7)),
         ]);
     }
+
+    // tests/runtime/test_history.py, ported where runtime_fixture.py's history scenario does not show it
+    // (docs/development/python-test-port.md).
+    const S: i64 = 1_000_000_000;
+    const ALL: usize = 100_000; // no reduction
+
+    fn parse(text: &str) -> Value {
+        crate::json::parse(text).unwrap()
+    }
+
+    fn ids_of(stats: &str) -> Vec<(String, String)> {
+        points_of(&parse(stats), &Value::Null).unwrap().into_iter().map(|(k, v)| (k, v.to_string(false))).collect()
+    }
+
+    /// record(n, t): a snapshot with memory used 1000 + n.
+    fn record(h: &History, n: i64, t: i64) {
+        h.append(n, t, &parse(&format!(r#"{{"memory": {{"used": {}}}}}"#, 1000 + n)), &Value::Null, false);
+    }
+
+    fn values(h: &History, now: i64, prefix: &str, sid: &str) -> Vec<String> {
+        let (series, _) = h.view(now, prefix, None, ALL);
+        match series.get(sid) { Some(Value::Arr(points)) => points.iter().map(|p| p.get_index(2).unwrap().to_string(false)).collect(), _ => vec![] }
+    }
+
+    fn observe(h: &History, name: &str, interval: f64, id: i64, started: i64, completed: i64, state: &str, data: &str) {
+        h.append_observation(name, interval, id, started, completed, state, &parse(data)).unwrap();
+    }
+
+    #[test]
+    fn the_gpu_is_one_series_and_a_card_without_a_load_is_a_gap() {
+        assert_eq!(ids_of(r#"{"gpu": {"usage": 12.5}}"#), [("gpu/usage".to_string(), "12.5".to_string())]);
+        assert_eq!(ids_of(r#"{"gpu": {"usage": null}}"#), [("gpu/usage".to_string(), "null".to_string())]); // a card that publishes no load
+        assert!(ids_of(r#"{"gpu": null}"#).is_empty()); // no graphics device: no series to keep
+    }
+
+    #[test]
+    fn battery_points_carry_the_charge_and_the_draw() {
+        // the charge the gauge counts and the draw where the driver reports it; the bay's name is the identity
+        let data = parse(r#"{"batteries": [{"name": "BAT1", "present": true, "percent": 89, "charge_now_uah": 3026000, "energy_now_uwh": null, "power_uw": null},
+            {"name": "BAT2", "present": false, "percent": null, "charge_now_uah": null, "energy_now_uwh": null, "power_uw": null}],
+            "external": [{"name": "ADP1", "online": true}]}"#);
+        let p = observation_points("battery", &data).unwrap();
+        // the other gauge family, an unreported draw, an empty bay and external power: no series at all
+        assert_eq!(p.into_iter().map(|(k, v)| (k, v.to_string(false))).collect::<Vec<_>>(),
+                   [("observation/battery/BAT1/percent".to_string(), "89".to_string()), ("observation/battery/BAT1/charge_now_uah".into(), "3026000".into())]);
+    }
+
+    #[test]
+    fn a_battery_observation_reaches_the_history() {
+        let h = History::new(60.0, 1.0);
+        for n in [1, 2] {
+            observe(&h, "battery", 60.0, n, n * S, n * S, "ok", &format!(r#"{{"batteries": [{{"name": "BAT1", "present": true, "percent": {},
+                "charge_now_uah": {}, "energy_now_uwh": null, "power_uw": null}}], "external": []}}"#, 90 - n, 3000000 - n));
+        }
+        // the gauge stops answering: the series stays, with a gap
+        observe(&h, "battery", 60.0, 3, 3 * S, 3 * S, "partial", r#"{"batteries": [{"name": "BAT1", "present": true, "percent": 87,
+            "charge_now_uah": null, "energy_now_uwh": null, "power_uw": null}], "external": []}"#);
+        assert_eq!(values(&h, 3 * S, "", "observation/battery/BAT1/percent"), ["89", "88", "87"]);
+        assert_eq!(values(&h, 3 * S, "", "observation/battery/BAT1/charge_now_uah"), ["2999999", "2999998", "null"]);
+    }
+
+    #[test]
+    fn concurrent_append_and_view() {
+        let h = std::sync::Arc::new(History::new(60.0, 1.0));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (r, d) = (h.clone(), done.clone());
+        let reader = std::thread::spawn(move || {
+            let mut views = 0;
+            while !d.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = r.view(1_000_000_000_000, "", None, ALL).0.to_string(false);
+                views += 1;
+            }
+            views
+        });
+        for n in 1..2000 {
+            record(&h, n, n * S);
+        }
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(reader.join().unwrap() > 0); // no panic in either thread, and the reader ran
+    }
+
+    #[test]
+    fn missing_series_and_elapsed_gap_do_not_join_values() {
+        let h = History::new(60.0, 1.0);
+        record(&h, 1, S);
+        h.append(2, 2 * S, &parse("{}"), &Value::Null, false);
+        record(&h, 3, 3 * S);
+        assert_eq!(values(&h, 3 * S, "memory/", "memory/used_bytes"), ["1001", "null", "1003"]);
+        record(&h, 4, 20 * S);
+        let v = values(&h, 20 * S, "memory/", "memory/used_bytes");
+        assert_eq!(v[v.len() - 2], "null"); // an explicit break after the stalled publisher
+        record(&h, 4, 20 * S); // the same publication again: no second point
+        assert_eq!(values(&h, 20 * S, "", "memory/used_bytes").iter().filter(|x| *x == "1004").count(), 1);
+    }
+
+    #[test]
+    fn low_observation_ids_append_once_independent_of_core_reads() {
+        let h = History::new(60.0, 1.0);
+        let probe = |c: &str| format!(r#"{{"targets": [{{"address": "127.0.0.1", "port": 80, "connect_ms": {}}}]}}"#, c);
+        for _ in 0..10 {
+            observe(&h, "probe", 10.0, 1, S, S, "ok", &probe("0.0"));
+        }
+        assert_eq!(h.view(S, "", None, ALL).0.get("observation/probe/127.0.0.1:80/connect_ms").unwrap().to_string(false), "[[1,0.0,0.0]]");
+        observe(&h, "probe", 10.0, 2, 11 * S, 11 * S, "ok", &probe("null"));
+        assert_eq!(values(&h, 11 * S, "", "observation/probe/127.0.0.1:80/connect_ms").last().unwrap(), "null");
+    }
+
+    #[test]
+    fn slow_history_releases_expired_points_after_retention() {
+        for (name, interval, data) in [("storage", 30, r#"{"filesystems": [{"major": 8, "minor": 1, "device": "sda1", "used_bytes": 1, "available_bytes": 2}]}"#),
+                                       ("probe", 10, r#"{"targets": [{"address": "127.0.0.1", "port": 80, "connect_ms": 1.0}]}"#)] {
+            let h = History::new(600.0, 1.0);
+            for second in (interval..=1800).step_by(interval as usize) {
+                observe(&h, name, interval as f64, second / interval, second * S, second * S, "ok", data);
+            }
+            let (visible, _) = h.view(1800 * S, "", None, 600);
+            let inner = h.inner.lock().unwrap();
+            for s in &inner.series { // filtering the HTTP response alone does not release memory
+                assert!(s.points.front().unwrap().1 >= 1200 * S, "{}", name);
+                assert_eq!(s.points.len(), (600 / interval + 1) as usize, "{}", name);
+                assert!(matches!(visible.get(&s.id), Some(Value::Arr(p)) if p.len() == s.points.len()));
+            }
+        }
+    }
+
+    #[test]
+    fn series_slot_is_freed_before_accepting_replacement() {
+        let mut h = History::new(60.0, 1.0);
+        h.max_series = 1;
+        h.append(1, S, &parse(r#"{"memory": {"used": 1}}"#), &Value::Null, false);
+        h.append(2, 100 * S, &parse(r#"{"cpu": [{"id": 0, "usage": 2}]}"#), &Value::Null, false);
+        let Value::Obj(series) = h.view(100 * S, "", None, ALL).0 else { panic!() };
+        assert_eq!(series.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["cpu/0/usage"]);
+    }
+
+    #[test]
+    fn wifi_history_requires_namespace_and_index_and_breaks_disconnection() {
+        let wifi = |scope: &str, ifindex: i64, connected: bool| observation_points("wifi", &parse(&format!(
+            r#"{{"scope": {}, "interfaces": [{{"name": "wlan0", "ifindex": {}, "connected": {}, "signal_dbm": -60}}]}}"#, scope, ifindex, connected))).unwrap()
+            .into_iter().map(|(k, v)| (k, v.to_string(false))).collect::<Vec<_>>();
+        let first = wifi(r#"{"id": "ns:a"}"#, 2, true);
+        assert_eq!(first, [("observation/wifi/ns:a/2/wlan0/signal_dbm".to_string(), "-60".to_string())]);
+        assert!(wifi("{}", 2, true).is_empty());
+        assert_ne!(wifi(r#"{"id": "ns:a"}"#, 3, true)[0].0, first[0].0);
+        assert_eq!(wifi(r#"{"id": "ns:a"}"#, 3, false)[0].1, "null");
+    }
+
+    #[test]
+    fn storage_history_identity_and_independent_cadence() {
+        let h = History::new(600.0, 1.0);
+        let data = r#"{"filesystems": [{"major": 8, "minor": 1, "device": "sda1", "source": "/dev/sda1", "fstype": "ext4", "used_bytes": 0, "available_bytes": 100}]}"#;
+        observe(&h, "storage", 30.0, 1, S, S, "ok", data);
+        for n in 1..20 {
+            record(&h, n, n * S);
+        }
+        let Value::Obj(series) = h.view(20 * S, "observation/storage/", None, ALL).0 else { panic!() };
+        assert!(series.len() == 2 && series.iter().all(|(_, p)| matches!(p, Value::Arr(a) if a.len() == 1)));
+        assert!(h.intervals().iter().filter(|(k, _)| k.starts_with("observation/storage/")).all(|(_, ms)| *ms == 30000.0));
+        assert!(series.iter().any(|(_, p)| p.get_index(0).unwrap().get_index(2) == Some(&Value::Int(0)))); // a measured 0
+        observe(&h, "storage", 30.0, 2, 31 * S, 122 * S, "ok", data); // longer than 3 intervals: nulls
+        let Value::Obj(series) = h.view(122 * S, "observation/storage/", None, ALL).0 else { panic!() };
+        assert!(series.iter().all(|(_, p)| matches!(p, Value::Arr(a) if a.last().unwrap().get_index(2) == Some(&Value::Null))));
+    }
+
+    #[test]
+    fn point_and_series_limits_even_at_fastest_cadence() {
+        let h = History::new(3600.0, 0.1);
+        let cpus = (0..70).map(|i| format!(r#"{{"id": {}, "usage": {}.0}}"#, i, i)).collect::<Vec<_>>().join(",");
+        let stats = parse(&format!(r#"{{"cpu": [{}]}}"#, cpus));
+        for n in 0..(MAX_POINTS_PER_SERIES as i64 + 50) {
+            h.append(n, n * 100_000_000, &stats, &Value::Null, false);
+        }
+        let inner = h.inner.lock().unwrap();
+        assert_eq!(inner.series.len(), 64);
+        assert!(inner.series.iter().all(|s| s.points.len() == MAX_POINTS_PER_SERIES));
+        assert_eq!(inner.dropped_series, 6); // cpu/64 .. cpu/69: counted once each, never once per publication
+    }
 }

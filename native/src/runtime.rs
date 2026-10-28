@@ -609,4 +609,14 @@ mod tests {
             assert_eq!((problem.is_none(), oldest.is_some()), (ok, ok), "{}", ptr); // else: from the cycle start
         }
     }
+
+    #[test]
+    fn default_stale_after_and_a_new_instance_each_time() {
+        // tests/runtime/test_sampler.py: a floor of 5 s, so a slow collect alone does not trip it; else 3 intervals
+        assert_eq!(Sampler::new(1.0, None, "x".into(), "boottime").stale_ns, 5_000_000_000);
+        assert_eq!(Sampler::new(10.0, None, "x".into(), "boottime").stale_ns, 30_000_000_000);
+        let (a, b) = (uuid4(), uuid4()); // each service start is a new instance: a version 4 UUID
+        assert_ne!(a, b);
+        assert!(a.len() == 36 && a.as_bytes()[14] == b'4' && "89ab".contains(a.as_bytes()[19] as char), "{}", a);
+    }
 }
