@@ -538,7 +538,7 @@ pub fn pressure(group: &mut Group) -> (Value, Span) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::collect::linux::sysfs::fake::Root;
+    use crate::collect::linux::sysfs::fake::{self, Root};
 
     #[test]
     fn counters_like_python() {
@@ -695,6 +695,339 @@ mod tests {
             let Some(Value::Float(avg)) = r.get("some").and_then(|s| s.get("avg10")) else { panic!("avg10") };
             assert!((0.0..=100.0).contains(avg));
         }
+    }
+
+    // tests/collector/test_disk_io.py, ported. A disk is physical, virtual or a partition by its /sys/block
+    // link, as the kernel makes them.
+    const S: i64 = 1_000_000_000;
+
+    /// One /proc/diskstats line: r/w = (ios, merges, sectors, ms); then in flight, io ms, weighted ms, 4 more.
+    fn row(major: u64, minor: u64, name: &str, r: [u64; 4], w: [u64; 4], in_flight: u64, io_ms: u64) -> String {
+        format!("{:4} {:7} {} {} {} {} {} {} {} {} {} {} {} 0 0 0 0 0 0 0", major, minor, name, r[0], r[1], r[2], r[3], w[0], w[1], w[2], w[3], in_flight, io_ms)
+    }
+
+    fn plain(major: u64, minor: u64, name: &str) -> String {
+        row(major, minor, name, [0; 4], [0; 4], 0, 0)
+    }
+
+    /// /sys/block/<name>: Some(true) a physical disk, Some(false) a virtual one, None no entry (a partition).
+    fn kind(root: &Root, name: &str, physical: Option<bool>) {
+        let link = format!("{}/{}", SYS_BLOCK, name);
+        if root.path(&link).symlink_metadata().is_ok() {
+            root.remove(&link);
+        }
+        match physical {
+            Some(true) => root.link(&link, &format!("../devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block/{}", name)),
+            Some(false) => root.link(&link, &format!("../devices/virtual/block/{}", name)),
+            None => {}
+        }
+    }
+
+    fn diskstats(root: &Root, rows: &[String]) {
+        root.put(DISKSTATS, rows.iter().map(|r| format!("{}\n", r)).collect::<String>());
+    }
+
+    fn sample_disks(d: &mut Disks, root: &Root, t: i64) -> (Value, Span, Value) {
+        root.at(t);
+        let mut g = Group::new("disk_io", false);
+        let (out, span) = d.sample(&mut g);
+        (out, span, g.status())
+    }
+
+    fn disk_named(out: &Value, name: &str) -> Value {
+        match out.get("disks") { Some(Value::Arr(d)) => d.iter().find(|x| x.get("name") == Some(&Value::from(name))).cloned().unwrap_or(Value::Null), _ => Value::Null }
+    }
+
+    fn names(out: &Value) -> Vec<String> {
+        match out.get("disks") { Some(Value::Arr(d)) => d.iter().map(|x| x.get("name").unwrap().to_string(false)).collect(), _ => vec![] }
+    }
+
+    fn reason(out: &Value, name: &str) -> String {
+        disk_named(out, name).get("reason").map_or("absent".into(), |r| r.to_string(false))
+    }
+
+    #[test]
+    fn only_physical_disks_with_rates_over_the_observed_window() {
+        let root = Root::new(T0);
+        for (n, k) in [("nvme0n1", Some(true)), ("nvme0n1p1", None), ("loop0", Some(false)), ("zram0", Some(false))] {
+            kind(&root, n, k);
+        }
+        diskstats(&root, &[plain(259, 0, "nvme0n1"), plain(259, 1, "nvme0n1p1"), plain(7, 0, "loop0"), plain(252, 0, "zram0")]);
+        let mut d = Disks::new(Some(5.0));
+        let (out, span, status) = sample_disks(&mut d, &root, T0);
+        assert_eq!((names(&out), reason(&out, "nvme0n1")), (vec![r#""nvme0n1""#.to_string()], r#""warmup""#.to_string()));
+        assert_eq!(out.get("scope").unwrap().to_string(false), r#"{"kind":"host_block_devices"}"#);
+        assert_eq!((out.get("provider").unwrap().to_string(false), out.get("read").unwrap().to_string(false)), (r#""proc_diskstats""#.into(), "null".into()));
+        assert_eq!(span, Some((T0, T0 + crate::metadata::FAKE_TICK)));
+        assert_eq!(status.get("state").unwrap().to_string(false), r#""ok""#);
+        diskstats(&root, &[row(259, 0, "nvme0n1", [10, 1, 80, 4], [20, 2, 160, 6], 3, 500), plain(259, 1, "nvme0n1p1"), plain(7, 0, "loop0")]);
+        let (out, _, _) = sample_disks(&mut d, &root, T0 + 2 * S);
+        assert_eq!(disk_named(&out, "nvme0n1").to_string(false), concat!(r#"{"name":"nvme0n1","major":259,"minor":0,"#,
+            r#""read":{"ios":10,"merges":1,"bytes":40960,"time_ms":4},"write":{"ios":20,"merges":2,"bytes":81920,"time_ms":6},"#,
+            r#""in_flight":3,"io_time_ms":500,"rates":{"read_bytes_per_s":20480.0,"write_bytes_per_s":40960.0,"reads_per_s":5.0,"#,
+            r#""writes_per_s":10.0,"io_time_ratio":0.25},"window_ms":2000.0,"reason":null}"#));
+        let (out, _, _) = sample_disks(&mut d, &root, T0 + 3 * S); // idle: measured 0, not missing
+        assert_eq!(disk_named(&out, "nvme0n1").get("rates").unwrap().get("write_bytes_per_s").unwrap().to_string(false), "0.0");
+    }
+
+    #[test]
+    fn confirmed_kinds_are_reused_and_missing_links_retried() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        kind(&root, "loop0", Some(false));
+        diskstats(&root, &[plain(8, 0, "sda"), plain(8, 1, "sda1"), plain(7, 0, "loop0")]);
+        let mut d = Disks::new(Some(5.0));
+        sample_disks(&mut d, &root, T0);
+        kind(&root, "sda", Some(false)); // a confirmed kind is not looked up again: sda stays a disk
+        kind(&root, "loop0", Some(true));
+        kind(&root, "sda1", Some(true)); // an entry that was missing is looked up again
+        let (out, _, _) = sample_disks(&mut d, &root, T0 + S);
+        assert_eq!(names(&out), [r#""sda""#, r#""sda1""#]);
+        diskstats(&root, &[plain(7, 0, "loop0")]);
+        sample_disks(&mut d, &root, T0 + 2 * S);
+        assert_eq!(d.kind.iter().map(|(k, _)| k.2.as_str()).collect::<Vec<_>>(), ["loop0"]); // names that are gone are not kept
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[plain(8, 0, "sda"), plain(7, 0, "loop0")]); // back: looked up again, and a new baseline
+        assert_eq!(reason(&sample_disks(&mut d, &root, T0 + 3 * S).0, "sda"), r#""warmup""#);
+    }
+
+    #[test]
+    fn a_failed_lookup_is_reported_and_retried() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        root.put("/sys/block/sdb", "not a link"); // readlink fails (EINVAL): Python's PermissionError stands for any
+        diskstats(&root, &[plain(8, 0, "sda"), plain(8, 16, "sdb")]);
+        let mut d = Disks::new(Some(5.0));
+        let (out, _, status) = sample_disks(&mut d, &root, T0);
+        assert_eq!(names(&out), [r#""sda""#]);
+        assert_eq!(status.to_string(false), r#"{"state":"partial","reason":"some_unreadable","issues":[{"target":"sdb","reason":"io_error"}],"issues_truncated":0}"#);
+        root.remove("/sys/block/sdb");
+        kind(&root, "sdb", Some(true));
+        let (out, _, status) = sample_disks(&mut d, &root, T0 + S);
+        assert_eq!((reason(&out, "sdb"), status.get("state").unwrap().to_string(false)), (r#""warmup""#.into(), r#""ok""#.into()));
+    }
+
+    #[test]
+    fn any_counter_going_down_gives_no_rate_but_in_flight_may() {
+        for field in [0, 1, 2, 3, 4, 5, 6, 7, 9] {
+            let root = Root::new(T0);
+            kind(&root, "sda", Some(true));
+            let v = [100u64; 10];
+            diskstats(&root, &[row(8, 0, "sda", [v[0], v[1], v[2], v[3]], [v[4], v[5], v[6], v[7]], v[8], v[9])]);
+            let mut d = Disks::new(Some(5.0));
+            sample_disks(&mut d, &root, T0);
+            let mut l = v;
+            l[field] -= 1;
+            diskstats(&root, &[row(8, 0, "sda", [l[0], l[1], l[2], l[3]], [l[4], l[5], l[6], l[7]], l[8], l[9])]);
+            let x = disk_named(&sample_disks(&mut d, &root, T0 + S).0, "sda");
+            assert_eq!(["reason", "rates", "window_ms"].map(|k| x.get(k).unwrap().to_string(false)), [r#""counter_regressed""#, "null", "1000.0"], "{}", field);
+            diskstats(&root, &[row(8, 0, "sda", [l[0], l[1], l[2], l[3]], [l[4], l[5], l[6], l[7]], 0, l[9])]); // in flight drops: fine
+            assert_eq!(reason(&sample_disks(&mut d, &root, T0 + 2 * S).0, "sda"), "null", "{}", field);
+        }
+    }
+
+    #[test]
+    fn gap_boundary_and_bad_intervals() {
+        for (window, why) in [(5 * S, "null"), (5 * S + 1, r#""gap""#), (0, r#""invalid_interval""#), (-S, r#""invalid_interval""#)] {
+            let root = Root::new(T0);
+            kind(&root, "sda", Some(true));
+            diskstats(&root, &[plain(8, 0, "sda")]);
+            let mut d = Disks::new(Some(5.0));
+            sample_disks(&mut d, &root, T0);
+            let x = disk_named(&sample_disks(&mut d, &root, T0 + window).0, "sda");
+            assert_eq!(x.get("reason").unwrap().to_string(false), why, "{}", window);
+            assert_eq!(x.get("rates").unwrap().is_null(), why != "null");
+            assert_eq!(reason(&sample_disks(&mut d, &root, T0 + window + S).0, "sda"), "null");
+        }
+    }
+
+    #[test]
+    fn a_new_device_number_under_the_same_name_starts_over() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[row(8, 0, "sda", [100, 0, 0, 0], [0; 4], 0, 0)]);
+        let mut d = Disks::new(Some(5.0));
+        sample_disks(&mut d, &root, T0);
+        diskstats(&root, &[row(8, 32, "sda", [200, 0, 0, 0], [0; 4], 0, 0)]);
+        assert_eq!(reason(&sample_disks(&mut d, &root, T0 + S).0, "sda"), r#""warmup""#);
+    }
+
+    #[test]
+    fn bad_rows_are_left_out_and_others_kept() {
+        let root = Root::new(T0);
+        for n in ["sda", "sdb", "sdc", "sdd", "sde", "dup", "sdf"] {
+            kind(&root, n, Some(true));
+        }
+        let text = [plain(8, 0, "sda"), "   8  16 sdb 1 2 3".into(), // short
+                    plain(8, 32, "sdc").replacen(" 0 ", " -1 ", 1), // signed
+                    plain(8, 48, "sdd").replacen(" 0 ", &format!(" {} ", 1u128 << 64), 1), // too large
+                    plain(8, 64, "sde") + " x", // a later field not a counter
+                    plain(8, 80, "dup"), plain(8, 96, "dup"), plain(8, 112, "a/b"), "8 128".into(),
+                    "   8     144 sdf 0 0 0 0 0 0 0 0 0 0 0".into(), "".into()].join("\n"); // 11 fields: an old kernel, fine
+        let mut g = Group::new("disk_io", false);
+        let (rows, bad, _) = Disks::new(None).parse(&text, &mut g).unwrap();
+        assert_eq!(rows.iter().map(|(k, _)| k.2.as_str()).collect::<Vec<_>>(), ["sda", "sdf"]);
+        assert_eq!(bad.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["sdb", "sdc", "sdd", "sde", "dup", "line8", "line9"]);
+        assert!(bad.iter().all(|(_, r)| *r == "invalid_data"));
+    }
+
+    #[test]
+    fn rows_of_left_out_devices_are_not_converted_or_reported() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        kind(&root, "loop0", Some(false));
+        root.put(DISKSTATS, format!("{}\n7 0 loop0 x y\n8 1 sda1 -1\n", plain(8, 0, "sda")));
+        let (out, _, status) = sample_disks(&mut Disks::new(Some(5.0)), &root, T0);
+        assert_eq!(names(&out), [r#""sda""#]);
+        assert_eq!(status.to_string(false), r#"{"state":"ok","reason":null,"issues":[],"issues_truncated":0}"#);
+        let mut g = Group::new("disk_io", false);
+        let (rows, bad, _) = Disks::new(None).parse("7 0 loop0 x y\n", &mut g).unwrap(); // listed, so not empty, but nothing to collect
+        assert!(rows.is_empty() && bad.is_empty());
+    }
+
+    #[test]
+    fn a_broken_file_gives_nothing_and_clears_baselines() {
+        for text in [&b"\xff\xfe"[..], b"", b"\n\n"] {
+            let root = Root::new(T0);
+            kind(&root, "sda", Some(true));
+            diskstats(&root, &[plain(8, 0, "sda")]);
+            let mut d = Disks::new(Some(5.0));
+            sample_disks(&mut d, &root, T0);
+            root.put(DISKSTATS, text);
+            let (out, span, status) = sample_disks(&mut d, &root, T0 + S);
+            assert!(names(&out).is_empty() && span.is_none());
+            assert_eq!(status.to_string(false), r#"{"state":"error","reason":"invalid_data","issues":[{"target":"diskstats","reason":"invalid_data"}],"issues_truncated":0}"#);
+            diskstats(&root, &[plain(8, 0, "sda")]);
+            assert_eq!(reason(&sample_disks(&mut d, &root, T0 + 2 * S).0, "sda"), r#""warmup""#);
+        }
+    }
+
+    #[test]
+    fn unreadable_file() {
+        for (errno, state, why) in [(libc::ENOENT, "unavailable", "not_exposed"), (libc::EACCES, "error", "permission_denied"), (libc::EIO, "error", "io_error")] {
+            let root = Root::new(T0);
+            kind(&root, "sda", Some(true));
+            diskstats(&root, &[plain(8, 0, "sda")]);
+            let mut d = Disks::new(Some(5.0));
+            sample_disks(&mut d, &root, T0);
+            fake::answers(DISKSTATS, vec![Err(errno)]);
+            let (out, span, status) = sample_disks(&mut d, &root, T0 + S);
+            assert!(names(&out).is_empty() && span.is_none() && d.last.is_none());
+            assert_eq!((status.get("state").unwrap().to_string(false), status.get("reason").unwrap().to_string(false)),
+                       (format!("{:?}", state), format!("{:?}", why)));
+        }
+    }
+
+    #[test]
+    fn no_physical_disk_is_not_detected_not_an_error() {
+        let root = Root::new(T0);
+        kind(&root, "loop0", Some(false));
+        kind(&root, "ram0", Some(false));
+        diskstats(&root, &[plain(7, 0, "loop0"), plain(1, 0, "ram0")]);
+        let (out, span, status) = sample_disks(&mut Disks::new(Some(5.0)), &root, T0);
+        assert!(names(&out).is_empty() && span.is_some());
+        assert_eq!(status.to_string(false), r#"{"state":"unavailable","reason":"not_detected","issues":[],"issues_truncated":0}"#);
+    }
+
+    #[test]
+    fn many_devices_and_capped_issues() {
+        let root = Root::new(T0);
+        let mut rows: Vec<String> = (0..200).map(|n| { kind(&root, &format!("loop{}", n), Some(false)); plain(7, n, &format!("loop{}", n)) }).collect();
+        kind(&root, "sda", Some(true));
+        rows.push(plain(8, 0, "sda"));
+        rows.extend((0..100).map(|n| { kind(&root, &format!("bad{}", n), Some(true)); format!("8 {} bad{} 1", n + 1, n) }));
+        diskstats(&root, &rows);
+        let (out, _, status) = sample_disks(&mut Disks::new(Some(5.0)), &root, T0);
+        assert_eq!(names(&out), [r#""sda""#]);
+        assert!(status.get("issues").unwrap().get_index(31).is_some() && status.get("issues").unwrap().get_index(32).is_none());
+        assert_eq!(status.get("issues_truncated").unwrap().to_string(false), "68");
+    }
+
+    #[test]
+    fn changing_the_output_does_not_touch_the_baseline() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[row(8, 0, "sda", [10, 0, 0, 0], [0; 4], 0, 0)]);
+        let mut d = Disks::new(Some(5.0));
+        let (mut out, _, _) = sample_disks(&mut d, &root, T0);
+        *out.get_mut("disks").unwrap() = Value::Arr(vec![]);
+        assert_eq!(disk_named(&sample_disks(&mut d, &root, T0 + S).0, "sda").get("rates").unwrap().get("reads_per_s").unwrap().to_string(false), "0.0");
+    }
+
+    #[test]
+    fn is_physical_follows_the_sysfs_link() {
+        let root = Root::new(T0);
+        kind(&root, "nvme0n1", Some(true));
+        kind(&root, "loop0", Some(false));
+        assert_eq!((is_physical("nvme0n1").unwrap(), is_physical("loop0").unwrap()), (Some(true), Some(false)));
+        assert_eq!(is_physical("nvme0n1p1").unwrap(), None); // a partition has no /sys/block entry
+    }
+
+    #[test]
+    fn on_unless_disabled_and_disabled_never_reads() {
+        let root = Root::new(T0);
+        root.required();
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[plain(8, 0, "sda")]);
+        let stats = crate::collect::linux::Collector::new(5.0, [false, false, false]).collect().ok().unwrap().stats;
+        assert!(stats.get("disk_io").is_none() && stats.get("collectors").unwrap().get("disk_io").is_none());
+        let mut c = crate::collect::linux::Collector::new(5.0, [false, true, false]);
+        assert_eq!(c.disks.as_ref().unwrap().max_gap, Some(5 * S));
+        root.at(T0);
+        let stats = c.collect().ok().unwrap().stats;
+        assert_eq!(stats.get("collectors").unwrap().get("disk_io").unwrap().get("state").unwrap().to_string(false), r#""ok""#);
+        assert_eq!(stats.get("disk").unwrap().to_string(false).matches(':').count(), 2); // the filesystem usage: total and used, unchanged
+    }
+
+    #[test]
+    fn real_host_reading() {
+        let mut g = Group::new("disk_io", false);
+        let (out, span) = Disks::new(None).sample(&mut g);
+        assert!(["\"ok\"", "\"partial\"", "\"unavailable\""].contains(&g.status().get("state").unwrap().to_string(false).as_str()));
+        if std::path::Path::new(DISKSTATS).exists() {
+            assert!(span.is_some());
+            if let Some(Value::Arr(disks)) = out.get("disks") {
+                for d in disks {
+                    let Some(Value::Str(name)) = d.get("name") else { panic!() };
+                    assert_eq!(is_physical(name).unwrap(), Some(true));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn changed_device_number_rechecks_classification() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[plain(8, 0, "sda")]);
+        let mut d = Disks::new(Some(5.0));
+        assert_eq!(reason(&sample_disks(&mut d, &root, T0).0, "sda"), r#""warmup""#);
+        kind(&root, "sda", Some(false));
+        diskstats(&root, &[plain(8, 32, "sda")]);
+        assert!(names(&sample_disks(&mut d, &root, T0 + S).0).is_empty());
+    }
+
+    #[test]
+    fn missing_sysfs_entry_is_retried_while_diskstats_name_remains() {
+        let root = Root::new(T0);
+        diskstats(&root, &[plain(8, 0, "sda")]);
+        let mut d = Disks::new(Some(5.0));
+        assert!(names(&sample_disks(&mut d, &root, T0).0).is_empty());
+        kind(&root, "sda", Some(true));
+        assert_eq!(reason(&sample_disks(&mut d, &root, T0 + S).0, "sda"), r#""warmup""#);
+    }
+
+    #[test]
+    fn file_failure_discards_classification_cache() {
+        let root = Root::new(T0);
+        kind(&root, "sda", Some(true));
+        diskstats(&root, &[plain(8, 0, "sda")]);
+        let mut d = Disks::new(Some(5.0));
+        sample_disks(&mut d, &root, T0);
+        fake::answers(DISKSTATS, vec![Err(libc::EIO)]);
+        sample_disks(&mut d, &root, T0 + S);
+        kind(&root, "sda", Some(false));
+        assert!(names(&sample_disks(&mut d, &root, T0 + 2 * S).0).is_empty());
     }
 
     #[test]
