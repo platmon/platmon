@@ -832,4 +832,278 @@ mod tests {
         assert_eq!(run(&mut logged, Some("io_error")), first); // the same problem again: not logged every second
         assert_eq!(run(&mut logged, None), [("temperature".to_string(), vec![])]); // logged once as readable again
     }
+
+    // tests/collector/test_provenance.py's source identity and read span tests, ported. The clock moves one
+    // FAKE_TICK per call, as Python's Tick moves 1 µs.
+    const CHIP: &[(&str, &str)] = &[("name", "ina"), ("temp1_input", "40000"), ("temp1_label", "Board"), ("power1_input", "2000000"),
+        ("power1_label", "VIN"), ("in2_label", "VDD"), ("in2_input", "5000"), ("curr2_input", "1000"), ("fan1_input", "900"), ("pwm1", "128")];
+
+    /// A hwmon chip at /sys/<device>/hwmon/hwmon<n>, linked from class/hwmon as the kernel does.
+    fn chip(root: &Root, device: &str, n: usize, files: &[(&str, &str)]) -> String {
+        let d = format!("/sys/{}/hwmon/hwmon{}", device, n);
+        root.mkdir(&d);
+        for (name, value) in files {
+            root.put(&format!("{}/{}", d, name), value);
+        }
+        root.link(&format!("/sys/class/hwmon/hwmon{}", n), &format!("../../{}/hwmon/hwmon{}", device, n));
+        d
+    }
+
+    fn traced() -> Groups {
+        crate::metadata::set_clocks(1_000_000_000_000, 0);
+        Groups::new(true)
+    }
+
+    fn traced_sensors() -> (Vec<(String, Value)>, Vec<(String, Value)>, Vec<Fan>, Groups) {
+        let mut g = traced();
+        let (t, p, f) = hwmon_sensors(&[], &[], &mut g);
+        (t, p, f, g)
+    }
+
+    fn record<'a>(g: &'a Group, key: &str) -> &'a Value {
+        &g.sensors.iter().find(|(s, _)| *s == Slot::Key(key.into())).unwrap().1
+    }
+
+    fn field(v: &Value, k: &str) -> String {
+        v.get(k).unwrap().to_string(false)
+    }
+
+    fn span(v: &Value) -> (i64, i64) {
+        match v.get("span") { Some(Value::Arr(a)) => match (&a[0], &a[1]) { (Value::Int(x), Value::Int(y)) => (*x, *y), _ => panic!() }, _ => panic!("no span") }
+    }
+
+    #[test]
+    fn descriptor_id_is_fixed() {
+        // sha256 of a sorted, compact JSON descriptor: the same in any process (Python's hash seed)
+        let src = metadata::source("hwmon", "celsius", "device_channel", vec![("device", "devices/platform/i2c/1-0040".into()), ("attr", "temp1_input".into())]);
+        assert_eq!(src.to_string(false), r#"{"id":"src1:dc1e592a9185fe57929e05c59a5759c4bb2cdd10e04a85525241df68d9a80bd0","provider":"hwmon","identity_basis":"device_channel","unit":"celsius"}"#);
+        assert_eq!(metadata::source("hwmon", "celsius", "unresolved", vec![]).to_string(false), r#"{"id":null,"provider":"hwmon","identity_basis":"unresolved","unit":"celsius"}"#);
+    }
+
+    #[test]
+    fn label_change_keeps_id_and_channels_differ() {
+        let root = Root::new(0);
+        let d = chip(&root, "devices/platform/i2c/1-0040", 3, CHIP);
+        let (_, _, _, g) = traced_sensors();
+        let first = field(record(&g.temperature, "ina Board"), "id");
+        root.put(&format!("{}/temp1_label", d), "Renamed");
+        let (_, _, _, g2) = traced_sensors();
+        assert_eq!(field(record(&g2.temperature, "ina Renamed"), "id"), first);
+        let mut ids = vec![field(record(&g.power, "VIN"), "id"), field(record(&g.power, "VDD"), "id"), first];
+        ids.extend(g.fans.sensors.iter().map(|(_, v)| field(v, "id")));
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 5); // temp, direct power, computed power, rpm, pwm: all different
+        assert_eq!(field(record(&g.power, "VIN"), "identity_basis"), r#""device_channel""#);
+    }
+
+    #[test]
+    fn same_name_on_two_devices_differs() {
+        let root = Root::new(0);
+        chip(&root, "devices/platform/i2c/1-0040", 1, &[("name", "nvme"), ("temp1_input", "40000"), ("temp1_label", "Composite")]);
+        chip(&root, "devices/platform/i2c/1-0041", 2, &[("name", "nvme"), ("temp1_input", "41000"), ("temp1_label", "Composite")]);
+        let (t, _, _, g) = traced_sensors();
+        assert_eq!(t.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["nvme Composite", "nvme Composite (hwmon2)"]);
+        assert_ne!(field(record(&g.temperature, "nvme Composite"), "id"), field(record(&g.temperature, "nvme Composite (hwmon2)"), "id"));
+    }
+
+    #[test]
+    fn renumbered_hwmon_keeps_device_id() {
+        let ids = |n: usize| { // the same device, enumerated as another hwmon node, under another temporary root
+            let root = Root::new(0);
+            chip(&root, "devices/platform/i2c/1-0040", n, CHIP);
+            let (_, _, _, g) = traced_sensors();
+            [&g.temperature, &g.power].map(|x| x.sensors.iter().map(|(_, v)| field(v, "id")).collect::<Vec<_>>())
+        };
+        assert_eq!(ids(3), ids(7));
+    }
+
+    #[test]
+    fn two_hwmon_nodes_on_one_device_are_not_merged() {
+        let root = Root::new(0);
+        chip(&root, "devices/platform/i2c/1-0040", 1, &[("name", "x"), ("temp1_input", "40000")]);
+        chip(&root, "devices/platform/i2c/1-0040", 2, &[("name", "y"), ("temp1_input", "41000")]);
+        let (_, _, _, g) = traced_sensors();
+        let (a, b) = (record(&g.temperature, "x temp1"), record(&g.temperature, "y temp1"));
+        assert_eq!([field(a, "identity_basis"), field(b, "identity_basis")], [r#""resolved_path""#; 2]); // the device alone is ambiguous
+        assert_ne!(field(a, "id"), field(b, "id"));
+    }
+
+    #[test]
+    fn virtual_hwmon_and_thermal_zone_are_path_based() {
+        let root = Root::new(0);
+        chip(&root, "devices/virtual", 0, &[("name", "acpitz"), ("temp1_input", "30000")]);
+        root.put("/sys/devices/virtual/thermal/thermal_zone0/type", "cpu-thermal");
+        root.put("/sys/devices/virtual/thermal/thermal_zone0/temp", "51000");
+        root.link("/sys/class/thermal/thermal_zone0", "../../devices/virtual/thermal/thermal_zone0");
+        let (_, _, _, g) = traced_sensors();
+        assert_eq!(field(record(&g.temperature, "acpitz temp1"), "identity_basis"), r#""resolved_path""#); // not "devices/virtual"
+        let mut tg = Group::new("temperature", true);
+        let (t, _, _) = thermal_zones(&mut tg);
+        assert_eq!(Value::Obj(t).to_string(false), r#"{"cpu":51.0}"#);
+        assert_eq!((field(record(&tg, "cpu"), "provider"), field(record(&tg, "cpu"), "identity_basis")), (r#""thermal""#.into(), r#""resolved_path""#.into()));
+    }
+
+    #[test]
+    fn class_alias_and_device_path_resolve_alike() {
+        let root = Root::new(0);
+        let d = chip(&root, "devices/platform/i2c/1-0040", 3, CHIP);
+        let via_class = sysfs::canonical("/sys/class/hwmon/hwmon3/temp1_input", "/sys");
+        assert_eq!(via_class, sysfs::canonical(&format!("{}/temp1_input", d), "/sys"));
+        assert_eq!(via_class.as_deref(), Some("devices/platform/i2c/1-0040/hwmon/hwmon3/temp1_input"));
+        assert_eq!(sysfs::canonical("/sys/missing", "/sys"), None);
+        root.put("/etc/hostname", "x");
+        assert_eq!(sysfs::canonical("/etc/hostname", "/sys"), None); // outside the sysfs root
+    }
+
+    #[test]
+    fn canonical_agrees_with_the_portable_way() {
+        // aliases, a symlinked root, links inside the path, outside the root, missing, dangling, a loop, a file
+        // in place of a directory; the portable way is also canonical's fallback without /proc/self/fd
+        let root = Root::new(0);
+        let d = chip(&root, "devices/platform/i2c/1-0040", 3, CHIP);
+        root.link("/sys/devices/virtual/alias", &root.path("/sys/devices/platform").to_string_lossy());
+        root.link("/sys/class/dangling", &root.path("/sys/nowhere").to_string_lossy());
+        root.link("/sys/class/loop", &root.path("/sys/class/loop").to_string_lossy());
+        root.put("/sys/file", "x");
+        root.mkdir("/outside");
+        root.link("/sys/class/out", &root.path("/outside").to_string_lossy());
+        root.link("/sys-link", "sys");
+        let paths = ["/sys/class/hwmon/hwmon3".to_string(), "/sys/class/hwmon/hwmon3/temp1_input".into(), d,
+                     "/sys/devices/virtual/alias/i2c/1-0040/hwmon/hwmon3/name".into(), "/sys".into(), "/sys/.".into(),
+                     "/sys/class/../class/hwmon/hwmon3".into(), "/sys/missing".into(), "/sys/class/dangling".into(), "/sys/class/loop".into(),
+                     "/sys/file/below".into(), "/sys/class/out".into(), "/etc/hostname".into()];
+        for base in ["/sys", "/sys-link"] {
+            for p in &paths {
+                assert_eq!(sysfs::canonical(p, base), sysfs::canonical_portable(p, base), "{} {}", p, base);
+            }
+        }
+        assert_eq!(sysfs::canonical(&paths[3], "/sys-link").as_deref(), Some("devices/platform/i2c/1-0040/hwmon/hwmon3/name"));
+    }
+
+    fn identity(chips: &[(&str, &str)]) -> Vec<(String, &'static str, String)> {
+        let chips: Vec<(String, String)> = chips.iter().map(|(d, n)| (d.to_string(), n.to_string())).collect();
+        sysfs::chip_identities(&chips, "/sys").into_iter().map(|(d, b, w)| (d, b, Value::Obj(w.into_iter().map(|(k, v)| (k.to_string(), v)).collect()).to_string(false))).collect()
+    }
+
+    #[test]
+    fn a_retargeted_link_resolves_to_its_new_device() {
+        let root = Root::new(0); // same name, new target: the next resolution follows it; nothing from before is reused
+        chip(&root, "devices/platform/i2c/1-0040", 3, CHIP);
+        let link = "/sys/class/hwmon/hwmon3";
+        assert_eq!(identity(&[(link, "ina")]), [(link.to_string(), "device_channel", r#"{"device":"devices/platform/i2c/1-0040"}"#.to_string())]);
+        root.mkdir("/sys/devices/platform/i2c/1-0041/hwmon/hwmon3");
+        root.remove(link);
+        root.link(link, "../../devices/platform/i2c/1-0041/hwmon/hwmon3");
+        assert_eq!(identity(&[(link, "ina")]), [(link.to_string(), "device_channel", r#"{"device":"devices/platform/i2c/1-0041"}"#.to_string())]);
+    }
+
+    #[test]
+    fn an_unresolved_path_recovers() {
+        let root = Root::new(0);
+        let link = "/sys/class/hwmon/hwmon3";
+        root.link(link, "../../devices/platform/i2c/1-0040/hwmon/hwmon3"); // dangling for now
+        assert_eq!(identity(&[(link, "ina")])[0].1, "unresolved");
+        root.mkdir("/sys/devices/platform/i2c/1-0040/hwmon/hwmon3");
+        assert_eq!(identity(&[(link, "ina")])[0].1, "device_channel");
+    }
+
+    #[test]
+    fn a_second_node_on_the_device_is_seen_when_it_comes_and_goes() {
+        let root = Root::new(0); // the shared-device decision is made from the current listing every time
+        chip(&root, "devices/platform/i2c/1-0040", 3, CHIP);
+        assert_eq!(identity(&[("/sys/class/hwmon/hwmon3", "ina")])[0].1, "device_channel");
+        chip(&root, "devices/platform/i2c/1-0040", 4, CHIP);
+        let both = identity(&[("/sys/class/hwmon/hwmon3", "ina"), ("/sys/class/hwmon/hwmon4", "ina")]);
+        assert!(both.iter().all(|(_, b, _)| *b == "resolved_path"));
+        root.remove("/sys/devices/platform/i2c/1-0040/hwmon/hwmon4");
+        root.remove("/sys/class/hwmon/hwmon4");
+        assert_eq!(identity(&[("/sys/class/hwmon/hwmon3", "ina")])[0].1, "device_channel");
+    }
+
+    #[test]
+    fn unresolved_source_keeps_the_value() {
+        let root = Root::new(0); // a chip outside the sysfs root: no identity, the values kept
+        for (name, value) in CHIP {
+            root.put(&format!("/elsewhere/hwmon3/{}", name), value);
+        }
+        root.link("/sys/class/hwmon/hwmon3", &root.path("/elsewhere/hwmon3").to_string_lossy());
+        let (t, p, f, g) = traced_sensors();
+        assert_eq!((Value::Obj(t).to_string(false), Value::Obj(p).to_string(false), f[0].rpm), (r#"{"ina Board":40.0}"#.into(), r#"{"VIN":2.0,"VDD":5.0}"#.into(), Some(900)));
+        assert!(g.temperature.sensors.iter().all(|(_, v)| field(v, "identity_basis") == r#""unresolved""#));
+        let r = record(&g.temperature, "ina Board");
+        assert!(r.get("id").unwrap().is_null() && !r.get("span").unwrap().is_null());
+        assert_eq!(g.temperature.status().get("state").unwrap().to_string(false), r#""ok""#); // no id is not a read error
+    }
+
+    #[test]
+    fn gpu_sources_follow_the_file_used() {
+        let ids = |files: &[(&str, &str)]| {
+            let root = Root::new(0);
+            for (p, v) in files {
+                root.put(&format!("/sys/{}", p), v);
+            }
+            crate::metadata::set_clocks(1_000_000_000_000, 0);
+            let mut g = Group::new("gpu", true);
+            super::super::jetson::gpu(&mut g);
+            (field(record(&g, "usage"), "id"), g.sensors.iter().find(|(s, _)| *s == Slot::Key("freq".into())).map(|(_, v)| field(v, "id")))
+        };
+        let a = ids(&[("class/devfreq/17000000.gpu/device/load", "500"), ("class/devfreq/17000000.gpu/cur_freq", "1")]);
+        let b = ids(&[("devices/platform/gpu.0/load", "500")]); // another BSP: another source
+        assert_ne!(a.0, b.0);
+        assert_ne!(Some(a.0.clone()), a.1);
+        let root = Root::new(0); // gpu.0 linked to the devfreq device: the same file, so the same source
+        root.put("/sys/class/devfreq/17000000.gpu/device/load", "500");
+        root.link("/sys/devices/platform/gpu.0", &root.path("/sys/class/devfreq/17000000.gpu/device").to_string_lossy());
+        assert_eq!(sysfs::canonical("/sys/devices/platform/gpu.0/load", "/sys"), sysfs::canonical("/sys/class/devfreq/17000000.gpu/device/load", "/sys"));
+    }
+
+    #[test]
+    fn label_read_later_does_not_refresh_the_number() {
+        let root = Root::new(0);
+        chip(&root, "devices/platform/i2c/1-0040", 3, &[("name", "c"), ("temp1_input", "0"), ("temp1_label", "Zero")]);
+        let (t, _, _, g) = traced_sensors();
+        assert_eq!(Value::Obj(t).to_string(false), r#"{"c Zero":0.0}"#); // a measured 0 has its read too
+        let (_, end) = span(record(&g.temperature, "c Zero"));
+        let after_label = crate::metadata::clock();
+        assert!(end < after_label - 2 * crate::metadata::FAKE_TICK); // the label was read after it; its read is not this span
+    }
+
+    #[test]
+    fn computed_and_fan_spans() {
+        let root = Root::new(0);
+        chip(&root, "devices/platform/i2c/1-0040", 3, CHIP);
+        let (_, _, _, g) = traced_sensors();
+        let (vdd, vin) = (span(record(&g.power, "VDD")), span(record(&g.power, "VIN")));
+        assert!(vdd.1 - vdd.0 > vin.1 - vin.0); // from the current read's start to the voltage read's end
+        let fan: Vec<(i64, i64)> = g.fans.sensors.iter().map(|(_, v)| span(v)).collect();
+        assert!(fan[0].1 < fan[1].0); // rpm, then pwm: two reads, two spans
+    }
+
+    #[test]
+    fn gpu_spans_skip_the_failed_candidate() {
+        let root = Root::new(0);
+        for (p, v) in [("class/devfreq/17000000.gpu/device/load", "bad"), ("devices/platform/gpu.0/load", "500"),
+                       ("class/devfreq/17000000.gpu/cur_freq", "1"), ("class/devfreq/17000000.gpu/max_freq", "2")] {
+            root.put(&format!("/sys/{}", p), v);
+        }
+        crate::metadata::set_clocks(1_000_000_000_000, 0);
+        let mut g = Group::new("gpu", true);
+        super::super::jetson::gpu(&mut g);
+        let [usage, freq, max_freq] = ["usage", "freq", "max_freq"].map(|k| span(record(&g, k)));
+        assert!(usage.0 > 1_000_000_000_000); // after the failed candidate's read, which started at the first tick
+        assert!(usage.1 < freq.0 && freq.0 < freq.1 && freq.1 < max_freq.0);
+    }
+
+    #[test]
+    fn virtual_devices_are_path_based() {
+        for (device, basis) in [("devices/virtual", "resolved_path"), ("devices/virtual/thermal/thermal_zone0", "resolved_path"),
+                                ("devices/virtual/platform/fan_controller", "resolved_path"), ("devices/platform/i2c/1-0040", "device_channel"),
+                                ("devices/platform/virtual_fan", "device_channel")] { // a real device named "virtual..."
+            let root = Root::new(0);
+            chip(&root, device, 0, &[("name", "t"), ("temp1_input", "1000")]);
+            let (_, _, _, g) = traced_sensors();
+            assert_eq!(field(record(&g.temperature, "t temp1"), "identity_basis"), format!("{:?}", basis), "{}", device);
+        }
+    }
 }

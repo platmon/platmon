@@ -254,7 +254,7 @@ pub fn canonical(path: &str, sysroot: &str) -> Option<String> {
     canonical_portable(path, sysroot)
 }
 
-fn canonical_portable(path: &str, sysroot: &str) -> Option<String> {
+pub(crate) fn canonical_portable(path: &str, sysroot: &str) -> Option<String> {
     let real = fs::canonicalize(&*at(path)).ok()?;
     let base = fs::canonicalize(&*at(sysroot)).ok()?;
     let rel = real.strip_prefix(&base).ok()?; // outside the root: relpath would start with ..
