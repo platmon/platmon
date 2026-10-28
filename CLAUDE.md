@@ -98,7 +98,7 @@ Confirmed for this repository:
 
 ```bash
 git diff --check
-pytest            # all tests (tests/, configured in pytest.ini); CI runs the same on Python 3.9 and 3.13
+pytest            # all tests (tests/, configured in pytest.ini); CI runs the same on Python 3.8 to 3.14 (3.8 observation only, docs/development/adr/0001-ubuntu-lts-python-support.md)
 ```
 <!-- agent-rules-local:validation_commands:end -->
 
