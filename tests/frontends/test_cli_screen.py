@@ -104,9 +104,13 @@ def test_low_levels_attention_and_colors(monkeypatch):
 
 
 def test_fallback_board_levels_match_the_server():
-    """The command's copy for older servers is the server's table."""
-    from platmon import BOARD_TEMPERATURE
-    assert {k: list(v) for k, v in cli.TEMP_LIMITS.items()} == BOARD_TEMPERATURE
+    """The command's copy for older servers is the server's table (native/src/config.rs, levels)."""
+    import re
+    from pathlib import Path
+    source = (Path(__file__).parents[2] / "native/src/config.rs").read_text(encoding="utf-8")
+    table = re.search(r'let pair = match p \{ (.*?), _ =>', source).group(1)
+    server = {name: (float(a), float(b)) for name, a, b in re.findall(r'"([^"]+)" => \[([0-9.]+), ([0-9.]+)\]', table)}
+    assert cli.TEMP_LIMITS == server and len(server) == 2
 
 
 def test_data_age_is_the_servers_plus_time_since():

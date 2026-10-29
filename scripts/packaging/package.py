@@ -19,10 +19,10 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ("VERSION", "platmon.py", "platmon.ini", "README.md", "LICENSE",
+SOURCE_FILES = ("VERSION", "platmon.ini", "README.md", "LICENSE",
                 "CHANGELOG.md", "pytest.ini", "deploy/docker/Dockerfile",
                 "deploy/docker/compose.yaml", "deploy/docker/compose.jetson.yaml", ".dockerignore", ".gitignore")
-SOURCE_DIRS = ("collector", "runtime", "frontends", "native", "scripts", "packaging", "deploy", "benchmarks", "docs",
+SOURCE_DIRS = ("frontends", "native", "scripts", "packaging", "deploy", "docs",
                "tests", ".github")
 # Debian architecture: the Rust target native/build.sh builds for it, its ELF e_machine and class (bits).
 ARCHES = {"amd64": ("x86_64-unknown-linux-musl", 62, 64), "arm64": ("aarch64-unknown-linux-musl", 183, 64),

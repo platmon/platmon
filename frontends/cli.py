@@ -325,9 +325,9 @@ def render(s, obs=None):
 # The web page's defaults; use_levels() replaces them with the server's [thresholds] (/api/status "levels").
 LIMITS = {"cpu": (80, 90), "gpu": (80, 90), "memory": (80, 90), "filesystem": (80, 90), "temperature": None,
           "battery": (20, 10), "wifi": (-70, -80)}
-# Levels where the low reading is the bad one: warning above critical (platmon.py LOW_LEVELS).
+# Levels where the low reading is the bad one: warning above critical (native/src/config.rs LOW_LEVELS).
 LOW = ("battery", "wifi")
-# Servers from #57 on send the temperature level they use; this copy of platmon.py BOARD_TEMPERATURE serves
+# Servers from #57 on send the temperature level they use; this copy of the server's board table serves
 # older ones that send none (tests/frontends/test_cli_screen.py checks that the two match).
 TEMP_LIMITS = {"Jetson Orin": (85, 95), "Raspberry Pi": (75, 80)}
 SPARK_POINTS = 24

@@ -148,11 +148,9 @@ def test_release_versions_match_and_cli_stays_standalone(tmp_path):
     release = version()
     cli = tmp_path / "platmon"
     shutil.copyfile(ROOT / "frontends/cli.py", cli)
-    for path, expected in ((cli, f"platmon {release}"),
-                           (ROOT / "platmon.py", f"platmon server {release}")):
-        result = run(sys.executable, str(path), "--version", cwd=tmp_path)
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == expected
+    result = run(sys.executable, str(cli), "--version", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"platmon {release}"
 
 
 @pytest.mark.parametrize("value", ["1.0", "01.0.0", "1.0.0-rc.1", "not-a-version"])
@@ -253,11 +251,10 @@ def test_source_archive_rebuilds_without_git(package, binaries, tmp_path):
     assert result.returncode == 0, result.stderr
     for deb in package:
         assert (tmp_path / "rebuilt" / deb.name).read_bytes() == deb.read_bytes()
-    # The archive carries benchmark tests, so their implementations must also be available
-    # without accidentally importing them from this checkout.
+    # The archive carries the tests, so what they import must also be in it, not taken from this checkout.
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
-    result = run(sys.executable, "-m", "pytest", "--collect-only", "-q", "tests/benchmarks",
+    result = run(sys.executable, "-m", "pytest", "--collect-only", "-q", "tests",
                  cwd=root, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
 
