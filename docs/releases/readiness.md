@@ -3,8 +3,8 @@
 > **TL;DR**
 > - Release gates and evidence per version, newest first (1.6.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
-> - Not verified for 1.6.0: armhf on a real device under systemd, a 24 h soak, an apt upgrade on a real
->   device.
+> - Not verified for 1.6.0: armhf on a real device under systemd, a 24 h soak, an apt upgrade from 1.5.0 on
+>   a real device (the Orin Nano's from 1.4.0 passed after the release).
 
 ## 1.6.0 release gate (2026-10-25)
 
@@ -34,6 +34,18 @@ Not verified, and therefore open:
 - **No 24 h soak and no `hub_check.py`** at this version, as at 1.5.0: the owner limited the check to an
   hour; raw: the Orin's `~/platmon-release-1.6.0/`.
 - **No real device upgrade** from 1.5.0 to 1.6.0 under apt.
+
+After the release, on the Jetson Orin Nano (L4T R36.5.2, Ubuntu 22.04), the production install upgraded
+under apt from the APT repository, checked read-only (without sudo) on 2026-10-28:
+
+| check | result |
+| --- | --- |
+| `apt-get upgrade` by the owner, then a reboot | `platmon` 1.4.0-1 (`all`) → 1.6.0-1 (`arm64`, the native server), from the Python server of 1.4.0's `all` package |
+| the service after the reboot | `platmon.service` enabled and active, `NRestarts=0`, no warning in its journal; the packaged binary as its DynamicUser with `ProtectSystem=strict` |
+| configuration | `/etc/platmon/platmon.ini` kept: its MD5 is the one dpkg records for the conffile |
+| API and clients | `/api/stats`, `/api/status`, `/api/observations`, `/api/history`, `/api/samples` and the web page 200; every group `ok` except PSI, NPU and battery, which the board does not have (`unavailable`); `platmon --once` prints the screen |
+
+Not checked there: the Hub reconnecting, and an upgrade from 1.5.0 (the board went from 1.4.0 directly).
 
 ## 1.5.0 release gate (2026-10-24)
 

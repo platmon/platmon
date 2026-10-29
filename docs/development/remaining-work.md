@@ -1,10 +1,10 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-10-28; the evidence for each release is in
+> - What is still open, checked against the repository on 2026-10-30; the evidence for each release is in
 >   [release readiness](../releases/readiness.md).
-> - Windows: unreleased until the real-PC checks below pass. Linux: armhf on a real device, a 24 h soak and
->   an apt upgrade on a real device since 1.5.0, a remote probe target.
+> - Windows: unreleased until the real-PC checks below pass. Linux: armhf on a real device, a 24 h soak
+>   since 1.5.0, an apt upgrade from 1.5.0 on a real device, a remote probe target.
 > - Python server: deprecated in 1.5.0, removed for the next minor release (below); not released yet.
 > - Also recorded, not started: battery follow-ups and a desktop tray frontend.
 
@@ -57,7 +57,9 @@ Open since the gates in [release readiness](../releases/readiness.md):
   start, its health check and the sandbox are unchecked on armhf.
 - **24 h soak and `hub_check.py`:** last run at 1.4.0; 1.5.0 and 1.6.0 had one-hour checks by the owner's
   choice.
-- **apt upgrade on a real device:** 1.5.0 and 1.6.0 were upgraded only in CI's containers.
+- **apt upgrade on a real device:** the Orin Nano upgraded from 1.4.0 to 1.6.0 under apt and rebooted
+  (2026-10-28, [release readiness](../releases/readiness.md#160-release-gate-2026-10-25)); the upgrade
+  from 1.5.0 and the Hub reconnecting after it were checked only in CI's containers or not at all.
 - **Probe against a remote target:** checked on loopback and with fakes only; no remote target has been
   approved ([probe.md](../reference/probe.md#verification)).
 - **Orin candidate unit:** remove it (`sudo native/tools/deploy/uninstall.sh` on the Orin).
