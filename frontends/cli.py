@@ -2,12 +2,13 @@
 """platmon terminal client: live view of a platmon service, this device's by default.
 Standalone (standard library only); scripts/install-cli.sh installs it as the `platmon` command.
 
-Usage: platmon [host[:port]] [interval_sec] [--once]   (default localhost:9797, 1s)
+Usage: platmon [host[:port]] [interval_sec] [--once | --view VIEW]   (default localhost:9797, 1s)
 The service itself runs in the background: deploy/systemd/install.sh or deploy/docker/start.sh.
 
 On an interactive terminal the live view is screen(): colored levels, a layout fitted to the terminal size,
 redrawn in place on the alternate screen. It shows one view at a time, as the web page's tabs do (VIEWS);
-1-7, Tab and the arrow keys switch them. --once, pipes and /text keep render(), plain text as before.
+1-7, Tab and the arrow keys switch them. --once and pipes keep render(), plain text as before; the
+server's /text answers with the same screen (native/src/render.rs).
 """
 # platmon-cli: marker that lets scripts/install-cli.sh recognise (and only replace) its own command
 import argparse
@@ -31,7 +32,6 @@ try:  # keys without Enter; not on Windows, where the live view stays the plain 
 except ImportError:
     termios = tty = None
 
-# The release version lives here so the copied, single-file client stays standalone.
 VERSION = "1.6.0"  # copy of VERSION, so this file stays standalone
 PORT = 9797
 
@@ -137,16 +137,32 @@ def counters_lines(s):
     return out
 
 
+def group_data(obs, name):
+    """(data, observation) of an /api/observations group, or (None, None) when it is off, not observed
+    yet, or the server has no such endpoint."""
+    groups = obs.get("groups") if isinstance(obs, dict) else None
+    g = groups.get(name) if isinstance(groups, dict) else None
+    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
+    return (data, o) if isinstance(data, dict) and isinstance(o, dict) else (None, None)
+
+
+def observed(o):
+    """How old an observation is: "observed 4 s ago", "(not current)" when stale."""
+    return f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
+
+
+def observed_text(o):
+    """observed() as a section's caption; empty when the observation reports no age."""
+    return observed(o) if isinstance(o, dict) and isinstance(o.get("data_age_ms"), (int, float)) else ""
+
+
 def storage_lines(obs):
     """Filesystems and partitions from /api/observations, with the observation's own age; nothing when the
     group is off, has not been observed yet, or the server has no such endpoint."""
-    groups = obs.get("groups") if isinstance(obs, dict) else None
-    g = groups.get("storage") if isinstance(groups, dict) else None
-    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
-    if not isinstance(data, dict) or not isinstance(o, dict):
+    data, o = group_data(obs, "storage")
+    if data is None:
         return []
-    head = f"STORAGE  observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
-    out = [head]
+    out = [f"STORAGE  {observed(o)}"]
     for f in data.get("filesystems") or []:
         first, more = f["mount_points"][0], len(f["mount_points"]) - 1  # bind mounts can be dozens
         where = first["path"] + (" (ro)" if first["read_only"] else "") + (f" +{more} more" if more else "")
@@ -186,14 +202,11 @@ def aged(body, seconds):
 
 def wifi_lines(obs):
     """Wireless interfaces from /api/observations: the signal while connected, never the last one after."""
-    groups = obs.get("groups") if isinstance(obs, dict) else None
-    g = groups.get("wifi") if isinstance(groups, dict) else None
-    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
-    items = data.get("interfaces") if isinstance(data, dict) else None
-    if not isinstance(items, list) or not items or not isinstance(o, dict):
+    data, o = group_data(obs, "wifi")
+    items = data.get("interfaces") if data else None
+    if not isinstance(items, list) or not items:
         return []
-    age = f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
-    out = [f"WIFI  {age}"]
+    out = [f"WIFI  {observed(o)}"]
     for i in items:
         if i.get("connected") is not True:
             state = "not connected" if i.get("connected") is False else i.get("connection_state", "unknown")
@@ -210,16 +223,13 @@ def wifi_lines(obs):
 def battery_lines(obs):
     """Batteries and external supplies from /api/observations. Observed on its own slow cadence, so the
     age is shown: a battery reading is one firmware call and is not taken every second."""
-    groups = obs.get("groups") if isinstance(obs, dict) else None
-    g = groups.get("battery") if isinstance(groups, dict) else None
-    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
-    if not isinstance(data, dict) or not isinstance(o, dict):
+    data, o = group_data(obs, "battery")
+    if data is None:
         return []
     cells, external = data.get("batteries"), data.get("external")
     if not isinstance(cells, list) or not isinstance(external, list) or not (cells or external):
         return []
-    age = f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
-    out = [f"BATT  {age}"]
+    out = [f"BATT  {observed(o)}"]
     for b in cells:
         if b.get("present") is False:
             out.append(f"  {b['name']}  not present")
@@ -245,14 +255,11 @@ def battery_lines(obs):
 def probe_lines(obs):
     """TCP connect times from /api/observations (not ICMP ping): the latest attempt per target, and the
     failures among its recent attempts."""
-    groups = obs.get("groups") if isinstance(obs, dict) else None
-    g = groups.get("probe") if isinstance(groups, dict) else None
-    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
-    items = data.get("targets") if isinstance(data, dict) else None
-    if not isinstance(items, list) or not items or not isinstance(o, dict):
+    data, o = group_data(obs, "probe")
+    items = data.get("targets") if data else None
+    if not isinstance(items, list) or not items:
         return []
-    age = f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
-    out = [f"TCP   connect time, {age}"]
+    out = [f"TCP   connect time, {observed(o)}"]
     for t in items:
         where = f"[{t['address']}]:{t['port']}" if ":" in t["address"] else f"{t['address']}:{t['port']}"
         now = f"{t['connect_ms']:.1f} ms" if t["connect_ms"] is not None else t["reason"]
@@ -271,7 +278,7 @@ def collection_note(s):
 
 def render(s, obs=None):
     """The screen for a /api/stats answer s, and the storage lines when obs (an /api/observations answer)
-    is given. Plain text: --once, pipes and the server's /text."""
+    is given. Plain text: --once and pipes; the server's /text is its copy."""
     up = int(s["uptime"])
     system = system_line(s.get("system"))
     lines = [
@@ -459,14 +466,6 @@ def busiest_first(interfaces):
     return sorted(interfaces, key=traffic)
 
 
-def filesystems(obs):
-    """(data, observation) of the storage group, or (None, None)."""
-    groups = obs.get("groups") if isinstance(obs, dict) else None
-    g = groups.get("storage") if isinstance(groups, dict) else None
-    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
-    return (data, o) if isinstance(data, dict) and isinstance(o, dict) else (None, None)
-
-
 def fs_pct(f):
     return 100 * f["used_bytes"] / f["total_bytes"] if f.get("total_bytes") else None
 
@@ -478,7 +477,7 @@ def attention(s, obs):
     out = [("/" if label == "DISK" else label, f"{v:.1f} {unit}", level(v, lim))
            for label, v, unit, lim, _ in metrics(s) if v is not None and label != "TEMP"]
     out += [(k, f"{v:.1f} °C", level(v, temp_limits(s))) for k, v in hottest_first(s)]
-    data, _ = filesystems(obs)
+    data, _ = group_data(obs, "storage")
     for f in (data or {}).get("filesystems") or []:
         pct = fs_pct(f)
         if pct is not None and not any(p["path"] == "/" for p in f["mount_points"]):
@@ -572,22 +571,6 @@ def tabbar(st, width, view):
 def mhz(hz):
     """"918 MHz" for a frequency in hertz; empty when the clock is not readable (None or 0)."""
     return f"{hz / 1e6:.0f} MHz" if hz else ""
-
-
-def group_data(obs, name):
-    """(data, observation) of an /api/observations group, or (None, None) when it is off, not observed
-    yet, or the server has no such endpoint."""
-    groups = obs.get("groups") if isinstance(obs, dict) else None
-    g = groups.get(name) if isinstance(groups, dict) else None
-    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
-    return (data, o) if isinstance(data, dict) and isinstance(o, dict) else (None, None)
-
-
-def observed_text(o):
-    """How old an observation is, as its section's caption; empty when it reports no age."""
-    if not isinstance(o, dict) or not isinstance(o.get("data_age_ms"), (int, float)):
-        return ""
-    return f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
 
 
 def detail_widths(width, items, columns):
@@ -765,7 +748,7 @@ def body_overview(v):
             body.append(v.kv("PRESSURE", "   ".join(f"{name} {r['some']['avg10']:.1f}" + (f" / {r['full']['avg10']:.1f}" if r.get("full") else "") + " %"
                                                     for name, r in res.items()) + st("      some / full · avg10, time stalled", "muted")))
 
-    data, o = filesystems(obs)
+    data, o = group_data(obs, "storage")
     if data:
         seen = st(observed_text(o) + " ", "muted")
         fss = data.get("filesystems") or []
@@ -974,17 +957,15 @@ def body_thermal(v):
     if not temps:
         return v.empty("No temperature readings · this board reports none")
 
-    body = []
-    if temps:
-        body.append(v.title("TEMPERATURE", f"bar scale 0-100 °C · warning from {limits[0]:g} °C" if limits
-                            else "bar scale 0-100 °C"))
-        name_w = max(len(k) for k, _ in temps) + 2  # sensor names can be long ("coretemp Package id 0")
-        bw = min(20 if v.wide else 11, max(6, v.width - 14 - name_w))
-        for k, t in temps:
-            lv = level(t, limits)
-            body.append(joined(v.width, [st(f"    {k:<{name_w}}", "muted"),
-                                         st(pad(f"{t:.1f} °C", 9), "bold", tone(lv)),
-                                         " " + meter(st, t, bw, limits)]))
+    body = [v.title("TEMPERATURE", f"bar scale 0-100 °C · warning from {limits[0]:g} °C" if limits
+                    else "bar scale 0-100 °C")]
+    name_w = max(len(k) for k, _ in temps) + 2  # sensor names can be long ("coretemp Package id 0")
+    bw = min(20 if v.wide else 11, max(6, v.width - 14 - name_w))
+    for k, t in temps:
+        lv = level(t, limits)
+        body.append(joined(v.width, [st(f"    {k:<{name_w}}", "muted"),
+                                     st(pad(f"{t:.1f} °C", 9), "bold", tone(lv)),
+                                     " " + meter(st, t, bw, limits)]))
     return body
 
 
@@ -1053,7 +1034,7 @@ def body_power(v):
 
 def body_system(v):
     """The web System tab: the platform, uptime and whatever the board reported about itself. The power
-    mode stays in Temperature & power, as on the web page."""
+    mode stays in Power & battery, as on the web page."""
     s, st = v.s, v.st
     up = int(s["uptime"])
     system = s.get("system") if isinstance(s.get("system"), dict) else {}
