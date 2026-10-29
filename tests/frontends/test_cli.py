@@ -107,6 +107,22 @@ def test_once_prints_one_snapshot():
     assert r.stdout == render(FULL) + "\n"  # the metadata the server adds changes nothing, no screen clearing
 
 
+def test_pipe_gets_snapshots_without_escapes():
+    """Repeated snapshots to a pipe or a log: plain text, a blank line between them, no screen clearing."""
+    import subprocess
+    import sys
+    httpd, base = serve(FULL)
+    proc = subprocess.Popen([sys.executable, CLI, base[len("http://"):], "0.05"], stdout=subprocess.PIPE, text=True)
+    try:
+        lines = [proc.stdout.readline() for _ in range(2 * len(render(FULL).split("\n")) + 1)]
+    finally:
+        proc.kill()
+        proc.wait()
+        proc.stdout.close()
+        httpd.shutdown()
+    assert "".join(lines) == f"{render(FULL)}\n\n{render(FULL)}\n"
+
+
 def test_view_only_selects_a_live_view():
     """--view picks the live screen's first view; --once prints every section, so the two do not mix."""
     bad = run_cli("--once", "--view", "network")
