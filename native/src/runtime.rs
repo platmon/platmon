@@ -214,6 +214,16 @@ impl Sampler {
     /// (the /api/stats body, or None when there is no current snapshot; the /api/status body), from one
     /// capture of the state; now() is read under the lock, as Sampler._view does.
     pub fn view(&self, now: impl FnOnce() -> i64) -> (Option<String>, Value) {
+        self.capture(now, |p, now| self.snapshot(p, now))
+    }
+
+    /// The current snapshot as a value (what /text renders), or None, from one capture as view's.
+    pub fn current_value(&self, now: impl FnOnce() -> i64) -> Option<Value> {
+        self.capture(now, |p, now| self.snapshot_value(p, now)).0
+    }
+
+    /// view with the current snapshot given by snapshot.
+    fn capture<T>(&self, now: impl FnOnce() -> i64, snapshot: impl FnOnce(&Publication, i64) -> T) -> (Option<T>, Value) {
         let (now, record, attempt, since) = {
             let st = self.state.lock().unwrap();
             let a = st.attempt.as_ref().map(|a| (a.reason, a.completed_at, a.duration_ns, a.consecutive_failures));
@@ -253,7 +263,7 @@ impl Sampler {
         }));
         status.set("collecting_for_ms", since.map(|s| ms(now - s)).into());
         status.set("clock", clock_value(self.clock_source));
-        (if fresh { record.map(|p| self.snapshot(&p, now)) } else { None }, status)
+        (if fresh { record.map(|p| snapshot(&p, now)) } else { None }, status)
     }
 
     /// Sampler._snapshot as JSON: the stored members, then schema_version and sample as of now, then the
@@ -556,6 +566,17 @@ mod tests {
         let (_, status) = s.view(|| 9_000);
         assert_eq!(status.get("sample").and_then(|x| x.get("sequence")), Some(&Value::Int(2)));
         assert_eq!(status.get("last_attempt").and_then(|x| x.get("consecutive_failures")), Some(&Value::Int(0)));
+    }
+
+    #[test]
+    fn current_value_is_the_stats_body() {
+        let s = Sampler::new(1.0, None, "id".into(), "boottime");
+        assert!(s.current_value(|| 0).is_none());
+        s.finish(collection(r#"{"a": 1, "b": [2.5, null], "collectors": {"core": 1, "gpu": {"state": "ok"}}}"#), true,
+                 1.0, 1_000, 1.5, 2_000);
+        let body = s.view(|| 3_000).0.unwrap();
+        assert_eq!(s.current_value(|| 3_000).unwrap().to_py(), body);
+        assert!(s.current_value(|| 1_101 + 5_000_000_000).is_none()); // stale, as view's
     }
 
     #[test]

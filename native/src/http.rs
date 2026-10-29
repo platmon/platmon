@@ -332,10 +332,9 @@ impl Server {
             }
             "/text" => { // the platmon command's screen, for curl and watch
                 self.sampler.wait_ready(self.first_wait);
-                let Some(stats) = self.sampler.view(self.clock).0 else {
+                let Some(stats) = self.sampler.current_value(self.clock) else {
                     return x.reply(full, 503, b"no current data (not collected yet, or collection keeps failing)\n", "text/plain; charset=utf-8");
                 };
-                let stats = crate::json::parse(&stats).map_err(std::io::Error::other)?;
                 let obs = self.observations.view(self.clock);
                 match crate::render::render(&stats, Some(&obs)) {
                     Ok(text) => x.reply(full, 200, (text + "\n").as_bytes(), "text/plain; charset=utf-8"),
