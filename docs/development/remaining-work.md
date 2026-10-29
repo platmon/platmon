@@ -70,7 +70,9 @@ container run, was deprecated in 1.5.0. The owner decided on 2026-10-24 to remov
 release: the versioning contract covers the HTTP API, `platmon.ini` keys and command options, which do not
 change. Before the removal:
 
-1. Move the source installation and the container to the native server (or a generic tarball).
+1. Move the source installation and the container to the native server (or a generic tarball). Done:
+   `deploy/systemd/install.sh` installs `native/build.sh`'s build, the Dockerfile builds the server in a
+   build stage and runs it on `debian:13-slim`, with `platmon-native health` as its health check.
 2. Freeze the Python service's answers into golden files, so the native equivalence checks keep their
    reference.
 3. Port the Python collector tests (about 290) to Rust. Done for all 397 Python service tests, the runtime's

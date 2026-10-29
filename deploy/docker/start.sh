@@ -61,12 +61,10 @@ for _ in $(seq 30); do
             mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$container")
             host=localhost
             if [ "$mode" = host ]; then
-                listen=$(docker compose "${files[@]}" exec -T platmon python3 -c '
-from platmon import load_config
-h = load_config("/opt/platmon/platmon.ini")["http"]
-print("localhost" if h["bind"] in ("0.0.0.0", "127.0.0.1") else h["bind"], h.getint("port"))
-')
+                # the server prints the address it checks: "HOST PORT", 127.0.0.1 for a bind of 0.0.0.0
+                listen=$(docker compose "${files[@]}" exec -T platmon /opt/platmon/platmon-native health /opt/platmon/platmon.ini)
                 read -r host port <<< "$listen"
+                [ "$host" != 127.0.0.1 ] || host=localhost
             else
                 port=$(docker compose "${files[@]}" port platmon 9797 | head -1)
                 port=${port##*:}

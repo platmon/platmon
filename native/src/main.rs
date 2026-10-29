@@ -17,6 +17,9 @@
 //!   platmon-native service [CONFIG] [serve's options]
 //!                                     Windows only: serve as a service the service control manager runs
 //!                                     (platform/windows.rs, run_service)
+//!   platmon-native health [CONFIG]    whether the server CONFIG configures answers: GET /api/stats on its
+//!                                     address, which it prints as "HOST PORT"; exit 0 on 200, 1 otherwise,
+//!                                     2 for a configuration serve refuses (the container's health check)
 //!   platmon-native runtime-script     tools/runtime_fixture.py: Sampler and slow-group operations with
 //!                                     given times and collections, one JSON line per stdin line
 // Elsewhere the shared helpers the Linux collectors call have no caller yet.
@@ -71,6 +74,7 @@ fn main() {
         }
         Some("runtime-script") => return harness::runtime_script(),
         Some("config-check") => return config_check(&args[2..]),
+        Some("health") => return health(args.get(2).map(String::as_str)),
         #[cfg(target_os = "linux")]
         Some("observe-script") => return harness::observe_script(&args[2..]),
         Some("replay-cost") => return harness::replay_cost(&args[2..]),
@@ -97,6 +101,20 @@ fn config_check(args: &[String]) {
         Err(e) => { let mut v = Value::obj(); v.set("error", e.into()); v }
     };
     println!("{}", out.to_string(false));
+}
+
+/// health [CONFIG]: GET /api/stats where serve would listen with CONFIG (127.0.0.1 for 0.0.0.0), within 4 s.
+fn health(path: Option<&str>) {
+    let cfg = config::load(path, None).unwrap_or_else(|e| { eprintln!("platmon-native health: error: {}", e); std::process::exit(2) });
+    let bind = cfg.text("http", "bind");
+    let host = if bind == "0.0.0.0" { "127.0.0.1".to_string() } else { bind };
+    let port = cfg.int("http", "port");
+    println!("{} {}", host, port);
+    match http::get_status(&host, port as u16, "/api/stats", std::time::Duration::from_secs(4)) {
+        Ok(200) => {}
+        Ok(code) => { eprintln!("platmon-native health: /api/stats answered {}", code); std::process::exit(1) }
+        Err(e) => { eprintln!("platmon-native health: {}:{}: {}", host, port, e); std::process::exit(1) }
+    }
 }
 
 /// The slow groups that run, in their order: each that is enabled, the probe only with targets.

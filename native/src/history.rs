@@ -515,19 +515,26 @@ mod tests {
         let h = std::sync::Arc::new(History::new(60.0, 1.0));
         let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (r, d) = (h.clone(), done.clone());
+        let (started, running) = std::sync::mpsc::channel();
         let reader = std::thread::spawn(move || {
             let mut views = 0;
-            while !d.load(std::sync::atomic::Ordering::Relaxed) {
+            loop { // at least one view, the first before the appends start
                 let _ = r.view(1_000_000_000_000, "", None, ALL).0.to_string(false);
                 views += 1;
+                if views == 1 {
+                    started.send(()).unwrap();
+                }
+                if d.load(std::sync::atomic::Ordering::Relaxed) {
+                    break views;
+                }
             }
-            views
         });
+        running.recv().unwrap();
         for n in 1..2000 {
             record(&h, n, n * S);
         }
         done.store(true, std::sync::atomic::Ordering::Relaxed);
-        assert!(reader.join().unwrap() > 0); // no panic in either thread, and the reader ran
+        assert!(reader.join().unwrap() > 0); // no panic in either thread
     }
 
     #[test]

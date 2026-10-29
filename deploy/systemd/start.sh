@@ -20,17 +20,14 @@ if command -v docker >/dev/null && [ -n "$(docker ps -q --filter label=com.docke
     exit 1
 fi
 
-# where to check: the installed code reads the config ("host port")
-listen=$(python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-from platmon import load_config
-try:
-    http = load_config(sys.argv[2])["http"]
-except ValueError as e:
-    sys.exit(f"invalid config: {e}")
-print("127.0.0.1" if http["bind"] == "0.0.0.0" else http["bind"], http.getint("port"))
-' "$prefix" "$config")
+# where to check: the installed server reads the config and prints "host port" (exit 2: an invalid config)
+health() { "$prefix/platmon-native" health "$config"; }
+status=0
+listen=$(health 2>/dev/null) || status=$?
+if [ "$status" -eq 2 ]; then
+    health >/dev/null || true # its message
+    exit 1
+fi
 read -r host port <<< "$listen"
 # how to look at it: plain `platmon` covers localhost:9797, anything else needs the address
 addr=$host
@@ -40,9 +37,8 @@ view=platmon
 
 systemctl restart platmon
 
-check='import sys, urllib.request; urllib.request.urlopen(f"http://{sys.argv[1]}:{sys.argv[2]}/api/stats", timeout=2)'
 for _ in $(seq 20); do
-    if python3 -c "$check" "$host" "$port" 2>/dev/null; then
+    if health >/dev/null 2>&1; then
         journalctl -u platmon -n 2 --no-pager -o cat
         echo "platmon is up on port $port; look at it with: $view"
         exit 0

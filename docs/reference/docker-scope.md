@@ -7,8 +7,9 @@
 >   privileged mode.
 > - Filesystem capacity through file bind mounts is partial or `null`.
 
-Checked on Orin Nano on 2026-10-09 with native Linux Docker Engine. The same collector was
-read on the host, in the production bridge container, and in an isolated host-network container.
+Checked on Orin Nano on 2026-10-09 with native Linux Docker Engine, when the image ran the Python
+server. The image now runs the native server, which reads the same files, mounts and namespaces; this
+table was not checked again with it on the Orin. The same collector was read on the host, in the production bridge container, and in an isolated host-network container.
 Dynamic readings differ in time; this comparison checks availability, identity and scope.
 
 | Item | Bridge container | Host-network configuration |

@@ -1,8 +1,7 @@
 # only what the image copies
 *
-!platmon.py
 !platmon.ini
-!collector
-!runtime
-!frontends
-**/__pycache__
+!frontends/web
+!native
+native/target
+!runtime/__init__.py
