@@ -1,21 +1,21 @@
-"""Live check of the HTTP runtime on a real host: starts the Python service (platmon.py) and `platmon-native
-serve` with the same platmon.ini (the defaults, each on its own local port), checks each the same way and
-compares them. Only the processes it started are stopped (and restarted once), by their own handles.
+"""Live check of the HTTP runtime on a real host: starts `platmon-native serve` with platmon.ini's defaults on
+a local port and checks it. What does not depend on the host is checked against the answers the Python
+service gave (recorded 2026-10-29, before its removal in 1.6.0, when this compared the two servers). Only
+the process it started is stopped (and restarted once), by its own handle.
 
-  PYTHONPATH=<platmon tree> python3 live_http.py PATH/TO/platmon-native [--json OUT]
+  python3 live_http.py PATH/TO/platmon-native [--json OUT]
 
-Per server:
-- every path: status code, Content-Type, Cache-Control; the web page and its files: the same bytes; the
-  /text screen: the same sections
-- raw requests at the protocol's edges (HEAD, HTTP/0.9, versions, header and line limits): the same answer
-  shape from its bytes (status line and headers or none, header names, a body or none); for HTTP/2.0 and
-  an invalid version (a known difference from some CPython releases) the server's answer alone: the body,
-  no status line
-- /api/stats, /api/status, /api/observations: the same keys, order and JSON types; values exact except
-  those that move (compare.py's plausibility rules, sample identity and ages, read offsets, the slow
-  groups' times and readings)
-- /api/history: the same series ids, cadences, bounds and dropped count, every point [int, float, number or
-  null]; /api/samples: the same envelope, records with /api/stats' keys and sample.stale
+- every path: status code, Content-Type, Cache-Control as the Python service answered (PATHS); the web page
+  and its files: the bytes of frontends/web (the page with the version filled in)
+- the /text screen: the sections frontends/cli.py's renderer gives for the same /api/stats and
+  /api/observations
+- raw requests at the protocol's edges (HEAD, HTTP/0.9, versions, header and line limits): the answer's
+  shape from its bytes (status line and headers or none, header names, a body or none), as the Python
+  service gave it (RAW); for HTTP/2.0 and an invalid version (a known difference from some CPython releases)
+  the body alone, no status line (KNOWN)
+- /api/history: the envelope's keys, schema, retention and cadence of the defaults, every point [int, float,
+  number or null]; /api/samples: the envelope's keys and JSON types, records with /api/stats' keys and
+  sample.stale
 - replay from the start, page by page, as walk.py checks it: one instance and stream, ids rising strictly,
   every page explaining exactly the ids it moves the cursor over, the cursor moving while has_more and
   ending at latest_id; a walk that does not end within 50 pages fails
@@ -27,10 +27,11 @@ Per server:
   while 32 are held and answered after they close
 - a request line cut off: the connection closed after the 10 s request timeout
 - 200 connections at once: handler threads stay within 32 more than before, the server answers again
-  once they close, and its threads go back (which connections were refused is not compared: timing)
+  once they close, and its threads go back
 - a restart: SIGTERM ends the server at once with exit code 0; the previous instance's cursor gets 409
   instance_changed with the new instance id
-Exit 1 on any difference or failed check."""
+The fields of /api/stats, /api/status and /api/observations are runtime_fixture.py's and fixture.py's to
+compare (fixed inputs); a live host's values move. Exit 1 on any difference or failed check."""
 import concurrent.futures as concurrent_futures
 import configparser
 import json
@@ -46,14 +47,33 @@ import urllib.request
 
 import walk
 import worker
-from compare import kind, plausible
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(REPO, "frontends"))
+from cli import render  # noqa: E402  the terminal client, one standalone file
+
 PATHS = ["/api/stats", "/api/status", "/api/observations", "/api/history", "/api/samples",
          "/api/observation-samples?group=storage", "/api/stats?x=1", "/", "/index.html", "/app.js", "/styles.css",
          "/assets/brand/favicon.svg", "/assets/brand/platmon-logo-dark.svg", "/nothing", "/text", "/text?x"]
 WEB = ["/", "/index.html", "/app.js", "/styles.css", "/assets/brand/favicon.svg", "/assets/brand/platmon-logo-dark.svg"]
+JSON, HTML, ERROR = "application/json", "text/html; charset=utf-8", "text/html;charset=utf-8"
+EXPECTED = {  # path: (code, Content-Type, Cache-Control no-store), as the Python service answered
+    "/api/stats": (200, JSON, True), "/api/status": (200, JSON, True), "/api/observations": (200, JSON, True),
+    "/api/history": (200, JSON, True), "/api/samples": (200, JSON, True),
+    "/api/observation-samples?group=storage": (200, JSON, True), "/api/stats?x=1": (404, ERROR, False),
+    "/": (200, HTML, False), "/index.html": (200, HTML, False), "/app.js": (200, "text/javascript; charset=utf-8", False),
+    "/styles.css": (200, "text/css; charset=utf-8", False), "/assets/brand/favicon.svg": (200, "image/svg+xml", False),
+    "/assets/brand/platmon-logo-dark.svg": (200, "image/svg+xml", False), "/nothing": (404, ERROR, False),
+    "/text": (200, "text/plain; charset=utf-8", True), "/text?x": (404, ERROR, False),
+}
+HISTORY = {"schema_version": 1, "retention_s": 600.0, "interval_ms": 1000.0}  # the defaults' history
+HISTORY_KEYS = ["schema_version", "instance_id", "retention_s", "interval_ms", "dropped_series", "series",
+                "series_intervals_ms"]
+SAMPLES = {"schema_version": "int", "instance_id": "str", "clock": "dict", "stream": "str", "data_schema_version": "int",
+           "historical": "bool", "retention_s": "float", "max_bytes": "int", "max_records": "int",
+           "max_record_bytes": "int", "max_response_bytes": "int", "oldest_id": "int", "latest_id": "int",
+           "next_after": "int", "has_more": "bool", "missing_ranges": "list", "records": "list"}
 
 
 def free_port():
@@ -82,39 +102,8 @@ def wait_ready(port, deadline):
     return False
 
 
-def moving(ptr, a, b):
-    """True where two servers' values may differ: what compare.py allows for two collections, the sample's
-    identity and times, read offsets, and how long a running collection has taken."""
-    if isinstance(a, (int, float)) and not isinstance(a, bool) and plausible("/stats" + ptr, a, b):
-        return True
-    parts = ptr.split("/")
-    observed = ptr.startswith("/groups/") and len(parts) > 3
-    return (ptr.startswith(("/sample/", "/last_attempt/completed_at", "/last_attempt/duration_ms"))
-            or ptr in ("/instance_id", "/collecting_for_ms")
-            or "read" in parts[:-1] and parts[-1] in ("started_offset_ms", "completed_offset_ms")
-            # slow groups: their own times, and readings that move (bytes in use, a battery, a signal)
-            or observed and (parts[3] in ("observation", "collecting_for_ms") or parts[3] == "data" and parts[2] in ("storage", "battery", "wifi")
-                             and isinstance(a, (int, float)) and isinstance(b, (int, float))))
-
-
-def diff(a, b, ptr, out):
-    if ptr.endswith("/collecting_for_ms") and (a is None or b is None):
-        return  # a collection may be running at one answer and not at the other
-    if kind(a) != kind(b):
-        out.append(f"{ptr}: {kind(a)} {a!r:.80} (python) != {kind(b)} {b!r:.80} (rust)")
-    elif isinstance(a, dict):
-        if list(a) != list(b):
-            out.append(f"{ptr}: keys {list(a)} (python) != {list(b)} (rust)")
-        for k in a:
-            if k in b:
-                diff(a[k], b[k], f"{ptr}/{k.replace('~', '~0').replace('/', '~1')}", out)
-    elif isinstance(a, list):
-        if len(a) != len(b):
-            out.append(f"{ptr}: length {len(a)} (python) != {len(b)} (rust)")
-        for i, (x, y) in enumerate(zip(a, b)):
-            diff(x, y, f"{ptr}/{i}", out)
-    elif a != b and not moving(ptr, a, b):
-        out.append(f"{ptr}: {a!r:.80} (python) != {b!r:.80} (rust)")
+def kind(v):
+    return "null" if v is None else type(v).__name__
 
 
 def endpoints(port):
@@ -282,9 +271,25 @@ RAW = {  # request -> what is compared of the answer: bare (no status line), sta
 }
 
 
-# A known difference, kept apart from the comparison: CPython 3.13.16 answers these with a status line and
-# headers; 3.10.12, 3.13.5 and 3.14.4, which the server was verified against, and the server answer with the
-# body alone. The server's answer is checked on its own; Python's is only reported.
+ERROR_HEADERS, OK_HEADERS = ["Connection", "Content-Length", "Content-Type"], ["Cache-Control", "Content-Length", "Content-Type"]
+RAW_EXPECTED = {  # the Python service's answers
+    "HEAD": {"bare": False, "status": "HTTP/1.0 501 Unsupported method ('HEAD')", "headers": ERROR_HEADERS, "body": False},
+    "POST": {"bare": False, "status": "HTTP/1.0 501 Unsupported method ('POST')", "headers": ERROR_HEADERS, "body": True},
+    "HTTP/0.9 said": {"bare": True, "body": True},
+    "HTTP/0.9 two words": {"bare": True, "body": True},
+    "HTTP/00.9": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
+    "99 headers": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
+    "100 headers": {"bare": False, "status": "HTTP/1.0 431 Too many headers", "headers": ERROR_HEADERS, "body": True},
+    "long header": {"bare": False, "status": "HTTP/1.0 431 Line too long", "headers": ERROR_HEADERS, "body": True},
+    "long request line": {"bare": False, "status": "HTTP/1.0 414 URI Too Long", "headers": ERROR_HEADERS, "body": True},
+    "empty line": {"bare": True, "body": False},
+    "//path": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
+}
+
+
+# A known difference between CPython releases: 3.13.16 answers these with a status line and headers;
+# 3.10.12, 3.13.5 and 3.14.4, which the server was verified against, and the server answer with the body
+# alone.
 KNOWN = {
     "HTTP/2.0": b"GET /api/status HTTP/2.0\r\n\r\n",
     "bad version": b"GET /api/status HTTP/x\r\n\r\n",
@@ -376,7 +381,7 @@ def check(port, interval, pid):
 
 
 def config(port, interval):
-    """platmon.ini with the defaults, but this port on 127.0.0.1: the same for both servers."""
+    """platmon.ini with the defaults, but this port on 127.0.0.1."""
     cfg = configparser.ConfigParser()
     cfg.read_dict({"core": {"interval": str(interval)}, "http": {"bind": "127.0.0.1", "port": str(port)}})
     path = tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False)
@@ -385,10 +390,7 @@ def config(port, interval):
     return path.name
 
 
-def start(name, binary, port, interval, log):
-    if name == "python":
-        return subprocess.Popen([sys.executable, f"{REPO}/platmon.py", config(port, interval)], cwd=REPO, stdout=log,
-                                stderr=log, env={**os.environ, "PYTHONPATH": REPO})
+def start(binary, port, interval, log):
     return subprocess.Popen([binary, "serve", config(port, interval), "--web", f"{REPO}/frontends/web",
                              "--app-version", version()], stdout=log, stderr=log)
 
@@ -415,114 +417,100 @@ def heads(text):
     return [line.split()[0] for line in text.split("\n")[2:] if line and not line.startswith(" ")]
 
 
+def problems(r, stopped, restarted):
+    out = []
+    eps = r["endpoints"]
+    for path in PATHS:
+        got = (eps[path]["code"], eps[path]["type"], eps[path]["no_store"])
+        if got != EXPECTED[path]:
+            out.append(f"{path}: {got} != {EXPECTED[path]}")
+    page = eps["/"]["body"]
+    if eps["/index.html"]["body"] != page or f"platmon v{version()}".encode() not in page or b"@VERSION@" in page \
+            or b"@LEVELS@" in page:
+        out.append("/: not the page with its version and levels filled in")
+    for path in WEB[2:]:
+        with open(f"{REPO}/frontends/web{path}", "rb") as f:
+            if eps[path]["body"] != f.read():
+                out.append(f"{path}: not the bytes of frontends/web{path}")
+    a, b = heads(eps["/text"]["body"].decode()), heads(render(r["bodies"]["/api/stats"], r["bodies"]["/api/observations"]))
+    if a != b:
+        out.append(f"/text: sections {a} != {b} (frontends/cli.py)")
+    for name in RAW:
+        if r["raw"][name] != RAW_EXPECTED[name]:
+            out.append(f"raw {name}: {r['raw'][name]} != {RAW_EXPECTED[name]}")
+    for name in KNOWN:
+        if r["known"][name] != KNOWN_RUST:
+            out.append(f"known difference {name}: {r['known'][name]} != {KNOWN_RUST}")
+    h = r["bodies"]["/api/history"]
+    if list(h) != HISTORY_KEYS or any(h[k] != v for k, v in HISTORY.items()) or set(h["series"]) != set(h["series_intervals_ms"]):
+        out.append(f"/api/history: {json.dumps({k: h[k] for k in h if k != 'series'})[:300]}")
+    if not all(type(p[0]) is int and type(p[1]) is float and (p[2] is None or type(p[2]) in (int, float))
+               for points in h["series"].values() for p in points):
+        out.append("/api/history: a point that is not [int, float, number or null]")
+    sm = r["bodies"]["/api/samples"]
+    if {k: kind(v) for k, v in sm.items()} != SAMPLES or list(sm) != list(SAMPLES):
+        out.append(f"/api/samples: the envelope {[(k, kind(v)) for k, v in sm.items()]}")
+    if sm["records"] and list(sm["records"][0]["data"]) != list(r["bodies"]["/api/stats"]):
+        out.append("/api/samples: a record's keys are not /api/stats'")
+    if sm["records"] and list(sm["records"][0]["data"]["sample"])[-1] != "stale":
+        out.append("/api/samples: no sample.stale")
+    out += [f"replay walk: {p}" for p in r["replay"]["problems"]]
+    out += [f"concurrent: {p}" for p in r["concurrent"]["problems"]]
+    lim = r["connection_limit"]
+    if lim["closed"] != lim["connections"] - 32 or not lim["refused_while_full"] or lim["after"] != 200:
+        out.append(f"connection limit: {lim}")
+    rt = r["request_timeout"]
+    if rt["answered"] or not 9.5 <= rt["closed_after_s"] <= 11.5:
+        out.append(f"request timeout: {rt}")
+    b = r["burst"]
+    if b["threads_peak"] > b["threads_before"] + 34 or b["code"] != 200 or b["threads_after"] > b["threads_before"] + 2:
+        out.append(f"burst: {b}")
+    code, seconds = stopped
+    if code != 0 or seconds >= 2:  # a stop exits at once, with status 0
+        out.append(f"SIGTERM: exit {code} after {seconds} s")
+    if restarted["code"] != 409 or restarted["body"].get("code") != "instance_changed" \
+            or restarted["body"].get("instance_id") == r["replay"]["instance"]:
+        out.append(f"after a restart: {restarted}")
+    return out
+
+
 def main():
     tested = self_test() & walk.self_test() & worker.self_test()
     if sys.argv[1:] == ["--self-test"] or not tested:
         sys.exit(0 if tested else 1)
-    binary, interval = os.path.abspath(sys.argv[1]), 1.0
-    ports = {"python": free_port(), "rust": free_port()}
-    logs = {n: tempfile.TemporaryFile("w+") for n in ports}
-    procs, restarted, stopped = {}, {}, {}
+    binary, interval, port = os.path.abspath(sys.argv[1]), 1.0, free_port()
+    log = tempfile.TemporaryFile("w+")
+    proc = start(binary, port, interval, log)
     try:
-        for n in ports:
-            procs[n] = start(n, binary, ports[n], interval, logs[n])
-        deadline = time.monotonic() + 15
-        for n, port in ports.items():
-            if not wait_ready(port, deadline):
-                sys.exit(f"{n} is not ready after 15 s")
-        time.sleep(6)  # past the first collections' warmup and the first slow observations on both
-        threads = {n: worker.Worker(f"{n} check", check, ports[n], interval, procs[n].pid) for n in ports}
-        for t in threads.values():  # at the same time, so both read the same moment as far as possible
-            t.start()
-        res = {n: t.result(300) for n, t in threads.items()}  # what a check raised ends the run here, by name
-        for n in ports:  # a restart: the old cursor is refused, never mixed with the new process's ids
-            stopped[n] = stop(procs[n])
-            procs[n] = start(n, binary, ports[n], interval, logs[n])
-        deadline = time.monotonic() + 15
-        for n, port in ports.items():
-            wait_ready(port, deadline)
-            old = res[n]["replay"]["instance"]
-            code, _, body = fetch(port, f"/api/samples?instance_id={old}&after=1")
-            restarted[n] = {"code": code, "body": json.loads(body)}
+        if not wait_ready(port, time.monotonic() + 15):
+            sys.exit("the server is not ready after 15 s")
+        time.sleep(6)  # past the first collections' warmup and the first slow observations
+        t = worker.Worker("check", check, port, interval, proc.pid)
+        t.start()
+        r = t.result(300)  # what the check raised ends the run here
+        stopped = stop(proc)  # a restart: the old cursor is refused, never mixed with the new process's ids
+        proc = start(binary, port, interval, log)
+        wait_ready(port, time.monotonic() + 15)
+        code, _, body = fetch(port, f"/api/samples?instance_id={r['replay']['instance']}&after=1")
+        restarted = {"code": code, "body": json.loads(body)}
     finally:
-        for p in procs.values():  # only what this run started
-            stop(p)
-    py, rs = res["python"], res["rust"]
-    out = []
-    for path in PATHS:
-        a, b = py["endpoints"][path], rs["endpoints"][path]
-        for k in ("code", "type", "no_store"):
-            if a[k] != b[k]:
-                out.append(f"{path}: {k} {a[k]!r} (python) != {b[k]!r} (rust)")
-        if path in WEB and a["body"] != b["body"]:
-            out.append(f"{path}: the bodies differ ({len(a['body'])} / {len(b['body'])} bytes)")
-    a, b = (heads(r["endpoints"]["/text"]["body"].decode()) for r in (py, rs))
-    if a != b:
-        out.append(f"/text: sections {a} (python) != {b} (rust)")
-    for name in RAW:
-        if py["raw"][name] != rs["raw"][name]:
-            out.append(f"raw {name}: {py['raw'][name]} (python) != {rs['raw'][name]} (rust)")
-    for name in KNOWN:
-        if rs["known"][name] != KNOWN_RUST:
-            out.append(f"known difference {name}: rust {rs['known'][name]} != {KNOWN_RUST}")
-    for path in ("/api/stats", "/api/status", "/api/observations"):
-        diff(py["bodies"][path], rs["bodies"][path], "", (d := []))
-        out += [f"{path}{x}" for x in d]
-    h = {n: r["bodies"]["/api/history"] for n, r in res.items()}
-    for k in ("schema_version", "retention_s", "interval_ms", "dropped_series", "series_intervals_ms"):
-        if h["python"][k] != h["rust"][k]:
-            out.append(f"/api/history: {k} {h['python'][k]!r:.200} (python) != {h['rust'][k]!r:.200} (rust)")
-    if list(h["python"]) != list(h["rust"]) or sorted(h["python"]["series"]) != sorted(h["rust"]["series"]):
-        out.append(f"/api/history: keys or series ids differ: {sorted(set(h['python']['series']) ^ set(h['rust']['series']))[:5]}")
-    for n, body in h.items():
-        if not all(type(p[0]) is int and type(p[1]) is float and (p[2] is None or type(p[2]) in (int, float))
-                   for points in body["series"].values() for p in points):
-            out.append(f"{n}: /api/history: a point that is not [int, float, number or null]")
-    sm = {n: r["bodies"]["/api/samples"] for n, r in res.items()}
-    if [kind(v) for v in sm["python"].values()] != [kind(v) for v in sm["rust"].values()] or list(sm["python"]) != list(sm["rust"]):
-        out.append("/api/samples: the envelope differs")
-    for n, body in sm.items():
-        stats_keys = list(res[n]["bodies"]["/api/stats"])
-        if body["records"] and list(body["records"][0]["data"]) != stats_keys:
-            out.append(f"{n}: /api/samples: a record's keys are not /api/stats'")
-        if body["records"] and list(body["records"][0]["data"]["sample"])[-1] != "stale":
-            out.append(f"{n}: /api/samples: no sample.stale")
-    for n, r in res.items():
-        out += [f"{n}: replay walk: {p}" for p in r["replay"]["problems"]]
-        out += [f"{n}: concurrent: {p}" for p in r["concurrent"]["problems"]]
-        lim = r["connection_limit"]
-        if lim["closed"] != lim["connections"] - 32 or not lim["refused_while_full"] or lim["after"] != 200:
-            out.append(f"{n}: connection limit: {lim}")
-        rt = r["request_timeout"]
-        if rt["answered"] or not 9.5 <= rt["closed_after_s"] <= 11.5:
-            out.append(f"{n}: request timeout: {rt}")
-        b = r["burst"]
-        if b["threads_peak"] > b["threads_before"] + 34 or b["code"] != 200 or b["threads_after"] > b["threads_before"] + 2:
-            out.append(f"{n}: burst: {b}")
-        code, seconds = stopped[n]
-        if code != 0 or seconds >= 2:  # a stop exits at once, with status 0
-            out.append(f"{n}: SIGTERM: exit {code} after {seconds} s")
-        rs_ = restarted[n]
-        if rs_["code"] != 409 or rs_["body"].get("code") != "instance_changed" or rs_["body"].get("instance_id") == r["replay"]["instance"]:
-            out.append(f"{n}: after a restart: {rs_}")
-    stats = py["bodies"]["/api/stats"]
+        stop(proc)  # only what this run started
+    out = problems(r, stopped, restarted)
+    stats = r["bodies"]["/api/stats"]
     report = {"host_platform": stats["platform"], "sensor_meta": len(stats.get("sensor_meta", {})),
               "interfaces": len(stats.get("network", {}).get("interfaces", [])),
-              "groups": {n: {g: o["state"] for g, o in r["bodies"]["/api/observations"]["groups"].items()} for n, r in res.items()},
-              "history_series": {n: len(b["series"]) for n, b in h.items()},
-              "codes": {p: [py["endpoints"][p]["code"], rs["endpoints"][p]["code"]] for p in PATHS},
-              "raw": py["raw"], "known": {n: r["known"] for n, r in res.items()}, "restart": {n: r["code"] for n, r in restarted.items()}, "stop": stopped,
-              **{n: {k: r[k] for k in ("replay", "concurrent", "connection_limit", "request_timeout", "burst")} for n, r in res.items()},
+              "groups": {g: o["state"] for g, o in r["bodies"]["/api/observations"]["groups"].items()},
+              "history_series": len(r["bodies"]["/api/history"]["series"]),
+              "codes": {p: r["endpoints"][p]["code"] for p in PATHS}, "raw": r["raw"], "known": r["known"],
+              "restart": restarted["code"], "stop": stopped,
+              **{k: r[k] for k in ("replay", "concurrent", "connection_limit", "request_timeout", "burst")},
               "differences": out}
     if "--json" in sys.argv:
         with open(sys.argv[sys.argv.index("--json") + 1], "w") as f:
-            json.dump({"report": report, "python": py["bodies"], "rust": rs["bodies"],
-                       "text": {n: r["endpoints"]["/text"]["body"].decode() for n, r in res.items()}}, f, indent=1)
+            json.dump({"report": report, "bodies": r["bodies"], "text": r["endpoints"]["/text"]["body"].decode()}, f, indent=1)
     print(json.dumps(report, indent=1))
-    for n, log in logs.items():
-        log.seek(0)
-        tail = log.read().splitlines()[-3:]
-        print(f"{n} log: " + " | ".join(tail), file=sys.stderr)
+    log.seek(0)
+    print("server log: " + " | ".join(log.read().splitlines()[-3:]), file=sys.stderr)
     sys.exit(1 if out else 0)
 
 

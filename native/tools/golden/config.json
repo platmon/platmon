@@ -177,7 +177,7 @@
   }
  },
  {
-  "name": "the shipped platmon.ini",
+  "name": "the defaults written out",
   "python": {
    "core": {
     "interval": 1.0

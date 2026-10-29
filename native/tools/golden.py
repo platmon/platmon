@@ -1,15 +1,16 @@
-"""The Python service's answers, frozen: what fixture.py and runtime_fixture.py compare platmon-native with
-once the Python service is gone. Each scenario's file (golden/<harness>/<scenario>.jsonl) holds one line per
-request: {"request": the line the harness wrote, "answer": the Python side's answer}.
+"""The Python service's answers, frozen: what fixture.py and runtime_fixture.py compare platmon-native with,
+recorded before the Python service was removed (1.6.0). Each scenario's file
+(golden/<harness>/<scenario>.jsonl) holds one line per request: {"request": the line the harness wrote,
+"answer": the Python side's answer}.
 
-Recording (the harnesses' --record DIR) keeps the answer as the comparison sees it, with what differs by
-design or by host taken out: an HTTP response unstamped (runtime_fixture.unstamped: no Date, Server or
-error-page markup), and, on the fake trees, the values the container's kernel chose put back as tokens
-(tokens()): the kernel's release and machine, an interface's index, the network namespace's id and the
-device numbers of the two tmpfs mounts;
-a probe's connect time, which fixture.py compares only as a number >= 0, is kept as 0.
-Replaying (--golden DIR) runs this file as the Python side: it answers each request with the recorded
-answer, the tokens resolved as it answers, from the same places the collectors read them. A request other
+An answer was kept as the comparison sees it, with what differs by design or by host taken out: an HTTP
+response unstamped (runtime_fixture.unstamped: no Date, Server or error-page markup), and, on the fake
+trees, the values the container's kernel chose as tokens: the kernel's release and machine
+(${kernel}, ${arch}), an interface's index (${ifindex:NAME}), the network namespace's id (${netns}) and the
+device numbers of the two tmpfs mounts (${major:MOUNT}, ${minor:MOUNT}); a probe's connect time, which
+fixture.py compares only as a number >= 0, as 0.
+The harnesses run this file as the Python side: it answers each request with the recorded answer, the
+tokens resolved as it answers, from the same places the collectors read them. A request other
 than the recorded one, or one past the end, is an error on stderr and exit 1: a broken side, never a match.
 
   python3 golden.py FILE        # the replaying side: requests on stdin, answers on stdout
@@ -49,34 +50,8 @@ def environment():
     return env
 
 
-def tokens(value, env):
-    """value with the environment's values as tokens: an "ifindex" that is its "name"'s index now, a string
-    that is the namespace's id, a "major" and "minor" pair that is a tmpfs mount's device, a "kernel" and an
-    "arch" that are the kernel's (system information, from uname)."""
-    if isinstance(value, list):
-        return [tokens(v, env) for v in value]
-    if isinstance(value, str):
-        return "${netns}" if env["netns"] is not None and value == env["netns"] else value
-    if not isinstance(value, dict):
-        return value
-    out = {k: tokens(v, env) for k, v in value.items()}
-    for key in ("kernel", "arch"):
-        if key in value and value[key] == env[key]:
-            out[key] = f"${{{key}}}"
-    name, index = value.get("name"), value.get("ifindex")
-    if isinstance(index, int) and not isinstance(index, bool) and env["ifindex"].get(name) == index:
-        out["ifindex"] = f"${{ifindex:{name}}}"
-    connect = value.get("connect_ms")  # a TCP connect's time: compared loosely (fixture.LOOSE), kept as 0
-    if isinstance(connect, (int, float)) and not isinstance(connect, bool):
-        out["connect_ms"] = type(connect)(0)
-    mount = env["dev"].get((value.get("major"), value.get("minor")))
-    if mount is not None:
-        out["major"], out["minor"] = f"${{major:{mount}}}", f"${{minor:{mount}}}"
-    return out
-
-
 def resolve(value, env):
-    """The inverse of tokens, from the environment now. KeyError for a token it has no value for."""
+    """value with its tokens resolved from the environment now. KeyError for a token it has no value for."""
     if isinstance(value, list):
         return [resolve(v, env) for v in value]
     if isinstance(value, dict):
@@ -95,22 +70,6 @@ def resolve(value, env):
         return env[kind]
     dev = {mount: d for d, mount in env["dev"].items()}[arg]
     return dev[0] if kind == "major" else dev[1]
-
-
-class Recorder:
-    """One scenario's file, written as the harness gets the Python side's answers."""
-
-    def __init__(self, path, fake_tree=False):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        self.file, self.fake_tree = open(path, "w", encoding="utf-8"), fake_tree
-
-    def add(self, request, answer):
-        if self.fake_tree:
-            answer = tokens(answer, environment())
-        self.file.write(json.dumps({"request": request, "answer": answer}, ensure_ascii=False) + "\n")
-
-    def close(self):
-        self.file.close()
 
 
 def replay(path):

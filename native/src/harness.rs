@@ -26,7 +26,7 @@ fn rss_kib() -> (i64, i64) {
 }
 
 #[cfg(target_os = "linux")]
-/// What the loop reports besides CPU, the same as tools/pyloop.py: collection times, missed 1 s deadlines,
+/// What the loop reports besides CPU (as the Python collector's loop did, tools/bench.sh): collection times, missed 1 s deadlines,
 /// RSS over the run, per group how often each state came up, the number of source ids of the last
 /// collection, and how many different read scopes (read_scope) came up, with the last one.
 #[derive(Default)]
@@ -41,7 +41,7 @@ struct Stats {
 }
 
 #[cfg(target_os = "linux")]
-/// pyloop.read_scope: the SHA-256 (16 hex digits) of the sorted source ids, and the names of the interfaces,
+/// The read scope: the SHA-256 (16 hex digits) of the sorted source ids, and the names of the interfaces,
 /// disks and pressure resources read.
 fn read_scope(col: &Collected) -> Value {
     let mut ids: Vec<&str> = col.sensors.iter().filter_map(|(_, v)| match v.get("id") { Some(Value::Str(s)) => Some(s.as_str()), _ => None }).collect();
@@ -114,8 +114,8 @@ impl Stats {
 /// JSON publication per line, at most one page of them). Per record, in µs of elapsed time, the median of 7
 /// rounds of PAGES pages: decoding the stored payloads, a page of records kept and then freed together;
 /// writing records decoded beforehand, the page of texts kept and then freed together; a whole
-/// Replay.view (decoding, ages and stale, the records and the envelope, writing). The same work as
-/// tools/replay_cost_py.py. One JSON line; OUT gets the page itself.
+/// Replay.view (decoding, ages and stale, the records and the envelope, writing), as the Python
+/// service's was measured before its removal. One JSON line; OUT gets the page itself.
 pub fn replay_cost(args: &[String]) {
     let Some(path) = args.first() else { eprintln!("replay-cost FILE [PAGES [OUT]]"); std::process::exit(2) };
     let pages: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(20);
@@ -310,7 +310,7 @@ fn script_now() -> i64 {
     SCRIPT_NOW.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// The runtime script (tools/runtime_fixture.py; tools/runtime_py.py is the Python side). One JSON
+/// The runtime script (tools/runtime_fixture.py, against the Python service's recorded answers). One JSON
 /// operation per line, one JSON line out for each; every "now" also sets the clock that history, replay
 /// and the HTTP answers read:
 ///   {"op": "setup", "interval", "instance_id", "clock", "slow": [[name, interval], ...], "levels",

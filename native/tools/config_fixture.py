@@ -1,14 +1,13 @@
-"""platmon.ini read by platmon.load_config and by `platmon-native config-check`, compared exactly: every
-setting with its type, the levels (with a platform's temperature default) and the probe targets, or the
-same refusal message; also with a --frontends value, as platmon.py passes it on. Then refusals as the two
-servers give them (`platmon.py` and `platmon-native serve`: exit 2, the same message), only for
-configurations both must refuse, so nothing starts listening. Runs on the host: the files are written to
-a temporary directory.
+"""platmon.ini read by `platmon-native config-check`, compared exactly with the Python service's answers
+(platmon.load_config, recorded in golden/config.json before its removal in 1.6.0; the temporary directory
+as ${dir}): every setting with its type, the levels (with a platform's temperature default) and the probe
+targets, or the same refusal message; also with a --frontends value, as platmon.py passed it on. Then
+refusals as the server gives them (`platmon-native serve`: exit 2, the message platmon.py gave), only for
+configurations it must refuse, so nothing starts listening. Last, the shipped platmon.ini must read as no
+file does: every value in it is the default. Runs on the host: the files are written to a temporary
+directory.
 
-With --record FILE, the Python answers are also written to FILE (the temporary directory as ${dir}); with
---golden FILE, those recorded answers stand in for the Python side, which is then not imported.
-
-  PYTHONPATH=<platmon tree> config_fixture.py BINARY [--record FILE | --golden FILE]"""
+  config_fixture.py BINARY"""
 import json
 import os
 import subprocess
@@ -16,11 +15,17 @@ import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden", "config.json")
 
 CASES = [  # name, file text (None: no file), platform
     ("no file", None, "Jetson Orin"),
     ("empty file", "", None),
-    ("the shipped platmon.ini", open(os.path.join(REPO, "platmon.ini")).read(), "Raspberry Pi"),
+    ("the defaults written out", "[core]\ninterval = 1.0\n[network]\nenabled = yes\n[disk_io]\nenabled = yes\n[storage]\n"
+     "enabled = yes\ninterval = 30\n[wifi]\nenabled = yes\ninterval = 5\n[battery]\nenabled = yes\ninterval = 60\n[probe]\n"
+     "enabled = yes\ninterval = 10\ntimeout = 2\ntargets =\n[history]\nenabled = yes\nretention = 600\n[replay]\nenabled = yes\n"
+     "retention = 600\nmax_bytes = 16777216\n[pressure]\nenabled = yes\n[http]\nenabled = yes\nbind = 0.0.0.0\nport = 9797\n"
+     "web = yes\n[thresholds]\ncpu = 80, 90\ngpu = 80, 90\nmemory = 80, 90\nfilesystem = 80, 90\ntemperature =\n"
+     "battery = 20, 10\nwifi = -70, -80\n", "Raspberry Pi"),  # the shipped platmon.ini's settings in 1.6.0
     ("everything set", "[core]\ninterval = 2\n[network]\nenabled = no\n[disk_io]\nenabled = Off\n[storage]\nenabled = 0\ninterval = 60\n"
      "[wifi]\nenabled = TRUE\ninterval = 1\n[battery]\ninterval = 3600\n[probe]\ninterval = 30\ntimeout = 0.5\n"
      "targets = 192.0.2.1:443, [2001:DB8::1]:22, 10.0.0.1:1\n[history]\nretention = 60\n[replay]\nretention = 1\nmax_bytes = 1_048_576\n"
@@ -96,23 +101,6 @@ REFUSED = [  # name, file text, the arguments (FILE: where the file goes, else f
 ]
 
 
-def python_side(path, platform, frontends=None):
-    from platmon import DEFAULTS, levels, load_config
-    from collector.probe import parse_targets
-    try:
-        cfg = load_config(path, frontends.split(",") if frontends else None)
-    except ValueError as e:
-        return {"error": str(e)}
-    out = {}
-    for section, options in DEFAULTS.items():
-        get = lambda k, d: {bool: cfg[section].getboolean, int: cfg[section].getint, float: cfg[section].getfloat,
-                            str: cfg[section].get}[type(d)](k)
-        out[section] = {k: get(k, d) for k, d in options.items()}
-    out["levels"] = levels(cfg, platform)
-    out["targets"] = [list(t) for t in parse_targets(cfg["probe"].get("targets"))]
-    return out
-
-
 def write(d, i, text):
     if text is None:
         return ""
@@ -144,63 +132,55 @@ def dir_token(value, d, back=False):
     return value
 
 
-class Python:
-    """The Python side's answers: computed (mode None), computed and recorded, or replayed from the file."""
+class Golden:
+    """The recorded answers, in the order they are asked for."""
 
-    def __init__(self, mode, path, d):
-        self.mode, self.path, self.d, self.out = mode, path, d, []
-        if mode == "golden":
-            with open(path, encoding="utf-8") as f:
-                self.recorded = json.load(f)
+    def __init__(self, d):
+        self.d, self.n = d, 0
+        with open(GOLDEN, encoding="utf-8") as f:
+            self.recorded = json.load(f)
 
-    def answer(self, name, compute):
-        if self.mode == "golden":
-            got = self.recorded[len(self.out)] if len(self.out) < len(self.recorded) else {}
-            if got.get("name") != name:
-                sys.exit(f"{self.path}: answer {len(self.out) + 1} is for {got.get('name')!r}, not {name!r}")
-            self.out.append(got)
-            return dir_token(got["python"], self.d, back=True)
-        value = compute()
-        self.out.append({"name": name, "python": dir_token(value, self.d)})
-        return value
+    def answer(self, name):
+        got = self.recorded[self.n] if self.n < len(self.recorded) else {}
+        if got.get("name") != name:
+            sys.exit(f"{GOLDEN}: answer {self.n + 1} is for {got.get('name')!r}, not {name!r}")
+        self.n += 1
+        return dir_token(got["python"], self.d, back=True)
 
     def close(self):
-        if self.mode == "golden" and len(self.out) != len(self.recorded):
-            sys.exit(f"{self.path}: {len(self.recorded)} answers recorded, {len(self.out)} asked for")
-        if self.mode == "record":
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump(self.out, f, indent=1, ensure_ascii=False)
-                f.write("\n")
+        if self.n != len(self.recorded):
+            sys.exit(f"{GOLDEN}: {len(self.recorded)} answers recorded, {self.n} asked for")
+
+
+def config_check(binary, args):
+    return json.loads(subprocess.run([binary, "config-check"] + args, capture_output=True, text=True, check=True).stdout)
 
 
 def main():
     binary, failed = os.path.abspath(sys.argv[1]), 0
-    mode, path = (sys.argv[2][2:], os.path.abspath(sys.argv[3])) if sys.argv[2:3] in (["--record"], ["--golden"]) else (None, None)
-    total = len(CASES) + len(FRONTENDS) + len(REFUSED)
+    total = len(CASES) + len(FRONTENDS) + len(REFUSED) + 1
     with tempfile.TemporaryDirectory() as d:
-        python = Python(mode, path, d)
+        python = Golden(d)
         cases = [(name, text, platform, None) for name, text, platform in CASES] + \
                 [(name, text, None, frontends) for name, text, frontends in FRONTENDS]
         for i, (name, text, platform, frontends) in enumerate(cases):
             path = write(d, i, text)
-            py = python.answer(name, lambda: python_side(path or None, platform, frontends))
+            py = python.answer(name)
             args = [path] + ([platform or "", frontends] if frontends is not None else [platform] if platform else [])
-            rs = json.loads(subprocess.run([binary, "config-check"] + args,
-                                           capture_output=True, text=True, check=True).stdout)
+            rs = config_check(binary, args)
             same = py == rs and json.dumps(py) == json.dumps(rs)  # also key order and int/float
             failed += not same
             shown = py["error"].replace(d, "DIR").split("\n")[0][:90] if "error" in py else "settings"
             print(f"  {name}: {'OK' if same else 'DIFFERENT'} ({shown})")
             if not same:
                 print(f"       python: {json.dumps(py)[:300]}\n       rust:   {json.dumps(rs)[:300]}")
-        server = os.path.join(REPO, "platmon.py")
         for i, (name, text, args) in enumerate(REFUSED):
             path = write(d, len(cases) + i, text)
             if "FILE" in args:
                 args = [path if a == "FILE" else a for a in args]
             elif path:
                 args = [path] + args
-            py = tuple(python.answer(name, lambda: list(refusal([sys.executable, server] + args))))
+            py = tuple(python.answer(name))
             rs = refusal([binary, "serve"] + args)
             same = py == rs and py[0] == 2
             failed += not same
@@ -208,6 +188,12 @@ def main():
             if not same:
                 print(f"       python: {py}\n       rust:   {rs}")
         python.close()
+    shipped, defaults = (config_check(binary, [path, "Raspberry Pi"]) for path in (os.path.join(REPO, "platmon.ini"), ""))
+    same = shipped == defaults
+    failed += not same
+    print(f"  the shipped platmon.ini: {'OK' if same else 'DIFFERENT'} (the defaults)")
+    if not same:
+        print(f"       shipped:  {json.dumps(shipped)[:300]}\n       defaults: {json.dumps(defaults)[:300]}")
     print(f"{total - failed}/{total} configurations the same")
     sys.exit(1 if failed else 0)
 

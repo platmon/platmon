@@ -1,10 +1,11 @@
-"""Step 3C: the whole Python service (A) against `platmon-native serve` (B) on one host, A B B A, the same
-platmon.ini (the defaults, 1 s collection, 127.0.0.1:PORT), the same user, one service at a time. Only the
-processes this tool starts are stopped, by their own handles. One JSON line per run, and a first line with
-the host and what was run.
+"""The whole service, `platmon-native serve` builds against each other on one host (B is --binary, any other
+name a --variant), in the order given (e.g. "S M M S"), the same platmon.ini (the defaults, 1 s collection,
+127.0.0.1:PORT), the same user, one service at a time. Step 3C ran the Python service (A) against B; it was
+removed in 1.6.0. Only the processes this tool starts are stopped, by their own handles. One JSON line per
+run, and a first line with the host and what was run.
 
-  python3 service_ab.py --tree PYTHON_TREE --binary platmon-native --out OUT.jsonl [--port 19797]
-  python3 service_ab.py ... --variant S=SYSTEM_BINARY --variant M=MIMALLOC_BINARY --order "S M M S"
+  python3 service_ab.py --tree PLATMON_TREE --binary SYSTEM_BINARY --variant M=MIMALLOC_BINARY --order "B M M B" \
+      --out OUT.jsonl [--port 19797]       # the tree: the checkout whose frontends/web is served
 
 Each run, in seconds from the service's start (docs/performance/budget.md for the first window):
 
@@ -322,9 +323,7 @@ def config(port):
 
 
 def command(variant, args, ini):
-    """A: the Python service; B: --binary; any other name: its --variant binary."""
-    if variant == "A":
-        return [sys.executable, f"{args.tree}/platmon.py", ini]
+    """B: --binary; any other name: its --variant binary."""
     binary = args.binary if variant == "B" else args.variants[variant]
     return [binary, "serve", ini, "--web", f"{args.tree}/frontends/web", "--app-version", args.app_version]
 
@@ -399,8 +398,7 @@ def concurrent(port, clock, proc, rss, hub, cursor, ph):
 
 def run(variant, args, ini, ph):
     log = tempfile.TemporaryFile("w+")
-    env = {**os.environ, "PYTHONPATH": args.tree} if variant == "A" else dict(os.environ)
-    p = subprocess.Popen(command(variant, args, ini), cwd=args.tree, stdout=log, stderr=log, env=env)
+    p = subprocess.Popen(command(variant, args, ini), cwd=args.tree, stdout=log, stderr=log)
     clock, proc = Clock(), Proc(p.pid)
     res = {"variant": variant, "pid": p.pid, "started": time.time(), "phases": ph}
     budget, rss = Budget(args.port, clock), Rss(proc, clock)
@@ -598,7 +596,7 @@ def host(args, ini):
             "tree": args.tree, "tree_ref": args.tree_ref, "binary": args.binary, "binary_sha256": sha256(args.binary),
             "tools_sha256": {os.path.basename(f): sha256(f) for f in (__file__, walk.__file__, worker.__file__)},
             "variants_sha256": {n: sha256(b) for n, b in args.variants.items()}, "order": args.order.split(),
-            "commands": {v: command(v, args, ini) for v in dict.fromkeys(["A", "B", *args.variants])}, "config": cfg}
+            "commands": {v: command(v, args, ini) for v in dict.fromkeys(["B", *args.variants])}, "config": cfg}
 
 
 def main():
@@ -615,7 +613,7 @@ def main():
     ap.add_argument("--app-version", default="1.3.0")
     ap.add_argument("--out", required=True)
     ap.add_argument("--port", type=int, default=19797)
-    ap.add_argument("--order", default="A B B A")
+    ap.add_argument("--order", required=True, help='the variants in order, e.g. "B M M B"')
     ap.add_argument("--quick", action="store_true", help="short phases, to try the tool")
     args = ap.parse_args()
     args.tree, args.binary = os.path.abspath(args.tree), os.path.abspath(args.binary)
