@@ -356,16 +356,15 @@ LIMITS = {"cpu": (80, 90), "gpu": (80, 90), "memory": (80, 90), "filesystem": (8
           "battery": (20, 10), "wifi": (-70, -80)}
 # Levels where the low reading is the bad one: warning above critical (native/src/config.rs LOW_LEVELS).
 LOW = ("battery", "wifi")
-# Servers from #57 on send the temperature level they use; this copy of the server's board table serves
-# older ones that send none (tests/frontends/test_cli_screen.py checks that the two match).
-TEMP_LIMITS = {"Jetson Orin": (85, 95), "Raspberry Pi": (75, 80)}
 SPARK_POINTS = 24
 WIDE = 100  # columns from which everything is on one screen; below, the overview and a few rows
 ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 
 
-def temp_limits(s):
-    return LIMITS["temperature"] or TEMP_LIMITS.get(s.get("platform"), (80, 90))
+def temp_limits():
+    """The server's temperature level (its board's default unless [thresholds] sets one); the web page's
+    generic default when /api/status could not be read."""
+    return LIMITS["temperature"] or (80, 90)
 
 
 def use_levels(levels):
@@ -471,7 +470,7 @@ def metrics(s):
                 f"{gib(d['used'])} / {gib(d['total'])}"))
     temps = hottest_first(s)
     if temps:
-        out.append(("TEMP", temps[0][1], "°C", temp_limits(s), f"{temps[0][0]} · hottest of {len(temps)}"))
+        out.append(("TEMP", temps[0][1], "°C", temp_limits(), f"{temps[0][0]} · hottest of {len(temps)}"))
     return out
 
 
@@ -498,7 +497,7 @@ def attention(s, obs):
     observations the batteries' charge and the connected Wi-Fi signals, where the low reading is the bad one."""
     out = [("/" if label == "DISK" else label, f"{v:.1f} {unit}", level(v, lim))
            for label, v, unit, lim, _ in metrics(s) if v is not None and label != "TEMP"]
-    out += [(k, f"{v:.1f} °C", level(v, temp_limits(s))) for k, v in hottest_first(s)]
+    out += [(k, f"{v:.1f} °C", level(v, temp_limits())) for k, v in hottest_first(s)]
     data, _ = group_data(obs, "storage")
     for f in (data or {}).get("filesystems") or []:
         pct = fs_pct(f)
@@ -772,7 +771,7 @@ def body_overview(v):
     if wide:
         temps = hottest_first(s)
         if temps:
-            body.append(v.kv("THERMAL", "   ".join(st(f"{k} {t:.1f}", tone(level(t, temp_limits(s)))) for k, t in temps) + st("  °C", "muted")))
+            body.append(v.kv("THERMAL", "   ".join(st(f"{k} {t:.1f}", tone(level(t, temp_limits()))) for k, t in temps) + st("  °C", "muted")))
         power = [f"{k} {p:.2f} W" for k, p in (s.get("power") or {}).items()]
         fans = [f"fan {f['name']} " + (" · ".join(x for x in (f["rpm"] is not None and f"{f['rpm']} rpm",
                                                                f["percent"] is not None and f"{f['percent']} %") if x) or "n/a")
@@ -959,7 +958,7 @@ def body_thermal(v):
     rails, fans and the batteries are their own view, so a host with dozens of channels here does not
     push what it draws and what it has left off the screen."""
     s, st = v.s, v.st
-    temps, limits = hottest_first(s), temp_limits(s)
+    temps, limits = hottest_first(s), temp_limits()
     if not temps:
         return v.empty("No temperature readings · this board reports none")
 

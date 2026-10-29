@@ -395,8 +395,8 @@ check uses `/api/stats` for that reason).
   board's default (Jetson Orin 85/95, Raspberry Pi 75/80, others 80/90). `battery` (percent) and `wifi`
   (dBm) are levels whose low reading is the bad one: the warning is **above** the critical level, and a
   reading at or below a level reaches it. A client that does not know a name ignores it. The web page and the `platmon`
-  command color readings with them. Older servers send no `levels`, or a null `temperature`: the `platmon`
-  command then uses those defaults.
+  command color readings with them. When `/api/status` cannot be read, or a server sends a null
+  `temperature`, both use 80/90 for temperature.
 
 ## Clock
 

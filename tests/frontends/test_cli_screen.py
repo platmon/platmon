@@ -103,16 +103,6 @@ def test_low_levels_attention_and_colors(monkeypatch):
     assert cli.LIMITS["battery"] == (30, 15) and cli.LIMITS["wifi"] == (-70, -80)
 
 
-def test_fallback_board_levels_match_the_server():
-    """The command's copy for older servers is the server's table (native/src/config.rs, levels)."""
-    import re
-    from pathlib import Path
-    source = (Path(__file__).parents[2] / "native/src/config.rs").read_text(encoding="utf-8")
-    table = re.search(r'let pair = match p \{ (.*?), _ =>', source).group(1)
-    server = {name: (float(a), float(b)) for name, a, b in re.findall(r'"([^"]+)" => \[([0-9.]+), ([0-9.]+)\]', table)}
-    assert cli.TEMP_LIMITS == server and len(server) == 2
-
-
 def test_data_age_is_the_servers_plus_time_since():
     assert data_age({"sample": {"data_age_ms": 1500}}, got=10.0, now=12.0) == 3.5
     assert data_age({}, got=10.0, now=12.0) == 2.0  # an older server: the time since its answer

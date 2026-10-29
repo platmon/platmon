@@ -20,6 +20,9 @@ API schema versions are independent of release versions.
 - Internal: the application version is the `VERSION` file. `native/tools/` is split into `equivalence/`
   (the recorded answers and the checks that compare with them, without recording again), `perf/` and
   `deploy/`; the measurement tools compare native builds.
+- The `platmon` command no longer keeps its own copy of the board temperature levels for servers older than
+  1.0.0, which sent none: it uses the level the server sends, and 80/90 °C when `/api/status` cannot be
+  read, as the web page does.
 
 ## 1.6.0 — 2026-10-25
 
