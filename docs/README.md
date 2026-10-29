@@ -41,10 +41,10 @@ document for implementation and validation evidence.
   — official support qualification and CI-only observation of Python 3.8 / Ubuntu 20.04.
 - [Ubuntu LTS qualification](development/ubuntu-lts-qualification.md) — implementation progress,
   local interpreter and container evidence, and remaining native OS release gates.
-- [Python test port](development/python-test-port.md) — where each Python service test is shown now: a Rust
-  test, a recorded comparison, or why none is needed.
+- [Python test port](development/python-test-port.md) — where each test of the removed Python server is
+  shown now: a Rust test, a recorded comparison, or why none is needed.
 - [Remaining work](development/remaining-work.md) — what is still open: the Windows build's
-  real-PC checks, Linux release gaps and the Python server's removal.
+  real-PC checks and Linux release gaps.
 - [Release readiness](releases/readiness.md) — acceptance gates and release evidence.
 - [Performance reports](performance/README.md) — budgets, current measurements,
   and background studies.

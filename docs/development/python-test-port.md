@@ -2,21 +2,21 @@
 
 > **TL;DR**
 > - Where each of the Python service's 397 tests (`tests/collector`, `tests/runtime`, `tests/test_layers.py`)
->   went before the Python server's removal (remaining-work.md, "Python server removal", step 3).
+>   went when the Python server was removed after 1.6.0 (remaining-work.md, "Python server removal").
 > - 250 are Rust unit tests now, 105 are shown by the recorded comparisons or the live checks, 32 test
 >   Python-only API, 5 stay with the CLI, and 5 cannot be made in a test (each says why).
 > - The Rust tests read fake trees through `sysfs::at` (identity outside tests): `cargo test` in
 >   `native/build.sh` runs them.
 
-The Python service's own tests go with it. So that what they showed is not lost, every one of them
-is listed below with where it is shown now:
+The Python service's own tests went with it; they are in the git history up to 1.6.0. So that what they
+showed is not lost, every one of them is listed below with where it is shown now:
 
 | mark | meaning |
 | --- | --- |
 | R | a Rust unit test: the file (`native/src/...`) and, where the name differs, the test |
-| G | shown by a comparison with the Python service's recorded answers (`native/tools/golden.py`: `fixture.py`'s fake-tree scenarios, `runtime_fixture.py`'s runtime scenarios, `config_fixture.py`) or by `live_http.py` on a real host; the scenario and step are named |
+| G | shown by a comparison with the Python service's recorded answers (`native/tools/equivalence/golden.py`: `fixture.py`'s fake-tree scenarios, `runtime_fixture.py`'s runtime scenarios, `config_fixture.py`) or by `live_http.py` on a real host; the scenario and step are named |
 | P | tests the Python implementation itself (its call signatures, dict ownership, exceptions, threads): there is no native counterpart to test |
-| K | tests `frontends/cli.py`, which stays: the test moves to `tests/frontends` with the removal |
+| K | tests `frontends/cli.py`, which stays: the test is in `tests/frontends/test_cli.py` |
 | X | the behavior is the native server's too, but a test cannot produce the condition; the reason is given |
 
 The Rust tests' fake trees: `sysfs::fake::Root` is a temporary directory that the test thread's reads
@@ -25,8 +25,9 @@ the clocks set (`metadata::set_clocks`, per thread in tests). Where Python patch
 `os.listdir` or `socket.if_nameindex`, the tests give `fake::answers` (a read's bytes or errno),
 `fake::unlistable` and `fake::indexes`. The tests run with the build (`native/build.sh`, `cargo test`).
 
-`live_http.py` compares the two servers on a host; after the removal its checks of each server stay, on
-the native server alone, and its comparisons with the Python service go.
+`live_http.py` compared the two servers on a host; since the removal it checks the native server alone, against
+the Python service's answers where they do not depend on the host (status codes, content types, the
+raw requests' answers) and `frontends/cli.py`'s renderer for `/text`.
 
 ## `tests/collector/test_battery.py`
 
@@ -297,7 +298,7 @@ R 11, K 1
 | `test_socket_error_keeps_other_targets_and_failure_window` | R | probe.rs |
 | `test_config_refuses` | R | config.rs probe_config_refusals_and_defaults; config_fixture |
 | `test_enabled_by_default_without_targets` | R | config.rs probe_config_refusals_and_defaults |
-| `test_cli_lines` | K | frontends/cli.py stays: moves to tests/frontends |
+| `test_cli_lines` | K | tests/frontends/test_cli.py `test_probe_lines` |
 
 ## `tests/collector/test_provenance.py`
 
@@ -373,7 +374,7 @@ R 19, G 5, P 3, K 1, X 1
 | `test_observations_endpoint` | G | runtime observations; live_http.py |
 | `test_real_host_observation` | R | observe.rs |
 | `test_http_answers_while_a_group_is_blocked_and_stale` | G | slow.rs a_blocked_read_stalls_only_its_group; runtime observations (observations while both run) |
-| `test_cli_storage_lines_and_ages` | K | frontends/cli.py stays: moves to tests/frontends |
+| `test_cli_storage_lines_and_ages` | K | tests/frontends/test_cli.py `test_storage_lines_and_ages` |
 | `test_only_local_filesystem_lines_are_converted` | R | observe.rs parse_mountinfo_escapes_optional_fields_and_bad_lines (the native parser always filters) |
 | `test_capacity_is_bound_to_verified_mount_descriptor` | R | observe.rs statvfs_failure_keeps_the_entry_without_numbers (replaced) |
 | `test_replaced_mount_has_no_capacity_and_an_explicit_reason` | R | observe.rs statvfs_failure_keeps_the_entry_without_numbers (replaced) |
@@ -407,7 +408,7 @@ R 17, K 1
 | `test_down_carrier_is_disconnected_without_issue` | R | observe.rs |
 | `test_carrier_errors_are_not_all_treated_as_down` | R | observe.rs |
 | `test_wifi_is_on_by_default_with_a_5_s_candidate_interval` | R | config.rs wifi_section |
-| `test_cli_lines` | K | frontends/cli.py stays: moves to tests/frontends |
+| `test_cli_lines` | K | tests/frontends/test_cli.py `test_wifi_lines` |
 
 ## `tests/runtime/test_history.py`
 
@@ -561,6 +562,6 @@ P 2, K 2
 | test | mark | where |
 | --- | --- | --- |
 | `test_lower_layers_do_not_import_upper_ones` | P | the Python service's layers: removed with them |
-| `test_cli_imports_nothing_from_the_project` | K | frontends/cli.py stays standalone: kept in tests/frontends |
+| `test_cli_imports_nothing_from_the_project` | K | tests/frontends/test_cli.py |
 | `test_the_allowed_exception_is_still_used` | P | runtime/server.py's import of frontends.cli: removed with it |
-| `test_cli_version_copy_matches_the_service` | K | kept, against VERSION's new place (stage 4) |
+| `test_cli_version_copy_matches_the_service` | K | tests/frontends/test_cli.py `test_cli_version_copy_matches_the_version_file` |

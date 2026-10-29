@@ -12,6 +12,14 @@ API schema versions are independent of release versions.
   Docker) and the web page, with the package's unit. The Dockerfile builds the server in a
   `rust:1.88-slim` stage and runs it on `debian:13-slim` (no Python in the image). `platmon-native health
   [CONFIG]` is the image's health check: it asks `/api/stats` where the configuration listens.
+- **Breaking:** the Python server (`platmon.py`, `collector/`, `runtime/`), deprecated in 1.5.0, is
+  removed, with `benchmarks/` and its tests: `python3 platmon.py` no longer runs a service. Every
+  installation already runs `platmon-native`; the HTTP API, `platmon.ini` keys and command options do not
+  change, and the `platmon` command stays the Python client. Its tests were ported to Rust or are shown by
+  the native checks against its recorded answers (docs/development/python-test-port.md).
+- Internal: the application version is the `VERSION` file. `native/tools/` is split into `equivalence/`
+  (the recorded answers and the checks that compare with them, without recording again), `perf/` and
+  `deploy/`; the measurement tools compare native builds.
 
 ## 1.6.0 — 2026-10-25
 

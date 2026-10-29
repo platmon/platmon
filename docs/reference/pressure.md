@@ -62,7 +62,7 @@ Shown on the web page ("Pressure") and in the `platmon` command and `/text` (`PS
 | Jetson Orin Nano, L4T R36 | 5.15-tegra | not built in (`CONFIG_PSI` not set) | `unavailable` / `not_exposed` |
 | Raspberry Pi 4, Debian 13 | 6.18.50+rpt-rpi-v8 | built in; owner-approved `psi=1` applied and rebooted | CPU/memory/I/O collected, `ok` |
 | WSL 2 | 6.6 | not built in | `unavailable` / `not_exposed` |
-| CI host (GitHub Actions, Ubuntu) | as provided | whatever the runner has | `tests/collector/test_pressure.py::test_real_host_pressure` reads it when present (see the CI log) |
+| CI host (GitHub Actions, Ubuntu) | as provided | whatever the runner has | the Rust test `real_host_pressure` (`native/src/collect/linux/passive.rs`) reads it when present (see the CI log) |
 
 The normal path is covered by fixtures, supported CI hosts, and a real Raspberry Pi read after the
 owner-approved boot-option change on 2026-10-09. All three `/proc/pressure` files and the API were

@@ -14,8 +14,8 @@ The service is a static native server built from `native/` (Rust, musl, the syst
 uses the host's systemd; it bundles neither Python nor OS/NVIDIA binaries. A package for an architecture
 does not mean that every OS/kernel on it has been validated. A device whose Python is older than 3.9
 needs a supported OS/interpreter before installation. Releases up to 1.3.0 are one `Architecture: all`
-package with the Python server; the source installation and the container now run the native server too,
-built from the checkout ([deployment](../guides/deployment.md)).
+package with the Python server, which was removed after 1.6.0; the source installation and the container run
+the native server too, built from the checkout ([deployment](../guides/deployment.md)).
 `armhf` (32-bit ARM, ARMv6 with VFP and later, e.g. Raspberry Pi OS 32-bit) is built by
 `native/build-armhf.sh`; releases 1.4.0 and 1.5.0 had no armhf package, so armhf hosts upgrade from 1.3.0.
 No GitHub runner runs 32-bit ARM code: CI checks the armhf package in Debian 13 and Ubuntu 24.04 armhf
@@ -33,7 +33,7 @@ and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
 
 The `VERSION` file (one line, `MAJOR.MINOR.PATCH`) is the single source of the application version.
 The builder reads it and writes it into the package's unit (`--app-version`), which the native server shows on its web page and logs at
-start. `frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/test_layers.py`
+start. `frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/frontends/test_cli.py`
 fails until they say the same, so a release changes both. Check versions with:
 
 ```sh

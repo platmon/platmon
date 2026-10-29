@@ -158,11 +158,13 @@ address and port, web enablement, threshold values and memory retention.
 To run the service in the foreground while developing:
 
 ```sh
-python3 platmon.py [platmon.ini]
+native/build.sh   # once: the server for this checkout, in Docker
+native/target/x86_64-unknown-linux-musl/release/platmon-native serve [platmon.ini] --web frontends/web
 ```
 
-The optional square-bracket argument indicates a configuration path; use
-`python3 platmon.py` or `python3 platmon.py platmon.ini` as actual commands.
+The optional square-bracket argument indicates a configuration path; without it the built-in defaults
+apply. On an Arm host the build is under `aarch64-unknown-linux-musl` (or `native/build-armhf.sh`'s
+`arm-unknown-linux-musleabihf` on 32-bit ARM).
 Restart the running service/container to apply edits.
 
 All monitoring features are enabled by default, but unavailable hardware still
