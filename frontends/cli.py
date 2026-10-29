@@ -48,6 +48,12 @@ def gib(b):
 SYSTEM_LABELS = {"os": "", "kernel": "kernel ", "arch": "", "hostname": "host ", "l4t": "L4T "}  # others: "key value"
 
 
+def uptime_text(seconds):
+    """"3d 04:05" for an uptime in seconds."""
+    up = int(seconds)
+    return f"{up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}"
+
+
 def system_line(system):
     """One line from the system entries, whatever the board added; empty for servers without them."""
     return " · ".join(SYSTEM_LABELS.get(k, f"{k} ") + str(v) for k, v in (system or {}).items() if v)
@@ -200,6 +206,15 @@ def aged(body, seconds):
     return {**body, "groups": groups}
 
 
+def wifi_signal(i):
+    """(signal, the other readings present) of a connected wireless interface."""
+    signal = (f"{i['signal_dbm']} dBm" if i["signal_dbm"] is not None
+              else f"signal {i['signal_raw']} (unit not reported)" if i["signal_raw"] is not None else "signal n/a")
+    extra = [f"link quality {i['link_quality']}" if i["link_quality"] is not None else "",
+             f"noise {i['noise_dbm']} dBm" if i["noise_dbm"] is not None else ""]
+    return signal, [e for e in extra if e]
+
+
 def wifi_lines(obs):
     """Wireless interfaces from /api/observations: the signal while connected, never the last one after."""
     data, o = group_data(obs, "wifi")
@@ -212,12 +227,24 @@ def wifi_lines(obs):
             state = "not connected" if i.get("connected") is False else i.get("connection_state", "unknown")
             out.append(f"  {i['name']}  {state}")
             continue
-        signal = (f"{i['signal_dbm']} dBm" if i["signal_dbm"] is not None
-                  else f"signal {i['signal_raw']} (unit not reported)" if i["signal_raw"] is not None else "signal n/a")
-        extra = [f"link quality {i['link_quality']}" if i["link_quality"] is not None else "",
-                 f"noise {i['noise_dbm']} dBm" if i["noise_dbm"] is not None else ""]
-        out.append(f"  {i['name']}  {signal}" + "".join(f"  {e}" for e in extra if e))
+        signal, extra = wifi_signal(i)
+        out.append(f"  {i['name']}  {signal}" + "".join(f"  {e}" for e in extra))
     return out
+
+
+def battery_readings(b, percent="%"):
+    """A battery's status and readings, those it reports, in order; percent goes between the wear figure
+    and "of design"."""
+    full = b.get("charge_full_uah") or b.get("energy_full_uwh")
+    design = b.get("charge_full_design_uah") or b.get("energy_full_design_uwh")
+    parts = [b.get("status") or "",
+             f"{b['voltage_uv'] / 1e6:.2f} V" if b.get("voltage_uv") is not None else "",
+             f"{b['current_ua'] / 1e6:+.2f} A" if b.get("current_ua") is not None else "",
+             f"{b['power_uw'] / 1e6:.2f} W" if b.get("power_uw") is not None else "",
+             f"{b['cycle_count']} cycles" if b.get("cycle_count") is not None else "",
+             # wear: what the gauge now calls full against what it was designed for
+             f"{full * 100 / design:.0f}{percent} of design" if full and design else ""]
+    return [x for x in parts if x]
 
 
 def battery_lines(obs):
@@ -234,22 +261,18 @@ def battery_lines(obs):
         if b.get("present") is False:
             out.append(f"  {b['name']}  not present")
             continue
-        full, design = b.get("charge_full_uah") or b.get("energy_full_uwh"), \
-            b.get("charge_full_design_uah") or b.get("energy_full_design_uwh")
-        parts = [f"{b['percent']}%" if b.get("percent") is not None else b.get("capacity_level") or "charge n/a",
-                 b.get("status") or "",
-                 f"{b['voltage_uv'] / 1e6:.2f} V" if b.get("voltage_uv") is not None else "",
-                 f"{b['current_ua'] / 1e6:+.2f} A" if b.get("current_ua") is not None else "",
-                 f"{b['power_uw'] / 1e6:.2f} W" if b.get("power_uw") is not None else "",
-                 f"{b['cycle_count']} cycles" if b.get("cycle_count") is not None else "",
-                 # wear: what the gauge now calls full against what it was designed for
-                 f"{full * 100 / design:.0f}% of design" if full and design else ""]
-        out.append(f"  {b['name']}  " + "  ".join(x for x in parts if x))
+        charge = f"{b['percent']}%" if b.get("percent") is not None else b.get("capacity_level") or "charge n/a"
+        out.append(f"  {b['name']}  " + "  ".join([charge] + battery_readings(b)))
     if external:
         shown = "  ".join(f"{e['name']} {'on' if e['online'] else 'off' if e['online'] is False else 'n/a'}"
                           for e in external)
         out.append(f"  external  {shown}")
     return out
+
+
+def target_text(t):
+    """A probe target as host:port, an IPv6 address in brackets."""
+    return f"[{t['address']}]:{t['port']}" if ":" in t["address"] else f"{t['address']}:{t['port']}"
 
 
 def probe_lines(obs):
@@ -261,7 +284,7 @@ def probe_lines(obs):
         return []
     out = [f"TCP   connect time, {observed(o)}"]
     for t in items:
-        where = f"[{t['address']}]:{t['port']}" if ":" in t["address"] else f"{t['address']}:{t['port']}"
+        where = target_text(t)
         now = f"{t['connect_ms']:.1f} ms" if t["connect_ms"] is not None else t["reason"]
         out.append(f"  {where}  {now}  failed {t['failures']}/{t['attempts']} recent")
     return out
@@ -279,11 +302,10 @@ def collection_note(s):
 def render(s, obs=None):
     """The screen for a /api/stats answer s, and the storage lines when obs (an /api/observations answer)
     is given. Plain text: --once and pipes; the server's /text is its copy."""
-    up = int(s["uptime"])
     system = system_line(s.get("system"))
     lines = [
         f"{s['model']}",
-        f"{s['platform']}   " + (f"mode {s['power_mode']}   " if s["power_mode"] else "") + f"up {up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}",
+        f"{s['platform']}   " + (f"mode {s['power_mode']}   " if s["power_mode"] else "") + f"up {uptime_text(s['uptime'])}",
         *([system] if system else []),
         *([note] if (note := collection_note(s)) else []),
         "",
@@ -568,6 +590,14 @@ def tabbar(st, width, view):
     return st(f"  {VIEWS.index(view) + 1}/{len(VIEWS)} {VIEW_LABELS[view][2]} {st.larr}/{st.rarr}", "ok", "bold")
 
 
+def core_cell(st, c):
+    """One core as the wide Overview and the Resources view draw it: id, bar, usage and clock."""
+    lv = tone(level(c["usage"], LIMITS["cpu"]))
+    freq = f"{c['freq'] / 1e6:4.0f}" if c.get("freq") else "    "
+    return (st(f"{c['id']:>4} ", lv or "muted", "bold" if lv else None) + meter(st, c["usage"], 8, LIMITS["cpu"], False)
+            + st(f" {c['usage']:5.1f}%", lv, "bold" if lv else None) + st(f" {freq}", "muted"))
+
+
 def mhz(hz):
     """"918 MHz" for a frequency in hertz; empty when the clock is not readable (None or 0)."""
     return f"{hz / 1e6:.0f} MHz" if hz else ""
@@ -621,6 +651,35 @@ class View:
         return self.st(pad(f"    {name}", widths[0])
                        + RATE_REASONS.get(item.get("reason"), str(item.get("reason"))), "muted")
 
+    def net_row(self, widths, i):
+        """An interface's line of the network table: its rates, or why it has none."""
+        r = i["rates"]
+        if not r:
+            return self.no_rate(widths, i["name"], i)
+        err = (i.get("rx") or {}).get("errors", 0) + (i.get("tx") or {}).get("errors", 0)
+        drop = (i.get("rx") or {}).get("dropped", 0) + (i.get("tx") or {}).get("dropped", 0)
+        idle = not r["rx_bytes_per_s"] and not r["tx_bytes_per_s"]
+        return self.row(widths, [f"    {i['name']}", per_s(r["rx_bytes_per_s"]), per_s(r["tx_bytes_per_s"]),
+                                 f"{r['rx_packets_per_s']:.0f} · {r['tx_packets_per_s']:.0f}", f"{err} · {drop}"],
+                        ["muted"] * 5 if idle else [None, None, None, "muted", "warn" if err or drop else "muted"])
+
+    def disk_rows(self, widths, disks):
+        """The disk I/O table's lines: at most MAX_ROWS disks, then how many were left out."""
+        out = []
+        for d in disks[:MAX_ROWS]:
+            r = d["rates"]
+            if not r:
+                out.append(self.no_rate(widths, d["name"], d))
+                continue
+            idle = not r["read_bytes_per_s"] and not r["write_bytes_per_s"]
+            out.append(self.row(widths, [f"    {d['name']}", per_s(r["read_bytes_per_s"]), per_s(r["write_bytes_per_s"]),
+                                         f"{r['reads_per_s']:.0f} · {r['writes_per_s']:.0f}",
+                                         f"{100 * r['io_time_ratio']:.1f} %"],
+                                ["muted"] * 5 if idle else [None, None, None, "muted", None]))
+        if len(disks) > MAX_ROWS:
+            out.append(self.st(f"    +{len(disks) - MAX_ROWS} more disks (all in /api/stats)", "muted"))
+        return out
+
     def meter_row(self, label, pct, limits, detail, label_w=6):
         """A reading as the Overview draws it, indented under a section title."""
         bw = 20 if self.wide else 10
@@ -672,12 +731,10 @@ def body_overview(v):
         cols = max(1, (width + 3) // (cell + 3)) if wide else max(1, (width + 1) // (cell + 1))
         cells = []
         for c in s["cpu"]:
-            lv = tone(level(c["usage"], LIMITS["cpu"]))
             if wide:
-                freq = f"{c['freq'] / 1e6:4.0f}" if c.get("freq") else "    "
-                cells.append(st(f"{c['id']:>4} ", lv or "muted", "bold" if lv else None) + meter(st, c["usage"], 8, LIMITS["cpu"], False)
-                             + st(f" {c['usage']:5.1f}%", lv, "bold" if lv else None) + st(f" {freq}", "muted"))
+                cells.append(core_cell(st, c))
             else:
+                lv = tone(level(c["usage"], LIMITS["cpu"]))
                 cells.append(st(f"{c['id']:>3} ", lv or "muted") + meter(st, c["usage"], 4, LIMITS["cpu"], False)
                              + st(f" {c['usage']:3.0f}%", lv))
         if wide:
@@ -699,17 +756,7 @@ def body_overview(v):
     if shown:
         body.append(v.row(widths, ["  NETWORK", "↓ RX", "↑ TX", "PKT/S rx · tx", "ERR · DROP"], ["muted bold"] + ["muted"] * 4)
                     + (st("   this netns · err/drop = totals", "muted") if wide else ""))
-        for i in shown:
-            r = i["rates"]
-            if not r:
-                body.append(v.no_rate(widths, i["name"], i))
-                continue
-            err = (i.get("rx") or {}).get("errors", 0) + (i.get("tx") or {}).get("errors", 0)
-            drop = (i.get("rx") or {}).get("dropped", 0) + (i.get("tx") or {}).get("dropped", 0)
-            idle = not r["rx_bytes_per_s"] and not r["tx_bytes_per_s"]
-            body.append(v.row(widths, [f"    {i['name']}", per_s(r["rx_bytes_per_s"]), per_s(r["tx_bytes_per_s"]),
-                                       f"{r['rx_packets_per_s']:.0f} · {r['tx_packets_per_s']:.0f}", f"{err} · {drop}"],
-                              ["muted"] * 5 if idle else [None, None, None, "muted", "warn" if err or drop else "muted"]))
+        body += [v.net_row(widths, i) for i in shown]
         if len(ifaces) > len(shown):
             body.append(st(f"    +{len(ifaces) - len(shown)} more interfaces"
                            + (" (all in /api/stats)" if wide else " · view 3 shows all"), "muted"))
@@ -719,17 +766,7 @@ def body_overview(v):
     disks = dio.get("disks") if isinstance(dio.get("disks"), list) else []
     if wide and disks:
         body.append(v.row(widths, ["  DISK I/O", "READ", "WRITE", "OPS/S r · w", "I/O TIME"], ["muted bold"] + ["muted"] * 4))
-        for d in disks[:MAX_ROWS]:
-            r = d["rates"]
-            if not r:
-                body.append(v.no_rate(widths, d["name"], d))
-                continue
-            idle = not r["read_bytes_per_s"] and not r["write_bytes_per_s"]
-            body.append(v.row(widths, [f"    {d['name']}", per_s(r["read_bytes_per_s"]), per_s(r["write_bytes_per_s"]),
-                                       f"{r['reads_per_s']:.0f} · {r['writes_per_s']:.0f}", f"{100 * r['io_time_ratio']:.1f} %"],
-                              ["muted"] * 5 if idle else [None, None, None, "muted", None]))
-        if len(disks) > MAX_ROWS:
-            body.append(st(f"    +{len(disks) - MAX_ROWS} more disks (all in /api/stats)", "muted"))
+        body += v.disk_rows(widths, disks)
         body.append("")
 
     if wide:
@@ -782,13 +819,7 @@ def body_resources(v):
     body = []
     if s["cpu"]:
         body.append(v.title("CPU CORES", f"%  ·  MHz  ·  {len(s['cpu'])} measured"))
-        cells = []
-        for c in s["cpu"]:
-            lv = tone(level(c["usage"], LIMITS["cpu"]))
-            freq = f"{c['freq'] / 1e6:4.0f}" if c.get("freq") else "    "
-            cells.append(st(f"{c['id']:>4} ", lv or "muted", "bold" if lv else None)
-                         + meter(st, c["usage"], 8, LIMITS["cpu"], False)
-                         + st(f" {c['usage']:5.1f}%", lv, "bold" if lv else None) + st(f" {freq}", "muted"))
+        cells = [core_cell(st, c) for c in s["cpu"]]
         cols = max(1, (v.width + 3) // 28)
         body += ["   ".join(cells[i:i + cols]) for i in range(0, len(cells), cols)]
     if cpu_note(s):
@@ -840,17 +871,7 @@ def body_network(v):
         widths = detail_widths(v.width, shown, [13, 13, 17, 12])
         body.append(v.row(widths, ["  INTERFACES", "↓ RX", "↑ TX", "PKT/S rx · tx", "ERR · DROP"],
                           ["muted bold"] + ["muted"] * 4))
-        for i in shown:
-            r = i["rates"]
-            if not r:
-                body.append(v.no_rate(widths, i["name"], i))
-                continue
-            err = (i.get("rx") or {}).get("errors", 0) + (i.get("tx") or {}).get("errors", 0)
-            drop = (i.get("rx") or {}).get("dropped", 0) + (i.get("tx") or {}).get("dropped", 0)
-            idle = not r["rx_bytes_per_s"] and not r["tx_bytes_per_s"]
-            body.append(v.row(widths, [f"    {i['name']}", per_s(r["rx_bytes_per_s"]), per_s(r["tx_bytes_per_s"]),
-                                       f"{r['rx_packets_per_s']:.0f} · {r['tx_packets_per_s']:.0f}", f"{err} · {drop}"],
-                              ["muted"] * 5 if idle else [None, None, None, "muted", "warn" if err or drop else "muted"]))
+        body += [v.net_row(widths, i) for i in shown]
         if len(ifaces) > len(shown):
             body.append(st(f"    +{len(ifaces) - len(shown)} more interfaces (all in /api/stats)", "muted"))
         body.append(st(pad("this netns · err/drop = totals", min(v.width, max(sum(widths), 32)), True), "muted"))
@@ -862,21 +883,16 @@ def body_network(v):
                 state = "not connected" if i.get("connected") is False else i.get("connection_state", "unknown")
                 body.append(st(f"    {i['name']:<8}  {state}", "muted"))
                 continue
-            signal = (f"{i['signal_dbm']} dBm" if i["signal_dbm"] is not None
-                      else f"signal {i['signal_raw']} (unit not reported)" if i["signal_raw"] is not None else "signal n/a")
-            extra = [f"link quality {i['link_quality']}" if i["link_quality"] is not None else "",
-                     f"noise {i['noise_dbm']} dBm" if i["noise_dbm"] is not None else ""]
+            signal, extra = wifi_signal(i)
             lv = low_level(i["signal_dbm"], LIMITS["wifi"]) if i["signal_dbm"] is not None else "ok"
             body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), st(signal, tone(lv))]
-                               + [st(f"   {e}", "muted") for e in extra if e]))
+                               + [st(f"   {e}", "muted") for e in extra]))
 
     if targets:
         body += ["", v.title("TCP CONNECT", observed_text(probe_o))]
-        places = {id(t): (f"[{t['address']}]:{t['port']}" if ":" in t["address"]
-                          else f"{t['address']}:{t['port']}") for t in targets}
-        where_w = max(len(w) for w in places.values()) + 2
+        where_w = max(len(target_text(t)) for t in targets) + 2
         for t in targets:
-            where = places[id(t)]
+            where = target_text(t)
             now = f"{t['connect_ms']:.1f} ms" if t["connect_ms"] is not None else str(t["reason"])
             body.append(joined(v.width, [st(pad(f"    {where}", 4 + where_w), "muted"), pad(now, 10, True),
                                          st(f"   failed {t['failures']}/{t['attempts']} recent",
@@ -933,17 +949,7 @@ def body_storage(v):
         widths = detail_widths(v.width, disks, [13, 13, 17, 12])
         body += ["", v.row(widths, ["  DISK I/O", "READ", "WRITE", "OPS/S r · w", "I/O TIME"],
                            ["muted bold"] + ["muted"] * 4)]
-        for d in disks[:MAX_ROWS]:
-            r = d["rates"]
-            if not r:
-                body.append(v.no_rate(widths, d["name"], d))
-                continue
-            idle = not r["read_bytes_per_s"] and not r["write_bytes_per_s"]
-            body.append(v.row(widths, [f"    {d['name']}", per_s(r["read_bytes_per_s"]), per_s(r["write_bytes_per_s"]),
-                                       f"{r['reads_per_s']:.0f} · {r['writes_per_s']:.0f}", f"{100 * r['io_time_ratio']:.1f} %"],
-                              ["muted"] * 5 if idle else [None, None, None, "muted", None]))
-        if len(disks) > MAX_ROWS:
-            body.append(st(f"    +{len(disks) - MAX_ROWS} more disks (all in /api/stats)", "muted"))
+        body += v.disk_rows(widths, disks)
         body.append(st(pad("I/O time = share of window with I/O in flight", min(v.width, max(sum(widths), 46)), True), "muted"))
     return body
 
@@ -1003,15 +1009,7 @@ def body_power(v):
                 continue
             charge = (f"{b['percent']} %" if b.get("percent") is not None
                       else b.get("capacity_level") or "charge n/a")
-            full = b.get("charge_full_uah") or b.get("energy_full_uwh")
-            design = b.get("charge_full_design_uah") or b.get("energy_full_design_uwh")
-            detail = " · ".join(x for x in (
-                b.get("status") or "",
-                b.get("voltage_uv") is not None and f"{b['voltage_uv'] / 1e6:.2f} V",
-                b.get("current_ua") is not None and f"{b['current_ua'] / 1e6:+.2f} A",
-                b.get("power_uw") is not None and f"{b['power_uw'] / 1e6:.2f} W",
-                b.get("cycle_count") is not None and f"{b['cycle_count']} cycles",
-                full and design and f"{full * 100 / design:.0f} % of design") if x)
+            detail = " · ".join(battery_readings(b, " %"))
             lv = low_level(b["percent"], LIMITS["battery"]) if b.get("percent") is not None else "ok"
             head = [st(f"    {b['name']:<{name_w}}", "muted"), st(pad(charge, 7), tone(lv) or "bold", "bold" if tone(lv) else None)]
             bw = min(14 if v.wide else 8, max(6, v.width - 10 - name_w - vlen(charge) - vlen(detail)))
@@ -1036,10 +1034,8 @@ def body_system(v):
     """The web System tab: the platform, uptime and whatever the board reported about itself. The power
     mode stays in Power & battery, as on the web page."""
     s, st = v.s, v.st
-    up = int(s["uptime"])
     system = s.get("system") if isinstance(s.get("system"), dict) else {}
-    rows = [("Model", s["model"]), ("Platform", s["platform"]),
-            ("Uptime", f"{up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}")]
+    rows = [("Model", s["model"]), ("Platform", s["platform"]), ("Uptime", uptime_text(s["uptime"]))]
     rows += [(label, system[key]) for key, label in SYSTEM_ROWS if system.get(key)]
     # Board-specific fields keep their own key, as the web page adds them without rebuilding its rows.
     rows += [(key, value) for key, value in system.items() if value and key not in dict(SYSTEM_ROWS)]
@@ -1063,8 +1059,7 @@ def screen(s, obs, width, height, st, status, history, view="overview", offset=0
     offset and the page size go back in status["scroll"], so the caller scrolls by what was drawn."""
     wide = width >= WIDE
     sys_ = s.get("system") or {}
-    up = int(s["uptime"])
-    uptime = f"up {up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}"
+    uptime = f"up {uptime_text(s['uptime'])}"
 
     state = status["state"]
     color = {"live": "ok", "partial": "warn", "offline": "crit"}[state]
