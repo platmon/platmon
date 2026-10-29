@@ -4,4 +4,4 @@
 !frontends/web
 !native
 native/target
-!runtime/__init__.py
+!VERSION

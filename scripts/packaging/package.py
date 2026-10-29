@@ -5,7 +5,6 @@ The server is the static Rust binary from native/build.sh; the `platmon` client 
 No interpreter, OS software, build tools or hardware binaries are bundled.
 """
 import argparse
-import ast
 from email.utils import parsedate_to_datetime
 import gzip
 import hashlib
@@ -20,7 +19,7 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ("platmon.py", "platmon.ini", "README.md", "LICENSE",
+SOURCE_FILES = ("VERSION", "platmon.py", "platmon.ini", "README.md", "LICENSE",
                 "CHANGELOG.md", "pytest.ini", "deploy/docker/Dockerfile",
                 "deploy/docker/compose.yaml", "deploy/docker/compose.jetson.yaml", ".dockerignore", ".gitignore")
 SOURCE_DIRS = ("collector", "runtime", "frontends", "native", "scripts", "packaging", "deploy", "benchmarks", "docs",
@@ -44,14 +43,11 @@ def file_md5(path):
 
 
 def version(root=ROOT):
-    """Read the single source without importing Linux collectors during a build."""
-    tree = ast.parse((root / "runtime/__init__.py").read_text(encoding="utf-8"))
-    values = [ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign)
-              and any(isinstance(t, ast.Name) and t.id == "VERSION" for t in node.targets)]
-    if len(values) != 1 or not isinstance(values[0], str) or not re.fullmatch(
-            r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", values[0]):
-        raise ValueError("runtime/__init__.py must define one VERSION = 'MAJOR.MINOR.PATCH'")
-    return values[0]
+    """The single source: the VERSION file, one line MAJOR.MINOR.PATCH."""
+    value = (root / "VERSION").read_text(encoding="utf-8")
+    if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\n?", value):
+        raise ValueError("VERSION must hold one line MAJOR.MINOR.PATCH")
+    return value.strip()
 
 
 def source_files(root):

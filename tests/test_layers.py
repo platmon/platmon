@@ -60,7 +60,7 @@ def test_the_allowed_exception_is_still_used():
         assert (module, name) in set(imports(ROOT / rel))
 
 
-def test_cli_version_copy_matches_the_service():
+def test_version_copies_match_the_version_file():
     from frontends import cli
     from runtime import VERSION
-    assert cli.VERSION == VERSION
+    assert cli.VERSION == VERSION == (ROOT / "VERSION").read_text(encoding="utf-8").strip()

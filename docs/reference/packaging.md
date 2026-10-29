@@ -3,7 +3,7 @@
 > **TL;DR**
 > - One `.deb` per architecture (amd64, arm64, armhf) with the static native server; the `platmon` command
 >   needs the host's Python 3.9+.
-> - `VERSION` in `runtime/__init__.py` is the single version source; releases are built once in CI and
+> - The `VERSION` file is the single version source; releases are built once in CI and
 >   published to GitHub Releases and the APT repository.
 > - Covers install, upgrade, migration from source or Docker installs, rollback and the release procedure.
 
@@ -31,11 +31,10 @@ and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
 
 ## Versioning
 
-`VERSION` in `runtime/__init__.py` is the single source of the application version. The
-service imports it; the builder reads that assignment without importing the collector and writes it
-into the package's unit (`--app-version`), which the native server shows on its web page and logs at
+The `VERSION` file (one line, `MAJOR.MINOR.PATCH`) is the single source of the application version.
+The builder reads it and writes it into the package's unit (`--app-version`), which the native server shows on its web page and logs at
 start. `frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/test_layers.py`
-fails until both say the same, so a release changes both. Check versions with:
+fails until they say the same, so a release changes both. Check versions with:
 
 ```sh
 platmon --version
@@ -267,7 +266,7 @@ directories are never automatically deleted by subsequent updates or uninstall.
 
 ## Release procedure
 
-1. Update VERSION in `runtime/__init__.py` (and its copy in `frontends/cli.py`) and the changelog. Review the scoped change and run
+1. Update `VERSION` (and its copy in `frontends/cli.py`) and the changelog. Review the scoped change and run
    `git diff --check`, `pytest -v`, `native/build.sh`, `native/build-armhf.sh`, the build, package checker and Lintian.
 2. Test fresh install, upgrade with an edited INI, downgrade, remove/purge and existing
    installation migration. CI uses isolated containers for the dpkg lifecycle and, with systemd

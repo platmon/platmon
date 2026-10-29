@@ -1,7 +1,7 @@
 # Changelog
 
 Versions use MAJOR.MINOR.PATCH. The application version is defined once in
-`runtime/__init__.py` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
+`VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
 ## Unreleased

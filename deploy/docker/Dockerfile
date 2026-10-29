@@ -7,7 +7,6 @@
 FROM rust:1.88-slim AS build
 WORKDIR /src
 COPY native ./native
-COPY runtime/__init__.py ./VERSION.py
 RUN set -eu; \
     case "$(uname -m)" in \
       x86_64) target=x86_64-unknown-linux-musl ;; \
@@ -20,14 +19,13 @@ RUN set -eu; \
     RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static" \
       cargo build --release --locked --no-default-features --target "$target"; \
     mkdir /out; \
-    cp "target/$target/release/platmon-native" /out/; \
-    sed -n 's/^VERSION = "\([^"]*\)".*/\1/p' ../VERSION.py > /out/VERSION; \
-    test -s /out/VERSION
+    cp "target/$target/release/platmon-native" /out/
 
 # A plain Debian base: the server is one static binary, so no NVIDIA runtime, L4T base or Python is needed.
 FROM debian:13-slim
 WORKDIR /opt/platmon
-COPY --from=build /out/platmon-native /out/VERSION ./
+COPY --from=build /out/platmon-native ./
+COPY VERSION ./
 COPY platmon.ini ./
 COPY frontends/web ./frontends/web
 
