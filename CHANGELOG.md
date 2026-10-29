@@ -23,6 +23,9 @@ API schema versions are independent of release versions.
 - The `platmon` command no longer keeps its own copy of the board temperature levels for servers older than
   1.0.0, which sent none: it uses the level the server sends, and 80/90 °C when `/api/status` cannot be
   read, as the web page does.
+- `platmon` writing to a pipe or a log no longer puts screen-clearing escapes before each snapshot: the
+  snapshots follow one another with a blank line between them. A console that is not an interactive Unix
+  terminal (Windows) still redraws in place.
 
 ## 1.6.0 — 2026-10-25
 

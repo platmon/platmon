@@ -1315,8 +1315,12 @@ def main(argv=None):
             live(addr, a.interval, fetch, first, a.view or "overview")
             return
         out = render(*first)  # not a terminal (a pipe, a log, Windows): the plain screen as before
+        # A console (Windows) redraws it in place; a pipe or a log gets no escapes, a blank line between snapshots.
+        clear = "\033[H\033[J" if sys.stdout.isatty() else ""
+        lead = clear
         while True:
-            print("\033[H\033[J" + out, flush=True)
+            print(lead + out, flush=True)
+            lead = clear or "\n"
             time.sleep(a.interval)
             try:
                 out = render(*fetch())
