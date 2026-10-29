@@ -26,7 +26,7 @@ fn rss_kib() -> (i64, i64) {
 }
 
 #[cfg(target_os = "linux")]
-/// What the loop reports besides CPU (as the Python collector's loop did, tools/bench.sh): collection times, missed 1 s deadlines,
+/// What the loop reports besides CPU (as the Python collector's loop did, tools/perf/bench.sh): collection times, missed 1 s deadlines,
 /// RSS over the run, per group how often each state came up, the number of source ids of the last
 /// collection, and how many different read scopes (read_scope) came up, with the last one.
 #[derive(Default)]
@@ -250,7 +250,7 @@ pub fn collect_command(args: &[String]) {
 }
 
 #[cfg(target_os = "linux")]
-/// observe-script TARGETS TIMEOUT (tools/fixture.py, the slow groups): for each stdin line, one observation
+/// observe-script TARGETS TIMEOUT (tools/equivalence/fixture.py, the slow groups): for each stdin line, one observation
 /// of storage, wifi, battery and probe (with those [probe] targets and timeout), printed as one JSON line
 /// {"observations": {group: {"collector", "data"}}}.
 pub fn observe_script(args: &[String]) {
@@ -310,7 +310,7 @@ fn script_now() -> i64 {
     SCRIPT_NOW.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// The runtime script (tools/runtime_fixture.py, against the Python service's recorded answers). One JSON
+/// The runtime script (tools/equivalence/runtime_fixture.py, against the Python service's recorded answers). One JSON
 /// operation per line, one JSON line out for each; every "now" also sets the clock that history, replay
 /// and the HTTP answers read:
 ///   {"op": "setup", "interval", "instance_id", "clock", "slow": [[name, interval], ...], "levels",

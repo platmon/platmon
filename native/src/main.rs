@@ -20,7 +20,7 @@
 //!   platmon-native health [CONFIG]    whether the server CONFIG configures answers: GET /api/stats on its
 //!                                     address, which it prints as "HOST PORT"; exit 0 on 200, 1 otherwise,
 //!                                     2 for a configuration serve refuses (the container's health check)
-//!   platmon-native runtime-script     tools/runtime_fixture.py: Sampler and slow-group operations with
+//!   platmon-native runtime-script     tools/equivalence/runtime_fixture.py: Sampler and slow-group operations with
 //!                                     given times and collections, one JSON line per stdin line
 // Elsewhere the shared helpers the Linux collectors call have no caller yet.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -85,7 +85,7 @@ fn main() {
 }
 
 /// config-check [CONFIG [PLATFORM [FRONTENDS]]]: the configuration as serve would use it, {"error": ...} if
-/// refused (tools/config_fixture.py compares it with platmon.load_config); empty CONFIG or PLATFORM: none,
+/// refused (tools/equivalence/config_fixture.py compares it with platmon.load_config's recorded answers); empty CONFIG or PLATFORM: none,
 /// FRONTENDS: the --frontends value.
 fn config_check(args: &[String]) {
     let platform = args.get(1).map(String::as_str).filter(|p| !p.is_empty());

@@ -22,7 +22,7 @@ jobs:
       - run: pytest -v
 
   # The server: Rust tests and both static targets (native/build.sh), then the Python service's recorded
-  # answers (native/tools/golden) on fake trees, configurations and the runtime, and a live HTTP check.
+  # answers (native/tools/equivalence/golden) on fake trees, configurations and the runtime, and a live HTTP check.
   native:
     runs-on: ubuntu-latest
     steps:
@@ -39,10 +39,10 @@ jobs:
         env:
           SERVER: native/target/x86_64-unknown-linux-musl/release/platmon-native
         run: |
-          python3 native/tools/config_fixture.py "$SERVER"
-          python3 native/tools/runtime_fixture.py "$SERVER"
-          native/tools/fixture.sh
-          python3 native/tools/live_http.py "$SERVER"
+          python3 native/tools/equivalence/config_fixture.py "$SERVER"
+          python3 native/tools/equivalence/runtime_fixture.py "$SERVER"
+          native/tools/equivalence/fixture.sh
+          python3 native/tools/equivalence/live_http.py "$SERVER"
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server

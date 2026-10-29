@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden", "config.json")
 
 CASES = [  # name, file text (None: no file), platform

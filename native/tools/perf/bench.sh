@@ -3,7 +3,7 @@
 # 120 s each, one JSON line per window. Each line has CPU, RSS over the run, collection times, missed deadlines
 # and how often each group was in each state, so a cheaper run can be told apart from one that read less.
 # stderr (group problems as the service logs them) goes to OUT.jsonl.log.
-#   native/tools/bench.sh PATH/TO/platmon-native OUT.jsonl PATH/TO/OTHER
+#   native/tools/perf/bench.sh PATH/TO/platmon-native OUT.jsonl PATH/TO/OTHER
 set -euo pipefail
 bin=$1 out=$2 other=$3
 : > "$out"; : > "$out.log"

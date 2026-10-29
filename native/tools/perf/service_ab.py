@@ -52,8 +52,9 @@ import tempfile
 import threading
 import time
 
-import walk
-import worker
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # native/tools: walk.py, worker.py
+import walk  # noqa: E402
+import worker  # noqa: E402
 
 TICK = os.sysconf("SC_CLK_TCK")
 STREAMS = ("core", "storage", "wifi", "battery", "probe")

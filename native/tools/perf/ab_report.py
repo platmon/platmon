@@ -15,9 +15,11 @@ not hold or fetch the same data as the baseline's, or lacks the peak's readings,
   python3 ab_report.py --pss-budget FULL,PEAK,SETTLED OUT.jsonl     # MiB, for the host of OUT.jsonl"""
 import copy
 import json
+import os
 import sys
 
-import worker
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # native/tools: walk.py, worker.py
+import worker  # noqa: E402
 
 
 def mean(xs):

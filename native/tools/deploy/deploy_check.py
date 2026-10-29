@@ -49,9 +49,11 @@ import sys
 import threading
 import time
 
-import service_ab as ab
-import walk
-import worker
+TOOLS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path[:0] = [TOOLS, os.path.join(TOOLS, "perf")]  # walk.py, worker.py; service_ab.py
+import service_ab as ab  # noqa: E402
+import walk  # noqa: E402
+import worker  # noqa: E402
 
 PORT = 19797
 NATIVE, FAKE = "platmon-native-candidate.service", "platmon-native-candidate-fakesmi.service"
@@ -596,13 +598,11 @@ def setup(kind):
     def sha(path):
         with open(path, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
-    here = os.path.dirname(os.path.abspath(__file__))
     return {"kind": kind, "host": socket.gethostname(), "machine": os.uname().machine, "python": sys.version.split()[0],
             "user": os.getuid(), "binary_sha256": sha("/usr/lib/platmon-candidate/platmon-native"),
             "ini_sha256": ini_sha(), "units": {u: show(u, "FragmentPath", "User", "DynamicUser")
                                                for u in UNITS},
-            "tools_sha256": {f: sha(os.path.join(here, f))
-                             for f in ("deploy_check.py", "service_ab.py", "walk.py", "worker.py")},
+            "tools_sha256": {os.path.basename(f): sha(f) for f in (__file__, ab.__file__, walk.__file__, worker.__file__)},
             "production": production()}
 
 

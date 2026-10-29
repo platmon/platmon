@@ -4,7 +4,7 @@
 //! answer. Contract: docs/reference/api.md (/api/stats, /api/status).
 //!
 //! The state changes in begin() and finish(), which take the times as arguments, so the runtime script
-//! (tools/runtime_fixture.py) can drive the same code as the service's thread (run()).
+//! (tools/equivalence/runtime_fixture.py) can drive the same code as the service's thread (run()).
 use crate::json::{self, Value};
 use crate::metadata;
 use std::sync::{Arc, Condvar, Mutex};

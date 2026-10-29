@@ -45,11 +45,11 @@ import time
 import urllib.error
 import urllib.request
 
-import walk
-import worker
-
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(HERE))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+sys.path.insert(0, os.path.dirname(HERE))  # native/tools: walk.py, worker.py
+import walk  # noqa: E402
+import worker  # noqa: E402
 sys.path.insert(0, os.path.join(REPO, "frontends"))
 from cli import render  # noqa: E402  the terminal client, one standalone file
 
