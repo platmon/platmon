@@ -1,15 +1,15 @@
 # Docker observation scope
 
 > **TL;DR**
-> - What the container sees, checked on a Jetson Orin Nano (2026-10-09): CPU, memory, GPU, sensors and
->   disks match the host with the supplied mounts.
+> - What the container sees, checked on a Jetson Orin Nano (2026-10-09, and with the native image on
+>   2026-10-30): CPU, memory, GPU, sensors and disks match the host with the supplied mounts.
 > - Compose uses `network_mode: host` to see host network and Wi-Fi; still non-root, read-only mounts, no
 >   privileged mode.
 > - Filesystem capacity through file bind mounts is partial or `null`.
 
 Checked on Orin Nano on 2026-10-09 with native Linux Docker Engine, when the image ran the Python
-server. The image now runs the native server, which reads the same files, mounts and namespaces; this
-table was not checked again with it on the Orin. The same collector was read on the host, in the production bridge container, and in an isolated host-network container.
+server, and again with the native image on 2026-10-30 ([below](#native-image-check)): the host-network
+column holds for it. The same collector was read on the host, in the production bridge container, and in an isolated host-network container.
 Dynamic readings differ in time; this comparison checks availability, identity and scope.
 
 | Item | Bridge container | Host-network configuration |
@@ -28,6 +28,31 @@ Dynamic readings differ in time; this comparison checks availability, identity a
 | PSI | unavailable on the Orin host too; kernel lacks CONFIG_PSI | networking cannot enable kernel PSI |
 | Probe | configured targets use the container network; loopback is container-local | loopback means the host; empty targets remain idle |
 | History / CLI / web | only records/displays the data the collectors can see | restored Network/Wi-Fi data becomes available to the same consumers |
+
+## Native image check
+
+On 2026-10-30 the image built from `main` at `0ba5e2c` (the native server on `debian:13-slim`, 142 MB,
+built on the Orin) ran on the Orin Nano (L4T R36.5.2, Docker 29.9.2) with the shipped Compose and
+Jetson settings (host network, host UTS, the device tree, root and nvpmodel mounts), on its own INI at
+127.0.0.1:19799, beside the production `platmon.service` (the 1.6.0 package) on 9797. Both were read
+after every slow group had observed once:
+
+- the same: platform, model, power mode, OS, kernel, L4T and host name; six CPUs with their clocks; GPU
+  usage and clocks; six temperatures, three INA3221 rails and two fans with the same 20 sensor source
+  ids; every group's state and reason (NPU `not_detected`, PSI `not_exposed`, battery unavailable); the
+  network namespace id and all nine interfaces with their ifindex; the NVMe disk; Wi-Fi `wlP1p1s0`
+  connected with a dBm signal and the same namespace and ifindex; 15 partitions; the clock
+  (`boottime`); the `/text` sections
+- storage: the root filesystem with the same capacity (981,814,759,424 bytes), under the container's
+  own mount paths; `/boot/efi` only with the extra bind of [Filesystems](#filesystems), then the same
+  66,059,264 bytes as the host
+- history: 40 series against the host's 44: the EFI filesystem's two and two of a `veth` interface that
+  had gone before the container started (the host's 600 s window still held it)
+- the image's health check `healthy` on the non-default port; user 65534:65534, not privileged;
+  `docker stop` ended it in 0.17 s with exit code 0
+
+The container, the image and the staged source were removed afterwards; the production service did not
+restart (`NRestarts=0`), and the earlier Compose container and images on the board were not touched.
 
 ## Networking
 
