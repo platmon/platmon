@@ -24,7 +24,7 @@ class Worker(threading.Thread):
             self.value = self.target(*self.args)
         except BaseException as e:  # everything, kept for the result: the thread ends either way
             frames = traceback.extract_tb(e.__traceback__)
-            mine = [f for f in frames if os.path.dirname(os.path.abspath(f.filename)) == HERE]
+            mine = [f for f in frames if os.path.abspath(f.filename).startswith(HERE + os.sep)]
             where = (mine or frames)[-1]  # the last line of these tools, not of the library it failed in
             self.error = f"{type(e).__name__}: {e}"[:200] + f" ({where.name}:{where.lineno})"
         finally:

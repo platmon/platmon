@@ -1,0 +1,1490 @@
+[
+ {
+  "name": "no file",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": [
+     85.0,
+     95.0
+    ],
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "empty file",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "the defaults written out",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": [
+     75.0,
+     80.0
+    ],
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "everything set",
+  "python": {
+   "core": {
+    "interval": 2.0
+   },
+   "network": {
+    "enabled": false
+   },
+   "disk_io": {
+    "enabled": false
+   },
+   "storage": {
+    "enabled": false,
+    "interval": 60.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 1.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 3600.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 30.0,
+    "timeout": 0.5,
+    "targets": "192.0.2.1:443, [2001:DB8::1]:22, 10.0.0.1:1"
+   },
+   "history": {
+    "enabled": true,
+    "retention": 60.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 1.0,
+    "max_bytes": 1048576
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "127.0.0.1",
+    "port": 80,
+    "web": false
+   },
+   "thresholds": {
+    "cpu": "70,95",
+    "gpu": "1, 100",
+    "memory": "50.5 , 60",
+    "filesystem": "90, 99",
+    "temperature": "60, 150",
+    "battery": "50, 5",
+    "wifi": "-60, -90"
+   },
+   "levels": {
+    "cpu": [
+     70.0,
+     95.0
+    ],
+    "gpu": [
+     1.0,
+     100.0
+    ],
+    "memory": [
+     50.5,
+     60.0
+    ],
+    "filesystem": [
+     90.0,
+     99.0
+    ],
+    "temperature": [
+     60.0,
+     150.0
+    ],
+    "battery": [
+     50.0,
+     5.0
+    ],
+    "wifi": [
+     -60.0,
+     -90.0
+    ]
+   },
+   "targets": [
+    [
+     "192.0.2.1",
+     443
+    ],
+    [
+     "2001:db8::1",
+     22
+    ],
+    [
+     "10.0.0.1",
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "name": "comments, colons, case, continuation",
+  "python": {
+   "core": {
+    "interval": 0.5
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80,\n90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "a value continued after a blank line",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80,\n\n90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "DEFAULT keys reach every section",
+  "python": {
+   "error": "[core] unknown key(s): enabled; valid: interval"
+  }
+ },
+ {
+  "name": "header with trailing text",
+  "python": {
+   "core": {
+    "interval": 3.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "no section header",
+  "python": {
+   "error": "cannot parse config ${dir}/case8.ini: File contains no section headers.\nfile: '${dir}/case8.ini', line: 1\n'interval = 1\\n'"
+  }
+ },
+ {
+  "name": "duplicate section",
+  "python": {
+   "error": "cannot parse config ${dir}/case9.ini: While reading from '${dir}/case9.ini' [line  2]: section 'core' already exists"
+  }
+ },
+ {
+  "name": "duplicate option",
+  "python": {
+   "error": "cannot parse config ${dir}/case10.ini: While reading from '${dir}/case10.ini' [line  3]: option 'interval' in section 'core' already exists"
+  }
+ },
+ {
+  "name": "parsing errors",
+  "python": {
+   "error": "cannot parse config ${dir}/case11.ini: Source contains parsing errors: '${dir}/case11.ini'\n\t[line  2]: 'garbage\\n'\n\t[line  3]: '= 3\\n'\n\t[line  5]: 'more garbage\\n'"
+  }
+ },
+ {
+  "name": "unknown section",
+  "python": {
+   "error": "unknown config section(s): cores, zzz"
+  }
+ },
+ {
+  "name": "removed section",
+  "python": {
+   "error": "[terminal] is no longer supported: the terminal view is now the `platmon` command (frontends/cli.py); delete this section"
+  }
+ },
+ {
+  "name": "unknown key",
+  "python": {
+   "error": "[core] unknown key(s): intervall, z; valid: interval"
+  }
+ },
+ {
+  "name": "not a bool",
+  "python": {
+   "error": "[network] enabled = 'maybe' is not a valid bool"
+  }
+ },
+ {
+  "name": "not an int",
+  "python": {
+   "error": "[http] port = '80.0' is not a valid int"
+  }
+ },
+ {
+  "name": "not a float",
+  "python": {
+   "error": "[core] interval = 'fast' is not a valid float"
+  }
+ },
+ {
+  "name": "float with underscores",
+  "python": {
+   "core": {
+    "interval": 10.5
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "float bad underscore",
+  "python": {
+   "error": "[core] interval = '1__0' is not a valid float"
+  }
+ },
+ {
+  "name": "interval too small",
+  "python": {
+   "error": "[core] interval = 0.05 is out of range (0.1 to 3600)"
+  }
+ },
+ {
+  "name": "interval nan",
+  "python": {
+   "error": "[core] interval = nan is out of range (0.1 to 3600)"
+  }
+ },
+ {
+  "name": "interval inf",
+  "python": {
+   "error": "[core] interval = inf is out of range (0.1 to 3600)"
+  }
+ },
+ {
+  "name": "storage interval too small",
+  "python": {
+   "error": "[storage] interval = 4.9 is out of range (5 to 3600)"
+  }
+ },
+ {
+  "name": "port too large",
+  "python": {
+   "error": "[http] port = 65536 is out of range (1 to 65535)"
+  }
+ },
+ {
+  "name": "port zero",
+  "python": {
+   "error": "[http] port = 0 is out of range (1 to 65535)"
+  }
+ },
+ {
+  "name": "max_bytes too small",
+  "python": {
+   "error": "[replay] max_bytes = 1048575 is out of range (1048576 to 67108864)"
+  }
+ },
+ {
+  "name": "probe timeout too large",
+  "python": {
+   "error": "[probe] timeout = 10.5 is out of range (0.1 to 10)"
+  }
+ },
+ {
+  "name": "history retention too short",
+  "python": {
+   "error": "[history] retention = 59.0 is out of range (60 to 3600)"
+  }
+ },
+ {
+  "name": "thresholds one number",
+  "python": {
+   "error": "[thresholds] cpu = '80': give two numbers, warning then critical, e.g. 80, 90"
+  }
+ },
+ {
+  "name": "thresholds three numbers",
+  "python": {
+   "error": "[thresholds] gpu = '1, 2, 3': give two numbers, warning then critical, e.g. 80, 90"
+  }
+ },
+ {
+  "name": "thresholds reversed",
+  "python": {
+   "error": "[thresholds] memory = '90, 80': need 0 < warning < critical <= 100"
+  }
+ },
+ {
+  "name": "thresholds above 100",
+  "python": {
+   "error": "[thresholds] cpu = '90, 101': need 0 < warning < critical <= 100"
+  }
+ },
+ {
+  "name": "temperature up to 150",
+  "python": {
+   "error": "[thresholds] temperature = '100, 151': need 0 < warning < critical <= 150"
+  }
+ },
+ {
+  "name": "battery high is good",
+  "python": {
+   "error": "[thresholds] battery = '10, 20': a low reading is the bad one, so need 100% > warning > critical > 0%"
+  }
+ },
+ {
+  "name": "wifi above 0",
+  "python": {
+   "error": "[thresholds] wifi = '1, -80': a low reading is the bad one, so need 0 dBm > warning > critical > -120 dBm"
+  }
+ },
+ {
+  "name": "thresholds not numbers",
+  "python": {
+   "error": "[thresholds] filesystem = 'a, b': give two numbers, warning then critical, e.g. 80, 90"
+  }
+ },
+ {
+  "name": "thresholds nan",
+  "python": {
+   "error": "[thresholds] cpu = 'nan, 90': need 0 < warning < critical <= 100"
+  }
+ },
+ {
+  "name": "probe target without port",
+  "python": {
+   "error": "[probe] targets: target '192.0.2.1': expected address:port"
+  }
+ },
+ {
+  "name": "probe target port 0",
+  "python": {
+   "error": "[probe] targets: target '192.0.2.1:0': expected address:port"
+  }
+ },
+ {
+  "name": "probe IPv6 unbracketed",
+  "python": {
+   "error": "[probe] targets: target '2001:db8::1:22': write an IPv6 address as [address]:port"
+  }
+ },
+ {
+  "name": "probe name, not an address",
+  "python": {
+   "error": "[probe] targets: 'example.com' does not appear to be an IPv4 or IPv6 address"
+  }
+ },
+ {
+  "name": "probe IPv4 leading zero",
+  "python": {
+   "error": "[probe] targets: '192.0.02.1' does not appear to be an IPv4 or IPv6 address"
+  }
+ },
+ {
+  "name": "probe five targets",
+  "python": {
+   "error": "[probe] targets: at most 4 targets"
+  }
+ },
+ {
+  "name": "probe twice",
+  "python": {
+   "error": "[probe] targets: a target is listed twice"
+  }
+ },
+ {
+  "name": "probe same after normalizing",
+  "python": {
+   "error": "[probe] targets: a target is listed twice"
+  }
+ },
+ {
+  "name": "probe slower than its interval",
+  "python": {
+   "error": "[probe] interval must be longer than timeout × number of targets (they are probed one after another)"
+  }
+ },
+ {
+  "name": "probe empty items",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ", 192.0.2.1:1 ,,"
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": [
+    [
+     "192.0.2.1",
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "name": "nothing to run",
+  "python": {
+   "error": "nothing to run: every output is disabled; set enabled = yes in [http] (or pass --frontends)"
+  }
+ },
+ {
+  "name": "--frontends http over enabled = no",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "--frontends http, already enabled",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "--frontends http twice",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "an empty --frontends keeps the file",
+  "python": {
+   "error": "nothing to run: every output is disabled; set enabled = yes in [http] (or pass --frontends)"
+  }
+ },
+ {
+  "name": "an unknown frontend",
+  "python": {
+   "error": "unknown frontend(s): web; choose from http"
+  }
+ },
+ {
+  "name": "unknown frontends sorted, once each",
+  "python": {
+   "error": "unknown frontend(s): aa, zz; choose from http"
+  }
+ },
+ {
+  "name": "a trailing comma: an empty name",
+  "python": {
+   "error": "unknown frontend(s): ; choose from http"
+  }
+ },
+ {
+  "name": "names are case-sensitive",
+  "python": {
+   "error": "unknown frontend(s): HTTP; choose from http"
+  }
+ },
+ {
+  "name": "a space is part of the name",
+  "python": {
+   "error": "unknown frontend(s):  http; choose from http"
+  }
+ },
+ {
+  "name": "a config error comes first",
+  "python": {
+   "error": "[core] interval = 'fast' is not a valid float"
+  }
+ },
+ {
+  "name": "a probe error comes first",
+  "python": {
+   "error": "[probe] targets: target '192.0.2.1': expected address:port"
+  }
+ },
+ {
+  "name": "--frontends http keeps the file's other settings",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 8080,
+    "web": false
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "serve: unknown frontend",
+  "python": [
+   2,
+   "unknown frontend(s): web; choose from http"
+  ]
+ },
+ {
+  "name": "serve: --frontends=VALUE",
+  "python": [
+   2,
+   "unknown frontend(s): web, zz; choose from http"
+  ]
+ },
+ {
+  "name": "serve: --frontends= keeps enabled = no",
+  "python": [
+   2,
+   "nothing to run: every output is disabled; set enabled = yes in [http] (or pass --frontends)"
+  ]
+ },
+ {
+  "name": "serve: the last --frontends counts",
+  "python": [
+   2,
+   "unknown frontend(s): web; choose from http"
+  ]
+ },
+ {
+  "name": "serve: --frontends before the file",
+  "python": [
+   2,
+   "nothing to run: every output is disabled; set enabled = yes in [http] (or pass --frontends)"
+  ]
+ },
+ {
+  "name": "serve: a config error before the frontends",
+  "python": [
+   2,
+   "[core] interval = 0.0 is out of range (0.1 to 3600)"
+  ]
+ }
+]

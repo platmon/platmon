@@ -21,44 +21,28 @@ jobs:
       - run: python -m pip install -r tests/requirements.txt
       - run: pytest -v
 
-  # The server: Rust tests and both static targets (native/build.sh), then the same answers as the Python
-  # service on fake trees, configurations, the runtime and a live HTTP check.
+  # The server: Rust tests and both static targets (native/build.sh), then the Python service's recorded
+  # answers (native/tools/equivalence/golden) on fake trees, configurations and the runtime, and a live HTTP check.
   native:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The Python the server was verified against (native/CANDIDATE.md, the Raspberry Pi's). Answers that
-      # differ between CPython releases (a malformed request version) are checked apart, on the server alone.
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13.5"
+          python-version: "3.13"
       - name: Build the server (Rust tests, amd64 and arm64, the system allocator)
         run: native/build.sh
       # Released; these runners cannot run 32-bit code, so armhf-userspace runs its package under QEMU.
       - name: Build the 32-bit ARM server (armhf)
         run: native/build-armhf.sh
-      - name: Compare with the Python service
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          SERVER: native/target/x86_64-unknown-linux-musl/release/platmon-native
-        # --record also rewrites the Python service's recorded answers (native/tools/golden.py): they must
-        # come out as committed, so the recorded answers the server is compared with stay the Python service's.
-        run: |
-          python3 native/tools/config_fixture.py "$SERVER" --record native/tools/golden/config.json
-          python3 native/tools/runtime_fixture.py "$SERVER" --record native/tools/golden/runtime
-          native/tools/fixture.sh --record
-          git status --porcelain -- native/tools/golden
-          git diff --stat -- native/tools/golden
-          git diff -U0 -- native/tools/golden | cut -c1-2000 | head -n 40
-          test -z "$(git status --porcelain -- native/tools/golden)"
-          python3 native/tools/live_http.py "$SERVER"
-      - name: Compare with the recorded answers alone
+      - name: Compare with the recorded answers
         env:
           SERVER: native/target/x86_64-unknown-linux-musl/release/platmon-native
         run: |
-          python3 native/tools/config_fixture.py "$SERVER" --golden native/tools/golden/config.json
-          python3 native/tools/runtime_fixture.py "$SERVER" --golden native/tools/golden/runtime
-          native/tools/fixture.sh --golden
+          python3 native/tools/equivalence/config_fixture.py "$SERVER"
+          python3 native/tools/equivalence/runtime_fixture.py "$SERVER"
+          native/tools/equivalence/fixture.sh
+          python3 native/tools/equivalence/live_http.py "$SERVER"
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server

@@ -54,7 +54,7 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   const full = attention({memory: {used: 7.6e9, total: 8e9, swap_total: 0}});
   assert(full.includes('Needs attention') && full.includes('<a class="pill crit" href="#resources">Memory'), 'memory 95% is critical');
   assert(attention({temperature: {cpu: 82}}).includes('pill warn'), 'not served by platmon: generic 80/90 °C');
-  run('LIMITS.temperature = [85, 95]');  // what the server sends for a Jetson Orin (tests/runtime/test_platmon.py)
+  run('LIMITS.temperature = [85, 95]');  // what the server sends for a Jetson Orin (native/src/config.rs, levels)
   const orin = attention({temperature: {cpu: 90, gpu: 86, soc: 40}});
   assert(orin.includes('href="#thermal">cpu') && orin.includes('href="#thermal">gpu') && !orin.includes('>soc'), 'every hot sensor');
   assert(orin.includes('pill warn') && !orin.includes('pill crit'), 'the served temperature level applies');

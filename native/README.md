@@ -2,9 +2,11 @@
 
 > **TL;DR**
 > - The Rust server the Debian package runs since 1.4.0: static musl binaries for x86_64, aarch64 and
->   armhf, a port of the Python service with the same HTTP API, `platmon.ini` and `/text`.
-> - Checked against the Python service on fake trees, configurations, the runtime and live HTTP (CI's
->   `native` job), then as a service on the boards and with the released Hub.
+>   armhf, a port of the Python service with the same HTTP API, `platmon.ini` and `/text`. Every
+>   installation runs it; the Python service was removed after 1.6.0.
+> - Checked against the Python service on fake trees, configurations, the runtime and live HTTP, then as
+>   a service on the boards and with the released Hub. CI's `native` job compares with its recorded
+>   answers (`tools/equivalence/golden/`).
 > - The Windows build collects every group except pressure, NPU, power, fans, power mode and board info,
 >   but is not released ([Windows](#windows-not-released)).
 
@@ -12,8 +14,9 @@ The platmon server the Debian package runs: a port of the Python service (`platm
 `runtime/`) that keeps its contracts, so that the two give the same answers. It began on 2026-10-18 as
 next step 1 of [rust-feasibility.md](../docs/performance/rust-feasibility.md); candidate 1
 ([CANDIDATE.md](CANDIDATE.md)) passed the [final comparison](#final-comparison-candidate-1) and became the
-packaged server in 1.4.0. The Python service, deprecated since 1.5.0, stays the reference it is compared
-with. The development record of the steps before candidate 1 (the step plans, the CPU runs of steps 1 and
+packaged server in 1.4.0. The Python service, deprecated in 1.5.0, was removed after 1.6.0; its answers,
+recorded before (`tools/equivalence/golden/`), stay the reference the server is compared with, and the
+results below that name it were measured against it while it was there. The development record of the steps before candidate 1 (the step plans, the CPU runs of steps 1 and
 2, the whole-service A/B of step 3C, the replay cost split and the allocator comparison) is in this file
 as of `b96aba8`.
 
@@ -124,7 +127,7 @@ Python service on fixtures), **verified on hardware** (also run live on a host b
 | area | implemented and compared | verified on hardware | unverified / unsupported |
 | --- | --- | --- | --- |
 | targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM (`arm-unknown-linux-musleabihf`, released as armhf) built by `build-armhf.sh`, checked on the Raspberry Pi 4 in 32-bit mode and its package under QEMU in CI ([below](#32-bit-arm)), no 32-bit kernel or ARMv6/ARMv7 board verified; `x86_64-pc-windows-msvc` builds, passes its unit tests and serves the required data in CI but is not released ([below](#windows-not-released)), so unsupported; other architectures unsupported |
-| core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`) | the fixtures' "not covered" lists below |
+| core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`, both servers at once, before the removal) | the fixtures' "not covered" lists below |
 | GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first; **the fallback on a real NVIDIA GPU under WSL2** (GeForce RTX 4070 Ti, Windows driver 610.88, `/usr/lib/wsl/lib/nvidia-smi`; [results](#nvidia-smi-on-an-nvidia-gpu-wsl2)) | the nvidia-smi fallback with a native Linux NVIDIA driver on a PC or server: **not verified on such hardware** (WSL2 and the fixtures only; NVIDIA does not promise a stable nvidia-smi output); amdgpu fixture only; NVML unsupported; clocks of 2^128 Hz and more refused (below) |
 | slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
 | configuration | `platmon.ini` as `load_config` reads and checks it, `--frontends` after it (67 cases, also the two servers' refusals) | on the three hosts (Python 3.14, 3.10, 3.13) | Unicode digits and whitespace in numbers, non-UTF-8 file names and files; argparse's abbreviations (`--front`) and a value that starts with `-` are unsupported |
@@ -147,7 +150,7 @@ before that run):
 
 Python's PSS with full buffers was 32.8 / 25.4 / 21.8 MiB; its four-poller peak was not measured.
 
-**Python versions.** The comparisons run against the Python service on 3.14 (PC), 3.10 (Orin) and 3.13
+**Python versions.** The comparisons ran against the Python service on 3.14 (PC), 3.10 (Orin) and 3.13
 (Pi). Where Python itself differs, the server follows 3.11 and later: a NUL inside nvidia-smi's CSV is a
 character (3.10's `csv` refuses the whole answer, 3.11 and later refuse only that field's number).
 
@@ -165,29 +168,26 @@ binaries, running conditions and comparison, is fixed in [CANDIDATE.md](CANDIDAT
 ## Use
 
 ```sh
+B=native/target/x86_64-unknown-linux-musl/release/platmon-native
 native/build.sh                     # in a rust:1.88 container; unit tests, then the system allocator build for both targets
-native/build-cache-alloc.sh         # the cache-alloc build (a record, for bench.sh's C), into target/cache-alloc
+native/build-cache-alloc.sh         # the cache-alloc build (a record, for bench.sh), into target/cache-alloc
 native/build-armhf.sh               # the 32-bit ARM build (armhf) and its unit tests, not run here
-native/tools/fixture.sh             # deterministic equivalence on fake trees, in a container
-native/tools/fixture.sh --golden    # the same against the Python service's recorded answers (--record rewrites them)
-PYTHONPATH=. python3 native/tools/compare.py native/target/x86_64-unknown-linux-musl/release/platmon-native
-PYTHONPATH=. native/tools/bench.sh native/target/x86_64-unknown-linux-musl/release/platmon-native out.jsonl \
-    native/target/cache-alloc/x86_64-unknown-linux-musl/release/platmon-native
-python3 native/tools/runtime_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon-native
-PYTHONPATH=. python3 native/tools/config_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon-native
-python3 native/tools/runtime_fixture.py BINARY --golden native/tools/golden/runtime      # recorded answers, no Python service
-python3 native/tools/config_fixture.py BINARY --golden native/tools/golden/config.json   # the same
-PYTHONPATH=. python3 native/tools/live_http.py native/target/x86_64-unknown-linux-musl/release/platmon-native
-python3 native/tools/service_ab.py --tree PYTHON_TREE --binary BINARY --out ab.jsonl   # about 2.5 h; --quick to try it
-python3 native/tools/ab_report.py ab.jsonl
-BINARY replay-cost core.jsonl 20; python3 native/tools/replay_cost_py.py core.jsonl PYTHON_TREE 20
+native/tools/equivalence/fixture.sh                 # deterministic equivalence on fake trees, in a container
+python3 native/tools/equivalence/runtime_fixture.py $B
+python3 native/tools/equivalence/config_fixture.py $B
+python3 native/tools/equivalence/live_http.py $B
+native/tools/perf/bench.sh $B out.jsonl native/target/cache-alloc/x86_64-unknown-linux-musl/release/platmon-native
+python3 native/tools/perf/service_ab.py --tree . --binary $B --variant M=OTHER --order "B M M B" --out ab.jsonl   # about 2.5 h; --quick to try it
+python3 native/tools/perf/ab_report.py ab.jsonl
+$B replay-cost core.jsonl 20
 sudo bash native/tools/deploy/install.sh   # on a host, once, from a staged copy with the binary: the candidate units
-python3 native/tools/deploy_check.py checks --out checks.jsonl   # about 15 min; soak --hours N, report
-python3 native/tools/hub_check.py --hub HUB_EXECUTABLE --hosts pc,orin=USER@HOST --out DIR   # 13 min
+python3 native/tools/deploy/deploy_check.py checks --out checks.jsonl   # about 15 min; soak --hours N, report
+python3 native/tools/deploy/hub_check.py --hub HUB_EXECUTABLE --hosts pc,orin=USER@HOST --out DIR   # 13 min
 ```
 
-On a board, use a source tree of the same version as the reference (`PYTHONPATH=TREE`): since 1.4.0 the
-package installs no Python collector under `/usr/share/platmon`.
+`tools/` by purpose: `equivalence/` compares the server with the Python service's recorded answers,
+`perf/` measures builds against each other, `deploy/` runs a build as a candidate service; `walk.py` and
+`worker.py`, which the live, A/B and deployment checks share, and the Windows smoke test stay in `tools/`.
 
 The candidate units (`native/tools/deploy/`) run a build beside `platmon.service` on 127.0.0.1:19797:
 `platmon-native-candidate` and `platmon-native-candidate-fakesmi` (the same with a slow fake nvidia-smi).
@@ -195,60 +195,64 @@ Since 1.4.0 the checks are the native server's alone: `start` on the INI, then r
 port and the stops. The Python unit and its swap and rollback checks, used for candidate 1 below, are gone
 with the package's Python server; `uninstall.sh` still removes that unit where an earlier install left it.
 
-- `fixture.sh` / `fixture.py`: **the equivalence test.** Fake `/sys` and `/proc` trees are mounted over the
-  real ones in a throwaway container (a local Debian 13 image with python3, built on first use and never
-  pushed). Both collectors run as `nobody`, so file modes apply, on the same clocks (`platmon-native script`
-  and `fixture_py.py`; the elapsed clock advances 1 µs per call, wall time is fixed). Every output value is
-  compared exactly: JSON types, key order, numbers, read spans, required reads, `collectors` and source ids.
-  No tolerance. Each step states whether it expects a collection or a failed collection; both sides must
-  give that and exit with 0 at the end, and a side that exits, hangs or writes something else fails the
-  run. The timeout (30 s) is one deadline for the whole answer line, not for its first byte or each piece,
-  and a line over 4 MiB is not read further. Before the scenarios, the harness checks itself against fake
-  sides (`fixture.py --self-test`, no container needed): both failing where a collection is expected, a
-  nonzero exit, a hang (also after part of an answer, or an answer completed in pieces past the deadline),
-  output that is not JSON and an oversized line must each be reported. Interfaces are real ones in the
-  container's own network namespace (empty bridges, created and removed by ioctl, so the kernel gives them
-  their ifindex); the container has `NET_ADMIN` there and no network.
-- `golden.py` and `golden/`: **the Python service's answers, recorded** for `fixture.py`, `runtime_fixture.py`
-  and `config_fixture.py`, so that they can compare the server without the Python service once it is
-  removed. `--record` compares with the Python service as before and writes its answers; `--golden` replays
-  them as the Python side. A recording holds what depends on the tree and the requests alone: the host
-  name and tmpfs sizes are fixed (`fixture.sh`), the probe's ports are fixed, an HTTP response is kept
-  unstamped, and the kernel's release and machine, an interface's index, the network namespace's id and the
-  tmpfs devices are tokens resolved when replayed. CI records again and fails when the result is not the
-  committed one, then replays.
-- `compare.py`: **a live smoke test** on a real host, both collectors at the same moment. Structure, types,
-  identities, `collectors`, source ids, which values have a span, the clock source, and spans within 5 s of
-  each other are exact. Readings that move between two reads are only checked to be plausible (a GPU clock
-  is not negative, a usage is within 0–100 %): this does not show numeric equivalence.
-- `bench.sh`: the Python collector (A) against platmon-native (B), and optionally a second build (C), over
-  the same scope: A B B A, or A B C C B A, with 30 s warmup and 120 s windows. Each window reports its own
-  CPU (`getrusage`), RSS at the start, every 30 collections and the end, collection time p50/p95/max,
-  missed 1 s deadlines, how often each group was in each state, the number of source ids of the last
-  collection, and its read scope: the SHA-256 of the sorted source ids and the interfaces, disks and
-  pressure resources it read, with how many different scopes came up in the window. stderr goes to
-  `OUT.jsonl.log`.
-- `runtime_fixture.py`: **the runtime equivalence test.** The service's Sampler, slow groups, History,
-  Replay and HTTP server (`runtime_py.py`, wired as `platmon.py` wires them) and `platmon-native
-  runtime-script` get the same operations: a collection begins, a view is taken while it runs, it ends
-  with a given collection or error; the same for observations; raw HTTP requests to each side's real
-  server. Every answer must be the same text: the `/api/stats`, `/api/status` and `/api/observations`
-  bodies, and whole HTTP answers without their `Date` and `Server` headers and without the markup of error
-  pages (it differs between Python versions; the status line with the message stays). Runs on the host,
-  reads no tree; the same self-test and deadlines as `fixture.py`.
-- `config_fixture.py`: platmon.ini files read by `platmon.load_config` and `platmon-native config-check`:
-  every setting with its type, the levels and the probe targets, or the same refusal message, also with
-  a `--frontends` value; then refusals of `platmon.py` and `platmon-native serve` as processes.
-- `live_http.py`: **a live check of the service.** Starts the Python service and `platmon-native serve`
-  with the same platmon.ini (the defaults, each on its own local port), checks both the same way and
-  compares them (see its docstring). It stops only the two processes it started, by their handles.
-- `service_ab.py` / `ab_report.py`: **the whole-service A/B** of the final comparison (see their docstrings). Each run is
-  judged complete first (its threads' end through `worker.py`, the counts its phases imply), then by
-  the rules; an incomplete run is invalid. Both, `walk.py` and `worker.py` run their self-tests first.
-- `replay-cost` / `replay_cost_py.py`: what a replay page costs per record, by stage, on fixed core
-  publications, Rust and Python; both can write the page, to compare it byte for byte.
+- `equivalence/fixture.sh` / `fixture.py`: **the equivalence test.** Fake `/sys` and `/proc` trees are
+  mounted over the real ones in a throwaway container (a local Debian 13 image with python3, built on first
+  use and never pushed). The server runs as `nobody`, so file modes apply, on set clocks (`platmon-native
+  script`; the elapsed clock advances 1 µs per call, wall time is fixed), and its every output value is
+  compared exactly with the Python collector's recorded answer for the same tree and clocks: JSON types, key
+  order, numbers, read spans, required reads, `collectors` and source ids. No tolerance. Each step states
+  whether it expects a collection or a failed collection; both sides must give that and exit with 0 at the
+  end, and a side that exits, hangs or writes something else fails the run. The timeout (30 s) is one
+  deadline for the whole answer line, not for its first byte or each piece, and a line over 4 MiB is not
+  read further. Before the scenarios, the harness checks itself against fake sides (`fixture.py
+  --self-test`, no container needed): both failing where a collection is expected, a nonzero exit, a hang
+  (also after part of an answer, or an answer completed in pieces past the deadline), output that is not
+  JSON and an oversized line must each be reported. Interfaces are real ones in the container's own network
+  namespace (empty bridges, created and removed by ioctl, so the kernel gives them their ifindex); the
+  container has `NET_ADMIN` there and no network.
+- `equivalence/golden.py` and `golden/`: **the Python service's answers, recorded** (1.6.0, before its
+  removal) for `fixture.py`, `runtime_fixture.py` and `config_fixture.py`; `golden.py` replays them as the
+  Python side. A recording holds what depends on the tree and the requests alone: the host name and tmpfs
+  sizes are fixed (`fixture.sh`), the probe's ports are fixed, an HTTP response is kept unstamped, and the
+  kernel's release and machine, an interface's index, the network namespace's id and the tmpfs devices are
+  tokens resolved when replayed. They are not recorded again: a change of the server's answers is a change
+  of its contract.
+- `equivalence/runtime_fixture.py`: **the runtime equivalence test.** `platmon-native runtime-script` gets
+  the operations the Python service's Sampler, slow groups, History, Replay and HTTP server got when its
+  answers were recorded: a collection begins, a view is taken while it runs, it ends with a given
+  collection or error; the same for observations; raw HTTP requests to the real server. Every answer must
+  be the same text: the `/api/stats`, `/api/status` and `/api/observations` bodies, and whole HTTP answers
+  without their `Date` and `Server` headers and without the markup of error pages (it differed between
+  Python versions; the status line with the message stays). Runs on the host, reads no tree; the same
+  self-test and deadlines as `fixture.py`.
+- `equivalence/config_fixture.py`: platmon.ini files read by `platmon-native config-check` against
+  `platmon.load_config`'s recorded answers: every setting with its type, the levels and the probe targets,
+  or the same refusal message, also with a `--frontends` value; then `platmon-native serve`'s refusals as
+  a process; last, the shipped `platmon.ini` must read as no file does (every value in it is the default).
+- `equivalence/live_http.py`: **a live check of the service.** Starts `platmon-native serve` with the
+  defaults on a local port and checks it, against the Python service's answers where they do not depend on
+  the host (see its docstring). It stops only the process it started, by its handle.
+- `perf/bench.sh`: two builds (B, C) over the same scope, B C C B, with 30 s warmup and 120 s windows. Each
+  window reports its own CPU (`getrusage`), RSS at the start, every 30 collections and the end, collection
+  time p50/p95/max, missed 1 s deadlines, how often each group was in each state, the number of source ids
+  of the last collection, and its read scope: the SHA-256 of the sorted source ids and the interfaces,
+  disks and pressure resources it read, with how many different scopes came up in the window. stderr goes
+  to `OUT.jsonl.log`. Until the removal its A was the Python collector.
+- `perf/service_ab.py` / `ab_report.py`: **the whole-service A/B** of the final comparison (see their
+  docstrings), now between builds. Each run is judged complete first (its threads' end through
+  `worker.py`, the counts its phases imply), then by the rules; an incomplete run is invalid. Both,
+  `walk.py` and `worker.py` run their self-tests first.
+- `replay-cost`: what a replay page costs per record, by stage, on fixed core publications; it can write
+  the page. The Python side it was compared with went with the removal.
+- Removed with the Python service: `compare.py` (the live smoke test of both collectors at once, results
+  below) and the Python sides `fixture_py.py`, `observe_py.py`, `runtime_py.py`, `pyloop.py` and
+  `replay_cost_py.py`.
 
 ## Results
+
+The dated results below compared the server with the Python service while it was there; since its
+removal CI compares with its recorded answers (`fixture.sh`: 11 of 11 scenarios, `runtime_fixture.py`: 7 of
+7, `config_fixture.py`: 68 of 68 with the shipped-INI check, on 2026-10-29).
 
 ### Equivalence on fake trees
 
@@ -264,7 +268,7 @@ release gate records it). Harness self-test: 15 of 15 controls reported as they 
 | `bare` | a host with nothing optional: every group unavailable with its reason |
 | `pi` | Raspberry Pi device tree, a zone whose hwmon twin is named with `_`, a DRM card (`v3d`) named but not read |
 | `passive` | interfaces with and without an ifindex (one named beyond ASCII), physical, virtual and partition disks, a disk with the 11 fields of older kernels; rates, counters reset (no rate, a new baseline), in flight falling (a gauge, not a reset), an interface and a disk removed and others added, an interface back under its name with a new ifindex, a counter at 2^64−1 and one beyond (not a counter), bytes beyond 64 bits, a delta whose rate depends on the float conversion, windows of 1.7 s and 0.3 s, a gap, the same clock twice, the network namespace changed and the rates after it, a disk whose `/sys/block` link went away (its classification is kept) |
-| `slow` | the slow groups' readers (`observe-script` against `observe_py.py`), 5 steps: partitions of physical, virtual and missing disks, a row listed twice; mountinfo with the real device numbers of the container's mounts, a bind mount, an escaped path, read only from the super-options, a file bind listed before a directory (`ENOTDIR`, skipped), a mount point gone, another device behind a path (`mount_changed`), one nobody cannot reach, non-local and non-`/dev` mounts, lines that do not parse; Wi-Fi rows connected, down, with a moved ifindex, an unreadable carrier, no ifindex, a level that is not dBm and one of 0, out of range, not a row; batteries present, an empty bay, invalid numbers and text, an unreadable attribute, a UPS, external supplies, one without a type; TCP connects accepted, refused and unreachable (their times only checked to be ≥ 0); then mountinfo unreadable, files gone, files broken, nothing there |
+| `slow` | the slow groups' readers (`observe-script` against the recorded answers of the Python readers), 5 steps: partitions of physical, virtual and missing disks, a row listed twice; mountinfo with the real device numbers of the container's mounts, a bind mount, an escaped path, read only from the super-options, a file bind listed before a directory (`ENOTDIR`, skipped), a mount point gone, another device behind a path (`mount_changed`), one nobody cannot reach, non-local and non-`/dev` mounts, lines that do not parse; Wi-Fi rows connected, down, with a moved ifindex, an unreadable carrier, no ifindex, a level that is not dBm and one of 0, out of range, not a row; batteries present, an empty bay, invalid numbers and text, an unreadable attribute, a UPS, external supplies, one without a type; TCP connects accepted, refused and unreachable (their times only checked to be ≥ 0); then mountinfo unreadable, files gone, files broken, nothing there |
 | `nvidia` | a card no DRM reader knows (driver `nvidia`) and a fake `nvidia-smi` on PATH: two GPUs (the smallest UUID, 12.25 % rounded, MHz to Hz), `[N/A]` and `[Not Supported]`, out of range, `nan`, `inf`, underscores and exponents, quoted fields, CRLF and lone CR, a field over two lines, a NUL, no rows, an empty line, three fields, not a GPU UUID, a quote not closed, stdout and stderr that are not UTF-8, the Orin's real answer; past the 0.5 s limit, exit 3 after an answer, killed by a signal, the answer after (nothing kept), not executable, removed, back; then no process left (`/proc` of the container: no fake, `sleep` or zombie) and every run with the query's arguments |
 | `nvidia_alone` | no DRM card: nvidia-smi answers for the GPU; exit 3 (no GPU entry), no rows, back |
 | `nvidia_drm_first` | an i915 card and nvidia-smi present: the DRM reader answers, nvidia-smi is never run |

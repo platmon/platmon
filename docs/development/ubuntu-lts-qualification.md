@@ -52,7 +52,7 @@ covered by the packaging suite; they do not alter the runtime payload tested in 
 
 Lifecycle checks cover install, config-preserving upgrade and downgrade, disabled/masked state,
 remove/purge, source-install migration refusal and invalid configuration recovery. They deliberately
-do not run against a live systemd host. Extracted smoke checks start the Python server directly.
+do not run against a live systemd host. Extracted smoke checks start the packaged server directly.
 
 Reproduction entrypoints:
 

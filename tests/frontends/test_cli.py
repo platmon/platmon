@@ -1,7 +1,11 @@
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
 import pytest
 
-from frontends.cli import render
-from collector import collect
+from frontends.cli import aged, probe_lines, render, storage_lines, wifi_lines
 
 FULL = {
     "platform": "Jetson Orin", "model": "Test Board", "uptime": 90061, "power_mode": "MAXN_SUPER",
@@ -50,14 +54,6 @@ def test_render_bare_hides_missing(absent):
     assert absent not in render(BARE)
 
 
-def test_render_live_collect():
-    """The viewer accepts whatever the collector really returns on this host (CI runner, WSL, boards)."""
-    s = collect()
-    out = render(s)
-    assert s["platform"] in out
-    assert all(f"CPU{c['id']}" in out for c in s["cpu"])
-
-
 def test_render_server_without_system_info():
     """An older server has no "system" entry: no system line, no empty extra line."""
     old = {k: v for k, v in FULL.items() if k != "system"}
@@ -69,7 +65,30 @@ def test_render_unknown_system_entry():
     assert "firmware 1.2" in render(dict(FULL, system={"os": "X", "firmware": "1.2"}))
 
 
-CLI = str(__import__("pathlib").Path(__file__).parents[2] / "frontends" / "cli.py")
+CLI = str(Path(__file__).parents[2] / "frontends" / "cli.py")
+
+
+def serve(stats):
+    """A server that answers /api/stats with stats (None: 503, no current data) and nothing else (404, as an
+    older server for /api/observations)."""
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != "/api/stats":
+                return self.send_error(404)
+            code, body = (200, stats) if stats is not None else (503, {"error": "no current data", "code": "no_current_data"})
+            data = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
 
 
 def run_cli(*args):
@@ -79,7 +98,6 @@ def run_cli(*args):
 
 
 def test_once_prints_one_snapshot():
-    from tests.runtime.test_server import serve
     httpd, base = serve(FULL)
     try:
         r = run_cli("--once", base[len("http://"):])
@@ -109,7 +127,6 @@ def test_not_running_explains_and_exits():
 
 
 def test_no_current_data_is_explained():
-    from tests.runtime.test_server import serve
     httpd, base = serve(None)  # service up, but no snapshot: 503
     try:
         r = run_cli("--once", base[len("http://"):])
@@ -240,3 +257,66 @@ def test_cached_observation_crosses_stale_threshold_without_another_reply():
     current = aged(body, 2)
     assert current["groups"]["wifi"]["observation"]["stale"] is True
     assert body["groups"]["wifi"]["observation"]["stale"] is False
+
+
+def test_probe_lines():
+    obs = {"groups": {"probe": {"observation": {"data_age_ms": 4000, "stale": False}, "data": {"targets": [
+        {"address": "192.0.2.1", "port": 443, "connect_ms": 12.34, "reason": None, "attempts": 10, "failures": 1},
+        {"address": "2001:db8::1", "port": 22, "connect_ms": None, "reason": "timeout", "attempts": 3, "failures": 3}]}}}}
+    assert probe_lines(obs) == ["TCP   connect time, observed 4 s ago", "  192.0.2.1:443  12.3 ms  failed 1/10 recent",
+                                "  [2001:db8::1]:22  timeout  failed 3/3 recent"]
+    assert probe_lines(None) == [] and probe_lines({"groups": {"probe": {"data": None}}}) == []
+
+
+def test_wifi_lines():
+    def obs(interfaces, stale=False):
+        return {"groups": {"wifi": {"observation": {"data_age_ms": 3000, "stale": stale}, "data": {"interfaces": interfaces}}}}
+    row = {"connected": True, "connection_state": "connected", "signal_dbm": None, "signal_raw": None,
+           "link_quality": None, "noise_dbm": None}
+    rows = [dict(row, name="wlan0", signal_dbm=-64, link_quality=46),
+            dict(row, name="wlan1", connected=False, connection_state="disconnected"),
+            dict(row, name="eth9", signal_raw=70, link_quality=70)]
+    assert wifi_lines(obs(rows)) == ["WIFI  observed 3 s ago", "  wlan0  -64 dBm  link quality 46",
+                                     "  wlan1  not connected", "  eth9  signal 70 (unit not reported)  link quality 70"]
+    assert wifi_lines(obs(rows, stale=True))[0] == "WIFI  observed 3 s ago (not current)"
+    assert wifi_lines(obs([])) == [] and wifi_lines(None) == [] and wifi_lines({"groups": {"wifi": {"data": None}}}) == []
+
+
+def test_storage_lines_and_ages():
+    body = {"groups": {"storage": {"observation": {"id": 2, "data_age_ms": 4000, "stale": False}, "data": {
+        "filesystems": [{"device": "nvme0n1p1", "major": 259, "minor": 1, "fstype": "ext4", "total_bytes": 4 * 2**30,
+                         "used_bytes": 2**30, "available_bytes": 3 * 2**30,
+                         "mount_points": [{"path": "/", "read_only": False}, {"path": "/srv", "read_only": True}]},
+                        {"device": None, "major": 0, "minor": 40, "fstype": "btrfs", "total_bytes": None,
+                         "used_bytes": None, "available_bytes": None, "mount_points": [{"path": "/data", "read_only": False}]}],
+        "partitions": [{"name": "p1", "disk": "nvme0n1", "mount_points": ["/"]}, {"name": "p2", "disk": "nvme0n1", "mount_points": []}]}}}}
+    assert storage_lines(aged(body, 6)) == [
+        "STORAGE  observed 10 s ago",
+        "  / +1 more  ext4 nvme0n1p1  used 1.0G/4.0G (25%)  available 3.0G",
+        "  /data  btrfs 0:40  capacity unknown",
+        "  nvme0n1: 2 partitions, 1 mounted"]
+    assert body["groups"]["storage"]["observation"]["data_age_ms"] == 4000  # the answer itself is kept
+    stale = {"groups": {"storage": {**body["groups"]["storage"], "observation": {"data_age_ms": 95000, "stale": True}}}}
+    assert storage_lines(stale)[0] == "STORAGE  observed 95 s ago (not current)"
+    for odd in (None, {}, {"groups": {}}, {"groups": {"storage": {"state": "starting", "observation": None, "data": None}}},
+                {"groups": "x"}):
+        assert storage_lines(odd) == []
+
+
+def test_cli_imports_nothing_from_the_project():
+    """scripts/install-cli.sh copies frontends/cli.py alone onto machines without the service."""
+    import ast
+    root = Path(CLI).parents[1]
+    project = {p.stem for p in root.iterdir()}
+    imported = set()
+    for node in ast.walk(ast.parse(Path(CLI).read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            imported |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            imported.add("." if node.level else node.module.split(".")[0])
+    assert imported and not imported & (project | {"."})
+
+
+def test_cli_version_copy_matches_the_version_file():
+    from frontends import cli
+    assert cli.VERSION == (Path(CLI).parents[1] / "VERSION").read_text(encoding="utf-8").strip()

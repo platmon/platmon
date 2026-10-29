@@ -5,7 +5,7 @@
 >   [release readiness](../releases/readiness.md).
 > - Windows: unreleased until the real-PC checks below pass. Linux: armhf on a real device, a 24 h soak and
 >   an apt upgrade on a real device since 1.5.0, a remote probe target.
-> - Python server: deprecated in 1.5.0, removed in a later minor release once the steps below are done.
+> - Python server: deprecated in 1.5.0, removed for the next minor release (below); not released yet.
 > - Also recorded, not started: battery follow-ups and a desktop tray frontend.
 
 Merging, production rollout and releases always wait for the owner's approval. The staged plan of
@@ -65,22 +65,23 @@ Open since the gates in [release readiness](../releases/readiness.md):
 
 ## Python server removal
 
-The Python server (`platmon.py`, `collector/`, `runtime/`), which the source installation and the
-container run, was deprecated in 1.5.0. The owner decided on 2026-10-24 to remove it in a later **minor**
-release: the versioning contract covers the HTTP API, `platmon.ini` keys and command options, which do not
-change. Before the removal:
+The Python server (`platmon.py`, `collector/`, `runtime/`) was deprecated in 1.5.0. The owner decided on
+2026-10-24 to remove it in a later **minor** release: the versioning contract covers the HTTP API,
+`platmon.ini` keys and command options, which do not change. Done on `main`, not released yet:
 
-1. Move the source installation and the container to the native server (or a generic tarball). Done:
-   `deploy/systemd/install.sh` installs `native/build.sh`'s build, the Dockerfile builds the server in a
-   build stage and runs it on `debian:13-slim`, with `platmon-native health` as its health check.
-2. Freeze the Python service's answers into golden files, so the native equivalence checks keep their
-   reference.
-3. Port the Python collector tests (about 290) to Rust. Done for all 397 Python service tests, the runtime's
-   too: [Python test port](python-test-port.md) lists where each one is shown now.
-4. Split `native/tools/` by purpose (equivalence, performance, deployment), and move `VERSION` out of
-   `runtime/__init__.py` and the benchmarks with the removal. Renaming `native/` needs the owner's approval.
+1. The source installation and the container run the native server: `deploy/systemd/install.sh` installs
+   `native/build.sh`'s build, the Dockerfile builds the server in a build stage and runs it on
+   `debian:13-slim`, with `platmon-native health` as its health check.
+2. The Python service's answers are frozen in `native/tools/equivalence/golden/`; the equivalence checks
+   compare with them and no longer record.
+3. Its 397 tests were ported to Rust or mapped to the checks that show them:
+   [Python test port](python-test-port.md).
+4. The Python server, `benchmarks/` and their tests are removed; `native/tools/` is split into
+   `equivalence/`, `perf/` and `deploy/`; the application version is the `VERSION` file. Renaming
+   `native/` was not part of it (it needs the owner's approval).
 
-Keep file moves and logic changes in separate commits, with the native fixture checks after each move.
+The release that carries the removal (a minor, by the owner) still has to record it in
+[release readiness](../releases/readiness.md).
 
 ## Deferred after the battery group (2026-10-11)
 
@@ -90,7 +91,7 @@ the reasons do not have to be rediscovered. None of them is a defect in what shi
 | Item | What it would take | Why it waited |
 | --- | --- | --- |
 | A battery level in `[thresholds]` | Done: `battery` and `wifi` levels, warning above critical, compared at or below by `low_level()` / `lowLevel` (docs/guides/interfaces.md) | — |
-| `temp`, `time_to_empty_now`, `time_to_full_now` | Three more standard `power_supply` attributes in `collector/battery.py`; absent ones already cost nothing | `temp` is a temperature and `/api/stats` already has a `temperature` table, so where it belongs is a design question, not a field to add. The two time estimates are a driver's own extrapolation, not a reading |
+| `temp`, `time_to_empty_now`, `time_to_full_now` | Three more standard `power_supply` attributes in the battery reader (`native/src/collect/linux/observe.rs`); absent ones already cost nothing | `temp` is a temperature and `/api/stats` already has a `temperature` table, so where it belongs is a design question, not a field to add. The two time estimates are a driver's own extrapolation, not a reading |
 | What reading a battery costs the battery | A power measurement on a battery-powered host, with the group off and on | It is the reason the default interval is 60 s rather than the 10 s floor, and it is the one number behind that choice that is not measured |
 | Battery in a fleet server's own history | Done in `platmon-hub` ([#31](https://github.com/platmon/platmon-hub/pull/31)): `battery` is among the observation groups its history stores | — |
 
@@ -109,7 +110,7 @@ It would stay a source platmon **reads**, not one that pushes to it. Three reaso
   `cycle_start_upper_bound` otherwise; a group's `data_age_ms` makes the same promise for its own data.
 - The HTTP frontend is read-only GET. A write path asks who may write, and platmon has no answer: an
   injected charge level is a safety-adjacent falsehood on a vehicle, and authentication is not in scope.
-- `collector/jetson.py` already reads another program's file (`/var/lib/nvpmodel/status`), so the pattern
+- The Jetson reader (`native/src/collect/linux/jetson.rs`) already reads another program's file (`/var/lib/nvpmodel/status`), so the pattern
   exists and needs no new mechanism.
 
 Deferred until a second real source exists, so that the format is settled by the field model rather than

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Deterministic equivalence on fake trees (fixture.py, against the answers in golden/fixture), in a
+# throwaway container: it needs to mount the trees over /sys and /proc, which an unprivileged process cannot,
+# and to add interfaces to its own network namespace (--network none: nothing but lo, and nothing reaches the
+# host). Builds the local image
+# platmon-native-fixture:local (Debian 13 and its python3; never pushed) on first use.
+#   native/build.sh && native/tools/equivalence/fixture.sh [SCENARIO ...]
+#   BINARY=native/target/<dir>/x86_64-unknown-linux-musl/release/platmon-native native/tools/equivalence/fixture.sh   # another build
+# The host name and the tmpfs sizes are fixed, as they were when the answers were recorded.
+set -euo pipefail
+repo=$(cd "$(dirname "$0")/../../.." && pwd)
+binary=${BINARY:-native/target/x86_64-unknown-linux-musl/release/platmon-native}  # relative to the repository
+image=platmon-native-fixture:local
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+  printf 'FROM debian:13\nRUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*\n' |
+    docker build -q -t "$image" - >/dev/null
+fi
+docker run --rm --cap-add SYS_ADMIN --cap-add NET_ADMIN --security-opt apparmor=unconfined --network none \
+  --hostname platmon-fixture \
+  -v "$repo":/platmon:ro "$image" sh -ec '
+    mkdir -p /fx /fxhost /realproc
+    mount -t tmpfs -o size=64m fx /fx && mount -t tmpfs -o size=64m fxhost /fxhost && mkdir /fx/sys /fx/proc
+    mount --rbind /proc /realproc
+    mount --bind /fx/sys /sys && mount --bind /fx/proc /proc
+    exec python3 /platmon/native/tools/equivalence/fixture.py "/platmon/$0" "$@"
+  ' "$binary" "$@"
