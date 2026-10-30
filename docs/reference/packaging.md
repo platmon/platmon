@@ -32,8 +32,9 @@ and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
 ## Versioning
 
 The `VERSION` file (one line, `MAJOR.MINOR.PATCH`) is the single source of the application version.
-The builder reads it and writes it into the package's unit (`--app-version`), which the native server shows on its web page and logs at
-start. `frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/frontends/test_cli.py`
+The server reads it at build time (`platmon-native --version`; `native/build.sh` and the Dockerfile put it
+beside the crate), and the builder also writes it into the package's unit (`--app-version`, which overrides
+it); the server shows it on its web page and logs it at start. `frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/frontends/test_cli.py`
 fails until they say the same, so a release changes both. Check versions with:
 
 ```sh

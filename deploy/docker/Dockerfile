@@ -7,6 +7,7 @@
 FROM rust:1.88-slim AS build
 WORKDIR /src
 COPY native ./native
+COPY VERSION ./
 RUN set -eu; \
     case "$(uname -m)" in \
       x86_64) target=x86_64-unknown-linux-musl ;; \

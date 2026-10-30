@@ -58,7 +58,7 @@ See the [live API](../reference/api.md), [observations](../reference/observation
 
 | Location | Responsibility |
 | --- | --- |
-| `src/main.rs` | Command dispatch (`serve`, `health`, `service` on Windows, `config-check`, `build-info`, the tool commands) |
+| `src/main.rs` | Command dispatch (`serve`, `health`, `service` on Windows, `config-check`, `collect`, `--help`, `--version`, `build-info`, the tool commands) |
 | `src/config.rs` | `platmon.ini` parsing and checks, its defaults, messages and levels |
 | `src/collect/linux/`, `src/collect/windows/` | One collector per OS; `collect/mod.rs` holds the CPU counters and required-read spans both use, `collect/probe.rs` the shared probe |
 | `src/collect/linux/common.rs`, `jetson.rs`, `accel.rs`, `nvidia.rs` | Generic Linux readings, board-specific extensions, DRM and accel devices, nvidia-smi |
