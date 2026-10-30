@@ -1,4 +1,4 @@
-//! collector/gpu.py's nvidia-smi fallback: found once like shutil.which (and WSL's location), queried with
+//! The GPU's nvidia-smi fallback: found once like shutil.which (and WSL's location), queried with
 //! one bounded, read-only run per collection, its CSV read like csv.reader(skipinitialspace=True,
 //! strict=True) of Python 3.11 and later (3.10 refuses a NUL, these read it as a character).
 use std::io::Read;

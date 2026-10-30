@@ -1,4 +1,4 @@
-//! runtime/history.py: the last few minutes of selected numbers from the published core snapshots and slow
+//! History: the last few minutes of selected numbers from the published core snapshots and slow
 //! observations, in memory only, for trend graphs. One point per publication, appended by its publisher
 //! after it is published; reading never adds points. Contract: docs/reference/history.md.
 use crate::json::Value;
@@ -85,8 +85,8 @@ fn get_or_null(v: Option<&Value>, k: &str) -> Value {
     v.and_then(|v| v.get(k)).cloned().unwrap_or(Value::Null)
 }
 
-/// history.points_of: {series id: value} of one snapshot, in Python's order. Err where Python raises (the
-/// snapshot then adds no point), for shapes the collector does not make.
+/// {series id: value} of one snapshot, in the recorded answers' order. Err (the snapshot then adds no point)
+/// for shapes the collector does not make.
 pub fn points_of(stats: &Value, meta: &Value) -> Result<Points, ()> {
     let mut out: Points = Vec::new();
     let put = |out: &mut Points, k: String, v: Value| match out.iter_mut().find(|(x, _)| *x == k) {
@@ -220,7 +220,7 @@ struct Series {
 
 #[derive(Default)]
 struct Inner {
-    series: Vec<Series>, // in the order they were made, as Python's dict
+    series: Vec<Series>, // in the order they were made
     periods: Vec<(String, f64)>,
     latest: Vec<(String, (i64, i64))>,
     dropped: HashSet<String>,

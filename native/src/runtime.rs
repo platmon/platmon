@@ -1,4 +1,4 @@
-//! runtime/sampler.py: one writer collects every interval and publishes snapshots; readers (HTTP) only read
+//! The Sampler: one writer collects every interval and publishes snapshots; readers (HTTP) only read
 //! the latest publication and never collect. A publication is immutable: its stats are serialized once,
 //! when it is published, and only what depends on the moment of the answer (ages, state) is written per
 //! answer. Contract: docs/reference/api.md (/api/stats, /api/status).
@@ -172,7 +172,7 @@ impl Sampler {
         self.ready.notify_all();
         drop(st);
         drop(replaced); // its last reference may go here: not under the lock
-        // after publishing, outside the lock, as Python's _attempt: replay, then history
+        // after publishing, outside the lock: replay, then history
         if let Some(replay) = &self.replay {
             let data = self.snapshot_value(&publication, completed);
             if let Err(e) = replay.append("core", publication.sequence, started, completed, &data, gap_before, &self.clock) {
@@ -212,7 +212,7 @@ impl Sampler {
     }
 
     /// (the /api/stats body, or None when there is no current snapshot; the /api/status body), from one
-    /// capture of the state; now() is read under the lock, as Sampler._view does.
+    /// capture of the state; now() is read under the lock.
     pub fn view(&self, now: impl FnOnce() -> i64) -> (Option<String>, Value) {
         self.capture(now, |p, now| self.snapshot(p, now))
     }

@@ -12,7 +12,7 @@
 //!   platmon-native loop SECONDS [WARMUP]  collect every 1 s (after WARMUP s, default 3), print own CPU
 //!                                     (user/sys %), RSS, collection times and group states as JSON
 //!   platmon-native serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]
-//!                                     the service as platmon.py runs it: platmon.ini, the Sampler, slow
+//!                                     the service: platmon.ini, the Sampler, slow
 //!                                     groups, history, replay and the HTTP API (src/runtime.rs, src/http.rs)
 //!   platmon-native service [CONFIG] [serve's options]
 //!                                     Windows only: serve as a service the service control manager runs
@@ -85,7 +85,7 @@ fn main() {
 }
 
 /// config-check [CONFIG [PLATFORM [FRONTENDS]]]: the configuration as serve would use it, {"error": ...} if
-/// refused (tools/equivalence/config_fixture.py compares it with platmon.load_config's recorded answers); empty CONFIG or PLATFORM: none,
+/// refused (tools/equivalence/config_fixture.py compares it with the recorded answers); empty CONFIG or PLATFORM: none,
 /// FRONTENDS: the --frontends value.
 fn config_check(args: &[String]) {
     let platform = args.get(1).map(String::as_str).filter(|p| !p.is_empty());
@@ -122,8 +122,8 @@ fn slow_groups(cfg: &config::Config) -> Vec<&'static str> {
     observe::GROUPS.iter().copied().filter(|g| cfg.flag(g, "enabled") && (*g != "probe" || !cfg.targets.is_empty())).collect()
 }
 
-/// platmon.py: serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]. The configuration as
-/// platmon.py reads it; the slow groups are on as configured, with their readers (src/collect/linux/observe.rs).
+/// serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]: the configuration as config::load
+/// reads it; the slow groups are on as configured, with their readers (src/collect/linux/observe.rs).
 fn serve(args: &[String]) {
     let (mut path, mut web_dir, mut version, mut frontends) = (None, None, "0.0.0".to_string(), None);
     let mut it = args.iter();

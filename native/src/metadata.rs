@@ -1,4 +1,4 @@
-//! collector/metadata.py: one optional group's diagnostics, timed reads, sensor sources and pointers.
+//! One optional group's diagnostics, timed reads, sensor sources and pointers.
 use crate::json::Value;
 use crate::{platform, sha256};
 #[cfg(target_os = "linux")]

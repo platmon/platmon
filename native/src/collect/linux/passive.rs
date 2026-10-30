@@ -1,4 +1,4 @@
-//! The passive groups: collector/network.py, disk_io.py and pressure.py. Each is read once per collection,
+//! The passive groups: Network, Disk I/O and Pressure. Each is read once per collection,
 //! after the required data, and gives its output and the (start, end) of its read.
 use crate::json::{round_to, Value};
 use crate::metadata::{clock, Group, Span};
@@ -18,7 +18,7 @@ fn counter(text: &str) -> Option<u64> {
     text.parse::<u128>().ok().filter(|v| *v <= MAX_COUNTER).map(|v| v as u64)
 }
 
-/// The read's (start, end): the end only when the file was read and decoded, as in Python.
+/// The read's (start, end): the end only when the file was read and decoded.
 fn timed_read(path: &str, read: fn(&str) -> Result<String, ReadError>) -> (i64, Result<(String, i64), ReadError>) {
     let start = clock();
     (start, read(path).map(|t| (t, clock())))

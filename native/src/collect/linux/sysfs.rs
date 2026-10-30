@@ -1,4 +1,4 @@
-//! collector/sysfs.py: reading /proc and /sys, listings, hwmon chips and resolved source identities.
+//! Reading /proc and /sys, listings, hwmon chips and resolved source identities.
 use crate::json::Value;
 use crate::metadata::Group;
 use crate::pystr::py_space;

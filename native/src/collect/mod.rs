@@ -109,7 +109,8 @@ pub struct Collected {
 }
 
 impl Collected {
-    /// {"stats", "sensors", "required", "passive"}: Collected's fields as the Python harnesses print them.
+    /// {"stats", "sensors", "required", "passive"}: Collected's fields as one value, as the Sampler and the
+    /// collect and script commands take them.
     pub fn to_value(self) -> Value {
         let mut required = Value::obj();
         for name in ["cpu", "memory", "disk", "uptime"] { // record.REQUIRED_READS

@@ -1,4 +1,4 @@
-//! The probe slow group (collector/probe.py): one TCP connection attempt per target, with each OS's
+//! The probe slow group: one TCP connection attempt per target, with each OS's
 //! connect_ms. Contract: docs/reference/probe.md.
 use crate::json::Value;
 use crate::metadata::Group;

@@ -1,4 +1,4 @@
-//! runtime/server.py: the live HTTP API. Requests only read the latest publication (runtime::Sampler,
+//! The live HTTP API. Requests only read the latest publication (runtime::Sampler,
 //! slow::Observations) and never collect. HTTP/1.0, one request per connection, at most 32 connections
 //! (excess ones are closed before a thread is started for them), 10 s to send the request line and
 //! headers (per read, as Python's socket timeout), 10 s without progress per response write.
@@ -338,7 +338,7 @@ impl Server {
                 let obs = self.observations.view(self.clock);
                 match crate::render::render(&stats, Some(&obs)) {
                     Ok(text) => x.reply(full, 200, (text + "\n").as_bytes(), "text/plain; charset=utf-8"),
-                    Err(()) => Ok(()), // as Python's handler when render raises: no answer
+                    Err(()) => Ok(()), // as recorded: no answer when the screen cannot be rendered
                 }
             }
             "/" | "/index.html" if self.web.is_some() => {
@@ -358,7 +358,7 @@ impl Server {
 }
 
 impl Server {
-    /// /api/samples and /api/observation-samples: (status code, compact JSON body), as server.py.
+    /// /api/samples and /api/observation-samples: (status code, compact JSON body).
     fn replay_answer(&self, query: &str, observation: bool) -> (u16, String) {
         let compact = |pairs: &[(&str, Value)]| Value::Obj(pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()).to_py_compact();
         let unavailable = || (404, compact(&[("code", "replay_unavailable".into())]));
