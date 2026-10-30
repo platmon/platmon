@@ -1,5 +1,5 @@
-//! The platmon server the Debian package runs, a port of the Python service (native/README.md). Its collector
-//! covers the core groups: CPU, clocks, thermal zones, hwmon, memory, disk,
+//! The platmon server (native/README.md) the Debian package, the source installation and the container run.
+//! Its collector covers the core groups: CPU, clocks, thermal zones, hwmon, memory, disk,
 //! identity, the Jetson extension, DRM GPU and accel NPU, collectors and sensor source ids, and the
 //! passive groups Network, Disk I/O and Pressure as the service enables them by default, and the nvidia-smi
 //! fallback.

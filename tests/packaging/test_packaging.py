@@ -181,7 +181,7 @@ def test_package_contents_and_config_ownership(package, binaries, tmp_path, arch
     server = root / "usr/lib/platmon/platmon-server"
     assert server.read_bytes() == binaries[arch].read_bytes() and os.access(server, os.X_OK)
     assert os.readlink(root / "usr/lib/platmon/platmon-native") == "platmon-server"  # the name up to 1.6.0
-    # The Python server stays in the source tree (source install, container), not in the package.
+    # No Python in the server package: the platmon command is platmon-cli's.
     assert not (root / "usr/share/platmon/platmon.py").exists() and not list(root.rglob("*.py"))
     assert (root / "usr/share/platmon/frontends/web/assets/brand/favicon.svg").is_file()
     assert (root / "usr/share/platmon/frontends/web/index.html").is_file()

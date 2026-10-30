@@ -1,4 +1,4 @@
-//! Python's str methods as the ports need them: isspace, split, strip and isprintable.
+//! Python's str methods as the server's text parsing uses them: isspace, split, strip and isprintable.
 
 /// str.isspace() for one character.
 pub fn py_space(c: char) -> bool {
