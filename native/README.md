@@ -97,8 +97,9 @@ Publication and the live API (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
 - HTTP/1.0 on std sockets, one thread per connection, at most 32 (excess ones closed before a thread
   starts), backlog 5, 10 s per request read, 10 s per response write without progress, 64 KiB writes;
   request line and header limits (the blank line that ends the headers counts), errors and their status
-  lines as `http.server` gives them; HEAD gets the 501's headers without its page; HTTP/0.9, also when
-  said, gets the body alone.
+  lines as `http.server` gives them; HEAD gets the 501's headers without its page; a request without a
+  version (HTTP/0.9) gets 400 and a version other than 1.x 505, with a status line like every answer but an
+  empty request line's ([ADR 0002](../docs/development/adr/0002-api-contract-not-python-answers.md)).
 - Slow groups: one thread each, the next observation an interval after the last one started; their entries
   as `runtime/slow.py` writes them.
 

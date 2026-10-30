@@ -11,7 +11,8 @@
 
 platmon answers on port 9797 (`[http]` in `platmon.ini`). There is no authentication: run it on trusted
 networks only. Every answer of `/api/stats`, `/api/status`, `/api/observations`, `/api/history`, `/api/samples`, `/api/observation-samples` and `/text`
-carries `Cache-Control: no-store`.
+carries `Cache-Control: no-store`. Requests are HTTP/1.x `GET` (`METHOD PATH VERSION`), answered as HTTP/1.0;
+a request without a version (HTTP/0.9) answers 400 and another version 505.
 
 | Path | Answer |
 | --- | --- |

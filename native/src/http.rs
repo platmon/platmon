@@ -130,19 +130,12 @@ fn words(line: &str) -> Vec<&str> {
 
 struct Exchange<'a> {
     stream: &'a TcpStream,
-    /// HTTP/0.9: the answer is the body alone. As in Python, a request counts as that until its version is
-    /// read, so errors about the request line itself have no status line or headers either; so does one
-    /// that says HTTP/0.9.
-    bare: bool,
     /// a HEAD request: an error's headers without its page (the only answer HEAD gets is 501)
     head_only: bool,
 }
 
 impl Exchange<'_> {
     fn head(&mut self, code: u16, message: &str, headers: &[(&str, String)]) -> std::io::Result<()> {
-        if self.bare {
-            return Ok(());
-        }
         let mut h = format!("HTTP/1.0 {} {}\r\nServer: platmon-native\r\nDate: {}\r\n", code, message, http_date());
         for (k, v) in headers {
             h.push_str(&format!("{}: {}\r\n", k, v));
@@ -231,10 +224,9 @@ impl Server {
         stream.set_read_timeout(Some(self.request_timeout))?;
         stream.set_write_timeout(Some(self.write_timeout))?;
         let mut r = BufReader::new(stream);
-        let mut x = Exchange { stream, bare: true, head_only: false };
+        let mut x = Exchange { stream, head_only: false };
         let raw = read_line(&mut r, MAX_LINE)?;
         if raw.len() > MAX_LINE {
-            x.bare = false; // Python's request_version is "" there, not HTTP/0.9
             return x.error(414, None);
         }
         let line: String = raw.iter().map(|&b| b as char).collect(); // Latin-1
@@ -242,25 +234,19 @@ impl Server {
         if w.is_empty() {
             return Ok(()); // nothing asked: closed without an answer
         }
-        if w.len() >= 3 {
-            let version = w[w.len() - 1];
-            let numbers: Option<Vec<u64>> = version.strip_prefix("HTTP/").and_then(|v| {
-                let parts: Vec<&str> = v.split('.').collect();
-                (parts.len() == 2 && parts.iter().all(|p| !p.is_empty() && p.len() <= 10 && p.bytes().all(|b| b.is_ascii_digit())))
-                    .then(|| parts.iter().map(|p| p.parse().unwrap()).collect())
-            });
-            match numbers {
-                None => return x.error(400, Some(&format!("Bad request version ({})", py_repr(version)))),
-                Some(n) if n[0] >= 2 => return x.error(505, Some(&format!("Invalid HTTP version ({})", &version[5..]))),
-                _ => x.bare = version == "HTTP/0.9", // Python compares the text, so HTTP/00.9 has headers
-            }
-        }
-        if !(2..=3).contains(&w.len()) {
+        if w.len() != 3 { // METHOD PATH VERSION: no HTTP/0.9 request without a version
             return x.error(400, Some(&format!("Bad request syntax ({})", py_repr(line.trim_end_matches(['\r', '\n'])))));
         }
-        let (command, mut path) = (w[0], w[1].to_string());
-        if w.len() == 2 && command != "GET" {
-            return x.error(400, Some(&format!("Bad HTTP/0.9 request type ({})", py_repr(command))));
+        let (command, mut path, version) = (w[0], w[1].to_string(), w[2]);
+        let numbers: Option<Vec<u64>> = version.strip_prefix("HTTP/").and_then(|v| {
+            let parts: Vec<&str> = v.split('.').collect();
+            (parts.len() == 2 && parts.iter().all(|p| !p.is_empty() && p.len() <= 10 && p.bytes().all(|b| b.is_ascii_digit())))
+                .then(|| parts.iter().map(|p| p.parse().unwrap()).collect())
+        });
+        match numbers {
+            None => return x.error(400, Some(&format!("Bad request version ({})", py_repr(version)))),
+            Some(n) if n[0] != 1 => return x.error(505, Some(&format!("Invalid HTTP version ({})", &version[5..]))), // HTTP/1.x only
+            _ => {}
         }
         x.head_only = command == "HEAD";
         if path.starts_with("//") {
@@ -558,30 +544,32 @@ mod tests {
     }
 
     #[test]
-    fn answers_like_the_python_server() {
+    fn answers_at_the_protocols_edges() {
         let (addr, _) = server(|_| {});
         let status = |r: &str| r.lines().next().unwrap_or("").to_string();
         assert_eq!(status(&get(addr, "GET /nothing HTTP/1.0\r\n\r\n")), "HTTP/1.0 404 Not Found");
         assert_eq!(status(&get(addr, "GET /api/stats?x HTTP/1.0\r\n\r\n")), "HTTP/1.0 404 Not Found"); // whole path
         assert_eq!(status(&get(addr, "POST /api/stats HTTP/1.0\r\n\r\n")), "HTTP/1.0 501 Unsupported method ('POST')");
         assert_eq!(status(&get(addr, "get / HTTP/1.0\r\n\r\n")), "HTTP/1.0 501 Unsupported method ('get')");
-        // errors about the request line before its version is read: the page alone, as for HTTP/0.9
-        assert!(get(addr, "GET /api/stats HTTP/2.0\r\n\r\n").starts_with("<!DOCTYPE HTML>"));
-        assert!(get(addr, "GET / HTTP/x\r\n\r\n").contains("<p>Message: Bad request version ('HTTP/x').</p>"));
-        assert!(get(addr, "A B C D\r\n\r\n").contains("Error code: 400"));
+        // errors about the request line: a status line and headers too (no HTTP/0.9)
+        assert_eq!(status(&get(addr, "GET /api/stats HTTP/2.0\r\n\r\n")), "HTTP/1.0 505 Invalid HTTP version (2.0)");
+        let bad = get(addr, "GET / HTTP/x\r\n\r\n");
+        assert!(bad.starts_with("HTTP/1.0 400 Bad request version ('HTTP/x')\r\n") && bad.contains("<p>Message: Bad request version ('HTTP/x').</p>"));
+        assert_eq!(status(&get(addr, "A B C D\r\n\r\n")), "HTTP/1.0 400 Bad request syntax ('A B C D')");
         assert_eq!(status(&get(addr, &format!("GET /{} HTTP/1.0\r\n\r\n", "a".repeat(70000)))), "HTTP/1.0 414 URI Too Long");
         assert_eq!(status(&get(addr, &format!("GET / HTTP/1.0\r\n{}\r\n", "A: b\r\n".repeat(101)))),
                    "HTTP/1.0 431 Too many headers");
         let r = get(addr, "GET /api/samples?after=1 HTTP/1.0\r\n\r\n");
         assert!(r.starts_with("HTTP/1.0 404 Not Found\r\n") && r.contains("no-store") && r.ends_with(r#"{"code":"replay_unavailable"}"#));
         assert_eq!(get(addr, "GET //api/status HTTP/1.0\r\n\r\n").lines().next(), Some("HTTP/1.0 200 OK"));
-        assert!(get(addr, "GET /api/status\r\n\r\n").starts_with("{\"schema_version\": 1")); // HTTP/0.9: the body alone
+        assert_eq!(status(&get(addr, "GET /api/status\r\n\r\n")), "HTTP/1.0 400 Bad request syntax ('GET /api/status')"); // no version
         assert_eq!(get(addr, "\r\n"), ""); // an empty request line: no answer
         let head = get(addr, "HEAD /api/status HTTP/1.0\r\n\r\n"); // 501: its headers, no page
         assert!(head.starts_with("HTTP/1.0 501 Unsupported method ('HEAD')\r\n") && head.ends_with("\r\n\r\n"), "{}", head);
         assert!(head.contains("\r\nContent-Length: "));
-        assert!(get(addr, "GET /api/status HTTP/0.9\r\n\r\n").starts_with("{\"schema_version\": 1")); // said 0.9: bare
-        assert!(get(addr, "GET /api/status HTTP/00.9\r\n\r\n").starts_with("HTTP/1.0 200 OK")); // not the text
+        assert_eq!(status(&get(addr, "GET /api/status HTTP/0.9\r\n\r\n")), "HTTP/1.0 505 Invalid HTTP version (0.9)");
+        assert!(get(addr, "GET /api/status HTTP/1.1\r\n\r\n").starts_with("HTTP/1.0 200 OK")); // answered as 1.0
+        assert!(get(addr, "GET /api/status HTTP/01.1\r\n\r\n").starts_with("HTTP/1.0 200 OK")); // the numbers, not the text
         // 99 header lines and the blank one: 100 lines, accepted; 100 and the blank one: 101, refused
         assert!(get(addr, &format!("GET /api/status HTTP/1.0\r\n{}\r\n", "A: b\r\n".repeat(99))).starts_with("HTTP/1.0 200 OK"));
         assert_eq!(status(&get(addr, &format!("GET / HTTP/1.0\r\n{}\r\n", "A: b\r\n".repeat(100)))),
