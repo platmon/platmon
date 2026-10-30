@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build .deb (amd64, arm64), source archive and checksums with stdlib + the host's dpkg-deb.
+"""Build .deb packages, source archive and checksums with stdlib + the host's dpkg-deb.
 
-The server is the static Rust binary from native/build.sh; the `platmon` client stays one Python file.
-No interpreter, OS software, build tools or hardware binaries are bundled.
+platmon, one package per architecture (amd64, arm64, armhf): the static Rust server from native/build.sh, its
+unit and web page, without Python. platmon-cli, Architecture: all: the `platmon` client, one Python file,
+which platmon recommends. No interpreter, OS software, build tools or hardware binaries are bundled.
 """
 import argparse
 from email.utils import parsedate_to_datetime
@@ -122,7 +123,8 @@ def source_archive(root, output, release, epoch):
 
 
 def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
-    """Build one package per architecture in `binaries` ({arch: path}; default: RELEASED, from native/target)."""
+    """Build one platmon package per architecture in `binaries` ({arch: path}; default: RELEASED, from
+    native/target), then platmon-cli; returns their paths, platmon-cli's last."""
     release = version(root)
     if not re.fullmatch(r"[1-9][0-9]*", revision):
         raise ValueError("revision must be a positive integer")
@@ -139,12 +141,14 @@ def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
     bodies = {arch: check_binary(arch, binaries[arch]) for arch in sorted(binaries)}
     deb_version = f"{release}-{revision}"
     debs = [output / f"platmon_{deb_version}_{arch}.deb" for arch in bodies]
+    debs.append(output / f"platmon-cli_{deb_version}_all.deb")
     source = output / f"platmon-{release}.tar.gz"
     outputs = (*debs, source, output / "BUILD.json", output / "SHA256SUMS")
     if any(path.exists() for path in outputs):
         raise ValueError("output files already exist; use a fresh output directory")
     for (arch, body), deb in zip(bodies.items(), debs):
         build_deb(root, deb, arch, body, release, revision, epoch)
+    build_cli_deb(root, debs[-1], release, revision, epoch)
     source_archive(root, source, release, epoch)
     inputs = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in source_files(root)}
@@ -158,7 +162,7 @@ def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
 
 
 def build_deb(root, deb, arch, server, release, revision, epoch):
-    deb_version = f"{release}-{revision}"
+    """platmon for one architecture: the server, its unit and configuration, the web page."""
     with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
         stage = Path(directory)
         web = root / "frontends/web"
@@ -171,55 +175,79 @@ def build_deb(root, deb, arch, server, release, revision, epoch):
         binary.parent.mkdir(parents=True)
         binary.write_bytes(server)
         binary.chmod(0o755)
-        cli = stage / "usr/bin/platmon"
-        copy_file(root / "frontends/cli.py", cli, executable=True)
-        cli.write_text(cli.read_text(encoding="utf-8").replace(
-            "#!/usr/bin/env python3\n", "#!/usr/bin/python3\n", 1), encoding="utf-8")
         unit = stage / "usr/lib/systemd/system/platmon.service"
         copy_file(root / "packaging/debian/platmon.service", unit)
         unit.write_text(unit.read_text(encoding="utf-8").replace("@VERSION@", release), encoding="utf-8")
         copy_file(root / "platmon.ini", stage / "etc/platmon/platmon.ini")
-        doc = stage / "usr/share/doc/platmon"
-        for source_path, name in ((root / "README.md", "README.md.gz"),
-                                  (root / "CHANGELOG.md", "changelog.gz"),
-                                  (root / "docs/reference/packaging.md", "packaging.md.gz")):
-            write_gzip(source_path.read_bytes(), doc / name, epoch)
-        changelog = (root / "packaging/debian/changelog").read_text(encoding="utf-8")
-        write_gzip(changelog.replace("@VERSION@", deb_version).encode("utf-8"),
-                   doc / "changelog.Debian.gz", epoch)
-        copy_file(root / "packaging/debian/copyright", doc / "copyright")
+        docs(root, stage, "platmon", release, revision, epoch, extra=((root / "README.md", "README.md.gz"),
+                                                                       (root / "docs/reference/packaging.md", "packaging.md.gz")))
+        overrides = (root / "packaging/debian/lintian-overrides").read_text(encoding="utf-8")
+        pack(root, stage, deb, "platmon", root / "packaging/debian", ("preinst", "postinst", "prerm", "postrm", "conffiles"),
+             overrides, {"@VERSION@": f"{release}-{revision}", "@ARCH@": arch}, revision, epoch)
+
+
+def build_cli_deb(root, deb, release, revision, epoch):
+    """platmon-cli: the platmon command and its manual. It breaks and replaces the platmon packages before
+    this release, which had the command (1.6.0 and earlier); later ones are released with it."""
+    with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
+        stage = Path(directory)
+        cli = stage / "usr/bin/platmon"
+        copy_file(root / "frontends/cli.py", cli, executable=True)
+        cli.write_text(cli.read_text(encoding="utf-8").replace(
+            "#!/usr/bin/env python3\n", "#!/usr/bin/python3\n", 1), encoding="utf-8")
         write_gzip((root / "packaging/debian/platmon.1").read_bytes(),
                    stage / "usr/share/man/man1/platmon.1.gz", epoch)
-        overrides = (root / "packaging/debian/lintian-overrides").read_text(encoding="utf-8")
-        if revision == "1":
-            overrides += (root / "packaging/debian/lintian-overrides.initial").read_text(encoding="utf-8")
-        target = stage / "usr/share/lintian/overrides/platmon"
+        docs(root, stage, "platmon-cli", release, revision, epoch)
+        pack(root, stage, deb, "platmon-cli", root / "packaging/debian/cli", ("postinst",), "",
+             {"@VERSION@": f"{release}-{revision}", "@UPSTREAM@": release}, revision, epoch)
+
+
+def docs(root, stage, package, release, revision, epoch, extra=()):
+    """/usr/share/doc/PACKAGE: the upstream and Debian changelogs, the copyright and any extra files."""
+    doc = stage / "usr/share/doc" / package
+    for source_path, name in ((root / "CHANGELOG.md", "changelog.gz"), *extra):
+        write_gzip(source_path.read_bytes(), doc / name, epoch)
+    changelog = (root / "packaging/debian/changelog").read_text(encoding="utf-8")
+    write_gzip(changelog.replace("@VERSION@", f"{release}-{revision}").encode("utf-8"),
+               doc / "changelog.Debian.gz", epoch)
+    copy_file(root / "packaging/debian/copyright", doc / "copyright")
+
+
+def pack(root, stage, deb, package, scripts, names, overrides, fields, revision, epoch):
+    """The staged tree as deb: lintian overrides, the maintainer scripts `names` from `scripts` and its
+    control template there with `fields` and the size filled in, md5sums, fixed timestamps."""
+    if revision == "1":  # the packaging's first revision: no Debian bug to close
+        overrides += (root / "packaging/debian/lintian-overrides.initial").read_text(encoding="utf-8").replace(
+            "platmon:", package + ":")
+    if overrides:
+        target = stage / "usr/share/lintian/overrides" / package
         target.parent.mkdir(parents=True)
         target.write_text(overrides, encoding="utf-8")
         target.chmod(0o644)
-        control = stage / "DEBIAN"
-        control.mkdir()
-        for name in ("preinst", "postinst", "prerm", "postrm", "conffiles"):
-            copy_file(root / "packaging/debian" / name, control / name, executable=name != "conffiles")
-        conffiles = set((control / "conffiles").read_text().splitlines())
-        md5sums = "".join(
-            f"{file_md5(path)}  {path.relative_to(stage).as_posix()}\n"
-            for path in sorted(stage.rglob("*")) if path.is_file()
-            and control not in path.parents and "/" + path.relative_to(stage).as_posix() not in conffiles)
-        (control / "md5sums").write_text(md5sums, encoding="utf-8")
-        size = sum(p.stat().st_size for p in stage.rglob("*") if p.is_file())
-        template = (root / "packaging/debian/control").read_text(encoding="utf-8")
-        (control / "control").write_text(template.replace("@VERSION@", deb_version).replace("@ARCH@", arch).replace(
-            "@SIZE@", str((size + 1023) // 1024)), encoding="utf-8")
-        for path in stage.rglob("*"):
-            if path.is_dir():
-                path.chmod(0o755)
-            os.utime(path, (epoch, epoch))
-        stage.chmod(0o755)
-        os.utime(stage, (epoch, epoch))
-        env = dict(os.environ, SOURCE_DATE_EPOCH=str(epoch), DPKG_DEB_THREADS_MAX="2")
-        subprocess.run(["dpkg-deb", "--root-owner-group", "-Zxz", "--build", str(stage), str(deb)],
-                       check=True, env=env)
+    control = stage / "DEBIAN"
+    control.mkdir()
+    for name in names:
+        copy_file(scripts / name, control / name, executable=name != "conffiles")
+    conffiles = set((control / "conffiles").read_text().splitlines()) if "conffiles" in names else set()
+    md5sums = "".join(
+        f"{file_md5(path)}  {path.relative_to(stage).as_posix()}\n"
+        for path in sorted(stage.rglob("*")) if path.is_file()
+        and control not in path.parents and "/" + path.relative_to(stage).as_posix() not in conffiles)
+    (control / "md5sums").write_text(md5sums, encoding="utf-8")
+    size = sum(p.stat().st_size for p in stage.rglob("*") if p.is_file())
+    template = (scripts / "control").read_text(encoding="utf-8")
+    for key, value in {**fields, "@SIZE@": str((size + 1023) // 1024)}.items():
+        template = template.replace(key, value)
+    (control / "control").write_text(template, encoding="utf-8")
+    for path in stage.rglob("*"):
+        if path.is_dir():
+            path.chmod(0o755)
+        os.utime(path, (epoch, epoch))
+    stage.chmod(0o755)
+    os.utime(stage, (epoch, epoch))
+    env = dict(os.environ, SOURCE_DATE_EPOCH=str(epoch), DPKG_DEB_THREADS_MAX="2")
+    subprocess.run(["dpkg-deb", "--root-owner-group", "-Zxz", "--build", str(stage), str(deb)],
+                   check=True, env=env)
 
 
 def main():

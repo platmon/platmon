@@ -8,5 +8,8 @@ platmon (@VERSION@) unstable; urgency=medium
   * Use this changelog date for reproducible default build timestamps.
   * Include package file checksums and check package policy with Lintian.
   * Point the homepage and copyright source to github.com/platmon/platmon.
+  * Move the platmon command to platmon-cli, which platmon recommends: the
+    server package no longer depends on python3, and its maintainer scripts
+    use the server's config-check and health instead of Python.
 
  -- Jinwoo Sung <jwsung91@users.noreply.github.com>  Thu, 22 Oct 2026 09:00:00 +0900

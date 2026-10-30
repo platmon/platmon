@@ -19,6 +19,14 @@ def invoke(*args, success=True):
     return result.stdout.strip()
 
 
+def cli_beside(package):
+    """platmon-cli's .deb of the same version, beside package (package.py writes them together)."""
+    path = package.parent / ("platmon-cli_" + invoke("dpkg-deb", "-f", str(package), "Version") + "_all.deb")
+    if not path.is_file():
+        raise RuntimeError(f"no {path.name} beside {package.name}")
+    return path
+
+
 def inside(first, second):
     # This entry point is used only in the disposable, root-owned test container.
     if not Path("/.dockerenv").is_file() or os.environ.get("PLATMON_PACKAGE_TEST_CONTAINER") != "1":
@@ -30,26 +38,34 @@ def inside(first, second):
     first_version = invoke("dpkg-deb", "-f", str(first), "Version")
     second_version = invoke("dpkg-deb", "-f", str(second), "Version")
     invoke("dpkg", "--compare-versions", first_version, "lt", second_version)
+    first_cli, second_cli = cli_beside(first), cli_beside(second)
+    # The server installs and runs without platmon-cli (only recommended), then the command comes with it.
     invoke("dpkg", "-i", str(first))
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == first_version
+    assert not Path("/usr/bin/platmon").exists()
+    invoke("dpkg", "-i", str(first_cli))
     assert invoke("/usr/bin/platmon", "--version") == "platmon " + first_version.split("-")[0]
+    assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-cli: /usr/bin/platmon"
     invoke("systemctl", "is-enabled", "platmon.service")
     custom = "[http]\nbind = 127.0.0.1\nport = 19797\n[history]\nenabled = no\n"
     ini.write_text(custom)
     invoke("systemctl", "disable", "platmon.service")
-    invoke("dpkg", "--force-confold", "-i", str(second))
+    invoke("dpkg", "--force-confold", "-i", str(second), str(second_cli))
     assert ini.read_text() == custom
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == second_version
+    assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon-cli") == second_version
     assert invoke("systemctl", "is-enabled", "platmon.service", success=False) == "disabled"
     invoke("systemctl", "mask", "platmon.service")
-    invoke("dpkg", "--force-confold", "-i", str(first))
+    invoke("dpkg", "--force-confold", "-i", str(first), str(first_cli))
     assert unit.is_symlink() and os.readlink(unit) == "/dev/null"
     assert ini.read_text() == custom
     invoke("systemctl", "unmask", "platmon.service")
     invoke("dpkg", "--remove", "platmon")
     assert ini.read_text() == custom
-    assert not Path("/usr/bin/platmon").exists()
     assert not Path("/usr/lib/platmon/platmon-native").exists()
+    assert Path("/usr/bin/platmon").exists()  # its own package
+    invoke("dpkg", "--remove", "platmon-cli")
+    assert not Path("/usr/bin/platmon").exists()
     invoke("dpkg", "--purge", "platmon")
     assert not ini.exists()
     # A source unit must be refused before it or any source-installed code is lost.
@@ -65,7 +81,7 @@ def inside(first, second):
     local = Path("/usr/local/bin/platmon")
     local.parent.mkdir(parents=True, exist_ok=True)
     local.write_text("retained local command\n")
-    invoke("dpkg", "--force-confold", "-i", str(first))
+    invoke("dpkg", "--force-confold", "-i", str(first), str(first_cli))
     assert ini.read_text() == custom and local.read_text() == "retained local command\n"
     # Invalid configuration fails configure instead of silently starting with defaults.
     ini.write_text("[http]\nprot = 9797\n")
@@ -75,11 +91,11 @@ def inside(first, second):
     invoke("dpkg", "--configure", "platmon")
     extra = ini.parent / "retained-backup.ini"
     extra.write_text("local backup\n")
-    invoke("dpkg", "--purge", "platmon")
+    invoke("dpkg", "--purge", "platmon", "platmon-cli")
     assert not ini.exists() and extra.read_text() == "local backup\n"
     assert local.read_text() == "retained local command\n"
-    print("dpkg lifecycle passed: install, config-preserving upgrade/downgrade, disabled/masked state, "
-          "remove/purge, migration refusal and invalid config recovery")
+    print("dpkg lifecycle passed: the server without platmon-cli, then with it, config-preserving "
+          "upgrade/downgrade, disabled/masked state, remove/purge, migration refusal and invalid config recovery")
 
 
 def check(first, second, image):

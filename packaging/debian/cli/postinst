@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    configure)
+        if [ -e /usr/local/bin/platmon ] || [ -e /usr/local/sbin/platmon ]; then
+            echo "a local platmon command may shadow /usr/bin/platmon; check command -v platmon" >&2
+        fi
+        ;;
+esac
+exit 0
