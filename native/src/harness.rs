@@ -310,7 +310,7 @@ fn script_now() -> i64 {
     SCRIPT_NOW.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// The runtime script (tools/equivalence/runtime_fixture.py, against the Python service's recorded answers). One JSON
+/// The runtime script (tools/equivalence/runtime_fixture.py, against the recorded answers). One JSON
 /// operation per line, one JSON line out for each; every "now" also sets the clock that history, replay
 /// and the HTTP answers read:
 ///   {"op": "setup", "interval", "instance_id", "clock", "slow": [[name, interval], ...], "levels",

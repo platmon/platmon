@@ -425,7 +425,7 @@ pub fn levels_for(cfg: &Config, platform: &str) -> Value {
 }
 
 // tests/collector/test_probe.py's target and config tests, ported (docs/development/python-test-port.md);
-// config_fixture.py compares the rest of the parsing with the Python service's answers.
+// config_fixture.py compares the rest of the parsing with the recorded answers.
 #[cfg(test)]
 mod tests {
     use super::*;

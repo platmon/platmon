@@ -295,6 +295,7 @@ mod tests {
 
     #[test]
     fn source_id_matches_python() {
+        // the Python collector's id, up to 1.6.0:
         // python3 -c 'from collector.metadata import source; print(source("hwmon","celsius","device_channel",
         //   device="devices/platform/x", attr="temp1_input")["id"])'
         let s = source("hwmon", "celsius", "device_channel",
