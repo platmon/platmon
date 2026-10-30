@@ -1,13 +1,14 @@
-"""platmon.ini read by `platmon-native config-check`, compared exactly with the Python service's answers
-(platmon.load_config, recorded in golden/config.json before its removal in 1.6.0; the temporary directory
-as ${dir}): every setting with its type, the levels (with a platform's temperature default) and the probe
+"""platmon.ini read by `platmon-native config-check`, compared exactly with the recorded answers
+(golden/config.json, first recorded from the Python service's platmon.load_config before its removal in
+1.6.0; the temporary directory as ${dir}): every setting with its type, the levels (with a platform's temperature default) and the probe
 targets, or the same refusal message; also with a --frontends value, as platmon.py passed it on. Then
 refusals as the server gives them (`platmon-native serve`: exit 2, the message platmon.py gave), only for
 configurations it must refuse, so nothing starts listening. Last, the shipped platmon.ini must read as no
 file does: every value in it is the default. Runs on the host: the files are written to a temporary
-directory.
+directory. --bless records the server's answers instead and rewrites golden/config.json when every refusal
+still exits with 2 and the shipped platmon.ini still reads as the defaults.
 
-  config_fixture.py BINARY"""
+  config_fixture.py BINARY [--bless]"""
 import json
 import os
 import subprocess
@@ -133,14 +134,18 @@ def dir_token(value, d, back=False):
 
 
 class Golden:
-    """The recorded answers, in the order they are asked for."""
+    """The recorded answers, in the order they are asked for; bless: the server's, kept to be written."""
 
-    def __init__(self, d):
-        self.d, self.n = d, 0
-        with open(GOLDEN, encoding="utf-8") as f:
-            self.recorded = json.load(f)
+    def __init__(self, d, bless=False):
+        self.d, self.n, self.bless, self.out = d, 0, bless, []
+        if not bless:
+            with open(GOLDEN, encoding="utf-8") as f:
+                self.recorded = json.load(f)
 
-    def answer(self, name):
+    def answer(self, name, server):
+        if self.bless:
+            self.out.append({"name": name, "python": dir_token(server, self.d)})
+            return server
         got = self.recorded[self.n] if self.n < len(self.recorded) else {}
         if got.get("name") != name:
             sys.exit(f"{GOLDEN}: answer {self.n + 1} is for {got.get('name')!r}, not {name!r}")
@@ -148,6 +153,8 @@ class Golden:
         return dir_token(got["python"], self.d, back=True)
 
     def close(self):
+        if self.bless:
+            return
         if self.n != len(self.recorded):
             sys.exit(f"{GOLDEN}: {len(self.recorded)} answers recorded, {self.n} asked for")
 
@@ -157,17 +164,18 @@ def config_check(binary, args):
 
 
 def main():
+    bless = sys.argv[2:] == ["--bless"]
     binary, failed = os.path.abspath(sys.argv[1]), 0
     total = len(CASES) + len(FRONTENDS) + len(REFUSED) + 1
     with tempfile.TemporaryDirectory() as d:
-        python = Golden(d)
+        python = Golden(d, bless)
         cases = [(name, text, platform, None) for name, text, platform in CASES] + \
                 [(name, text, None, frontends) for name, text, frontends in FRONTENDS]
         for i, (name, text, platform, frontends) in enumerate(cases):
             path = write(d, i, text)
-            py = python.answer(name)
             args = [path] + ([platform or "", frontends] if frontends is not None else [platform] if platform else [])
             rs = config_check(binary, args)
+            py = python.answer(name, rs)
             same = py == rs and json.dumps(py) == json.dumps(rs)  # also key order and int/float
             failed += not same
             shown = py["error"].replace(d, "DIR").split("\n")[0][:90] if "error" in py else "settings"
@@ -180,8 +188,8 @@ def main():
                 args = [path if a == "FILE" else a for a in args]
             elif path:
                 args = [path] + args
-            py = tuple(python.answer(name))
             rs = refusal([binary, "serve"] + args)
+            py = tuple(python.answer(name, list(rs)))
             same = py == rs and py[0] == 2
             failed += not same
             print(f"  {name}: {'OK' if same else 'DIFFERENT'} ({py[1].replace(d, 'DIR')[:90]})")
@@ -194,7 +202,12 @@ def main():
     print(f"  the shipped platmon.ini: {'OK' if same else 'DIFFERENT'} (the defaults)")
     if not same:
         print(f"       shipped:  {json.dumps(shipped)[:300]}\n       defaults: {json.dumps(defaults)[:300]}")
-    print(f"{total - failed}/{total} configurations the same")
+    if bless and not failed:
+        with open(GOLDEN + ".new", "w", encoding="utf-8") as f:
+            json.dump(python.out, f, indent=1, ensure_ascii=False)
+            f.write("\n")
+        os.replace(GOLDEN + ".new", GOLDEN)
+    print(f"{total - failed}/{total} configurations {'blessed' if bless and not failed else 'the same'}")
     sys.exit(1 if failed else 0)
 
 
