@@ -4,7 +4,8 @@
 > - One collector publishes snapshots; HTTP, the terminal client and the web page only read them, and slow
 >   groups run on their own threads.
 > - The server is the native one (`native/`, one Rust crate). The Python server it was ported from was
->   removed after 1.6.0; its recorded answers (`native/tools/equivalence/golden/`) stay the reference.
+>   removed after 1.6.0; its recorded answers (`native/tools/equivalence/golden/`) stay as regression data,
+>   rewritten with `--bless` after an intended change ([ADR 0002](adr/0002-api-contract-not-python-answers.md)).
 > - Layers: collectors read the system, the runtime schedules and publishes, frontends present.
 
 The service reads system data once and publishes snapshots for the HTTP API, terminal client and web
@@ -12,8 +13,10 @@ viewer. Runtime scheduling is independent of frontend requests.
 
 The Debian package, the source installation and the container run the server built from `native/`.
 It was ported module by module from a Python server (`platmon.py`, `collector/`, `runtime/`), deprecated in
-1.5.0 and removed after 1.6.0; the HTTP API, `platmon.ini` and its messages, and `/text` are its contracts,
-and the Python answers recorded before the removal are what the equivalence checks compare with
+1.5.0 and removed after 1.6.0. The server keeps the versioning contract (the HTTP API, `platmon.ini` keys
+and syntax, command options), not the Python service's answers
+([ADR 0002](adr/0002-api-contract-not-python-answers.md)); the answers recorded before the removal are what
+the equivalence checks compare with, and an intended change rewrites them with `--bless`
 ([native/README.md](../../native/README.md)). Comments in `native/src/` describe the Rust code; where they name
 Python, they mean its language or standard library (the recorded answers fix that behavior), the Python service
 as the port's origin and the recorded answers' source, or, in the ported tests, the Python test and the functions
