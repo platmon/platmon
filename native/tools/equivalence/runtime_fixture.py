@@ -1,6 +1,6 @@
 """Deterministic equivalence of the runtime (step 3A): platmon-native's Sampler and slow groups
-(`runtime-script`) against the Python service's recorded answers (golden.py, golden/runtime/<scenario>.jsonl,
-recorded before its removal in 1.6.0) for the same operations with the same times and collections, and
+(`runtime-script`) against the recorded answers (golden.py, golden/runtime/<scenario>.jsonl, first
+recorded from the Python service before its removal in 1.6.0) for the same operations with the same times and collections, and
 every answer must be the same, byte for byte: the /api/stats body (or none), the /api/status body without
 levels, and the /api/observations body, each as json.dumps writes it. No tolerance. Covers publication,
 the states (starting, ready, degraded, stale), failures and recovery, collections dropped as too slow, the
@@ -11,8 +11,10 @@ Before the scenarios, the harness is run against fake sides (CONTROLS): equal on
 difference, an early exit, a nonzero exit or a hang must fail.
 
 The recorded HTTP responses are unstamped (unstamped()), and so are the server's before they are compared.
+--bless runs the server alone and rewrites each scenario's file whose server answered every operation and
+exited with 0, from its answers, unstamped.
 
-  runtime_fixture.py BINARY [SCENARIO ...]
+  runtime_fixture.py BINARY [--bless] [SCENARIO ...]
   runtime_fixture.py --self-test"""
 import json
 import os
@@ -20,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 
+import golden
 from fixture import Broken, ask, diff
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -536,11 +539,13 @@ def show(name, a, b, out):
         out.append(f"/{name}: the same JSON, different text: {a!r:.200} / {b!r:.200}")
 
 
-def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
+def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT, record=None):
     """Runs the operations on both sides: (differences, report lines). Every answer must be the same; both
-    sides must exit with 0. A side that breaks ends the run."""
-    logs = {n: tempfile.TemporaryFile("w+") for n in ("python", "rust")}
-    procs = {"python": start(py_cmd, logs["python"]), "rust": start(rs_cmd, logs["rust"])}
+    sides must exit with 0. A side that breaks ends the run. py_cmd None: the server alone (--bless), each of
+    its answers added to record as (request, answer unstamped)."""
+    sides = {"python": py_cmd, "rust": rs_cmd} if py_cmd else {"rust": rs_cmd}
+    logs = {n: tempfile.TemporaryFile("w+") for n in sides}
+    procs = {n: start(cmd, logs[n]) for n, cmd in sides.items()}
     report, problems, equal = [], 0, 0
     for i, (label, op) in enumerate(steps):
         out, res = [], {}
@@ -558,12 +563,14 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
                     x, y = (unstamped(a[k]), unstamped(b[k])) if k == "response" else (a[k], b[k])
                     if x != y:
                         show(k, x, y, out)
+        if record is not None and isinstance(res.get("rust"), dict):
+            record.append((json.dumps(op), {k: unstamped(v) if k == "response" else v for k, v in res["rust"].items()}))
         if not out:
             equal += 1
         report.append(f"  {i + 1}. {label}: " + ("OK" if not out else f"{len(out)} DIFFERENCES"))
         report += [f"       {d}" for d in out[:20]]
         problems += len(out)
-        if len(res) < 2:
+        if len(res) < len(procs):
             report.append("       stopped: a side did not answer")
             break
     for n, p in procs.items():
@@ -580,15 +587,19 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
             logs[n].seek(0)
             report += [f"       {n} stderr: {t}" for t in logs[n].read().splitlines()[-5:]]
         logs[n].close()
-    report.append(f"  {equal}/{len(steps)} answers equal")
+    report.append(f"  {equal}/{len(steps)} answers {'equal' if len(procs) == 2 else 'given'}")
     return problems, report
 
 
-def run(name, binary):
-    """One scenario, against its recorded answers."""
-    py_cmd = [sys.executable, f"{HERE}/golden.py", os.path.join(GOLDEN, f"{name}.jsonl")]
-    problems, report = compare(SCENARIOS[name](), py_cmd, [binary, "runtime-script"])
-    print(f"{name}: {'OK' if not problems else 'FAILED'}")
+def run(name, binary, bless=False):
+    """One scenario, against its recorded answers; bless: the server alone, its answers then recorded."""
+    path = os.path.join(GOLDEN, f"{name}.jsonl")
+    record = [] if bless else None
+    py_cmd = None if bless else [sys.executable, f"{HERE}/golden.py", path]
+    problems, report = compare(SCENARIOS[name](), py_cmd, [binary, "runtime-script"], record=record)
+    if bless and not problems:
+        golden.write(path, record)
+    print(f"{name}: {('BLESSED' if bless else 'OK') if not problems else 'FAILED'}")
     print("\n".join(report))
     return problems
 
@@ -639,9 +650,12 @@ def main():
         sys.exit(0 if self_test() else 1)
     if not self_test():
         sys.exit(1)
-    binary, names = os.path.abspath(sys.argv[1]), sys.argv[2:] or list(SCENARIOS)
-    failed = sum(run(n, binary) > 0 for n in names)
-    print(f"{len(names) - failed}/{len(names)} scenarios equal")
+    args = sys.argv[1:]
+    bless = "--bless" in args
+    binary, *names = [a for a in args if a != "--bless"]
+    names = names or list(SCENARIOS)
+    failed = sum(run(n, os.path.abspath(binary), bless) > 0 for n in names)
+    print(f"{len(names) - failed}/{len(names)} scenarios {'blessed' if bless else 'equal'}")
     sys.exit(1 if failed else 0)
 
 

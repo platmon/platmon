@@ -75,8 +75,9 @@ The Python server (`platmon.py`, `collector/`, `runtime/`) was deprecated in 1.5
 1. The source installation and the container run the native server: `deploy/systemd/install.sh` installs
    `native/build.sh`'s build, the Dockerfile builds the server in a build stage and runs it on
    `debian:13-slim`, with `platmon-native health` as its health check.
-2. The Python service's answers are frozen in `native/tools/equivalence/golden/`; the equivalence checks
-   compare with them and no longer record.
+2. The Python service's answers are recorded in `native/tools/equivalence/golden/`; the equivalence
+   checks compare with them. Since 2026-10-30 they are regression data that `--bless` rewrites from the
+   server after an intended change ([ADR 0002](adr/0002-api-contract-not-python-answers.md)).
 3. Its 397 tests were ported to Rust or mapped to the checks that show them:
    [Python test port](python-test-port.md).
 4. The Python server, `benchmarks/` and their tests are removed; `native/tools/` is split into

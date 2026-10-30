@@ -1,4 +1,4 @@
-"""Deterministic equivalence: platmon-native against the Python collector's recorded answers (golden.py,
+"""Deterministic equivalence: platmon-native against the recorded answers (golden.py,
 golden/fixture/<scenario>.jsonl) on the same fake /sys and /proc trees with the same clocks, compared exactly (no tolerance: every value, JSON type, key order, span,
 required read, collectors state and source id). Runs inside the container fixture.sh starts, where
 /sys and /proc are bind mounts of the trees written here; never on a host.
@@ -11,14 +11,17 @@ collections must be equal, and both sides must exit with 0 at the end. A failed 
 collector's {"error"} answer; exiting, not answering in time or writing something else is a broken side,
 never a match. Error messages are not compared. Exit 1 on any difference.
 
-The answers were recorded from the Python service before its removal (1.6.0); the probe's ports are fixed
-and fixture.sh fixes the host name and the tmpfs sizes, so that they depend on the tree alone.
+The answers were recorded from the Python service before its removal (1.6.0); after an intended change,
+--bless runs the server alone and, for each scenario whose steps all give what they expect and whose server
+exits with 0, rewrites the scenario's file from its answers (fixture.sh mounts golden/fixture writable for
+it). The probe's ports are fixed and fixture.sh fixes the host name and the tmpfs sizes, so that the
+answers depend on the tree alone.
 
 Before the scenarios, the harness is run against fake sides that read no tree (CONTROLS): equal ones must
 pass, and both sides failing where a collection is expected, a nonzero exit, a hang (also after part of an
 answer, or an answer completed after the timeout), garbage or an oversized line must fail.
 
-  fixture.py BINARY [SCENARIO ...]
+  fixture.py BINARY [--bless] [SCENARIO ...]
   fixture.py --self-test          # the controls only; needs no container"""
 import fcntl
 import json
@@ -30,6 +33,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+import golden
 
 FX = "/fx"            # tmpfs; FX/sys is mounted at /sys and FX/proc at /proc
 HOST = "/fxhost"      # PLATMON_HOST_ROOT: os-release, nv_tegra_release; statvfs reads this tmpfs
@@ -967,12 +972,14 @@ def states(a):
     return out
 
 
-def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
+def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT, record=None):
     """Runs the steps on both sides: (differences, report lines). A step passes only when both sides gave
     what it expects (a collection, or a failed collection) and, for collections, the same one; and the run
-    only when both sides then exit with 0. A side that breaks ends the run."""
-    logs = {n: tempfile.TemporaryFile("w+") for n in ("python", "rust")}
-    procs = {"python": start(py_cmd, logs["python"]), "rust": start(rs_cmd, logs["rust"])}
+    only when both sides then exit with 0. A side that breaks ends the run. py_cmd None: the server alone
+    (--bless), each of its answers added to record as (request, answer with tokens)."""
+    sides = {"python": py_cmd, "rust": rs_cmd} if py_cmd else {"rust": rs_cmd}
+    logs = {n: tempfile.TemporaryFile("w+") for n in sides}
+    procs = {n: start(cmd, logs[n]) for n, cmd in sides.items()}
     report, problems, got = [], 0, {OK: 0, FAILS: 0}
     for i, (label, change, base, expect) in enumerate(steps):
         found = (change() if change else None) or []  # a change may return problems it found
@@ -986,15 +993,18 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
         for n, r in res.items():
             if ("error" in r) != (expect == FAILS):
                 out.append(f"{n}: expected {expect}, got " + (f"an error: {r['error']!r}" if "error" in r else "a collection"))
-        if not out and expect == OK:
+        if not out and expect == OK and len(procs) == 2:
             diff(res["python"], res["rust"], "", out)
+        if record is not None and "rust" in res:
+            record.append((f"{base} {wall}", golden.tokens(res["rust"], golden.environment())))
         if not out:
             got[expect] += 1
-        shown = states(res["python"]) if "python" in res else "no answer"
+        first = res.get("python", res.get("rust"))
+        shown = states(first) if first is not None else "no answer"
         report.append(f"  {i + 1}. {label}: {'OK' if not out else f'{len(out)} DIFFERENCES'} [{shown}]")
         report += [f"       {d}" for d in out[:40]]
         problems += len(out)
-        if len(res) < 2:
+        if len(res) < len(procs):
             report.append("       stopped: a side did not answer")
             break
     for n, p in procs.items():
@@ -1013,12 +1023,13 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT):
             report += [f"       {n} stderr: {t}" for t in tail]
         logs[n].close()
     want = {e: sum(s[3] == e for s in steps) for e in got}
-    report.append(f"  {got[OK]}/{want[OK]} collections equal, {got[FAILS]}/{want[FAILS]} expected failures on both sides")
+    both = "equal" if len(procs) == 2 else "as expected"
+    report.append(f"  {got[OK]}/{want[OK]} collections {both}, {got[FAILS]}/{want[FAILS]} expected failures on {'both sides' if len(procs) == 2 else 'the server'}")
     return problems, report
 
 
-def run(name, binary):
-    """One scenario, against its recorded answers."""
+def run(name, binary, bless=False):
+    """One scenario, against its recorded answers; bless: the server alone, its answers then recorded."""
     tree, steps = SCENARIOS[name]
     steps = steps()
     clear()
@@ -1027,9 +1038,12 @@ def run(name, binary):
         rs_cmd = [binary, "observe-script", PROBE["targets"], "0.5"]
     else:
         rs_cmd = [binary, "script"]
-    py_cmd = ["python3", f"{HERE}/golden.py", os.path.join(GOLDEN, f"{name}.jsonl")]
-    problems, report = compare(steps, py_cmd, rs_cmd)
-    print(f"{name}: {'OK' if not problems else 'FAILED'}")
+    path = os.path.join(GOLDEN, f"{name}.jsonl")
+    record = [] if bless else None
+    problems, report = compare(steps, None if bless else ["python3", f"{HERE}/golden.py", path], rs_cmd, record=record)
+    if bless and not problems:
+        golden.write(path, record)
+    print(f"{name}: {('BLESSED' if bless else 'OK') if not problems else 'FAILED'}")
     print("\n".join(report))
     return problems
 
@@ -1102,9 +1116,12 @@ def main():
         sys.exit(0 if self_test() else 1)
     if not self_test():
         sys.exit(1)
-    binary, names = sys.argv[1], sys.argv[2:] or list(SCENARIOS)
-    failed = sum(run(n, binary) > 0 for n in names)
-    print(f"{len(names) - failed}/{len(names)} scenarios equal")
+    args = sys.argv[1:]
+    bless = "--bless" in args
+    binary, *names = [a for a in args if a != "--bless"]
+    names = names or list(SCENARIOS)
+    failed = sum(run(n, binary, bless) > 0 for n in names)
+    print(f"{len(names) - failed}/{len(names)} scenarios {'blessed' if bless else 'equal'}")
     sys.exit(1 if failed else 0)
 
 

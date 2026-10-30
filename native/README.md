@@ -176,6 +176,7 @@ native/tools/equivalence/fixture.sh                 # deterministic equivalence 
 python3 native/tools/equivalence/runtime_fixture.py $B
 python3 native/tools/equivalence/config_fixture.py $B
 python3 native/tools/equivalence/live_http.py $B
+native/tools/equivalence/fixture.sh --bless; python3 native/tools/equivalence/runtime_fixture.py $B --bless; python3 native/tools/equivalence/config_fixture.py $B --bless   # after an intended change: rewrite golden/ from the server, review the diff
 native/tools/perf/bench.sh $B out.jsonl native/target/cache-alloc/x86_64-unknown-linux-musl/release/platmon-native
 python3 native/tools/perf/service_ab.py --tree . --binary $B --variant M=OTHER --order "B M M B" --out ab.jsonl   # about 2.5 h; --quick to try it
 python3 native/tools/perf/ab_report.py ab.jsonl
@@ -185,7 +186,8 @@ python3 native/tools/deploy/deploy_check.py checks --out checks.jsonl   # about 
 python3 native/tools/deploy/hub_check.py --hub HUB_EXECUTABLE --hosts pc,orin=USER@HOST --out DIR   # 13 min
 ```
 
-`tools/` by purpose: `equivalence/` compares the server with the Python service's recorded answers,
+`tools/` by purpose: `equivalence/` compares the server with the recorded answers (first the Python
+service's; `--bless` rewrites them, [ADR 0002](../docs/development/adr/0002-api-contract-not-python-answers.md)),
 `perf/` measures builds against each other, `deploy/` runs a build as a candidate service; `walk.py` and
 `worker.py`, which the live, A/B and deployment checks share, and the Windows smoke test stay in `tools/`.
 
