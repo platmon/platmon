@@ -1,5 +1,5 @@
-//! platmon.py's configuration: platmon.ini read as configparser reads it (interpolation off), checked
-//! as check() and levels() check it, with the same defaults and the same messages.
+//! The service's configuration: platmon.ini read as Python's configparser reads it (interpolation off),
+//! checked by check() and levels(), with the defaults and messages of the recorded answers.
 use crate::json::Value;
 
 /// (section, key, default as configparser holds it, type): platmon.DEFAULTS in its order.
@@ -114,7 +114,7 @@ impl Ini {
         out
     }
 
-    /// The defaults, as platmon.load_config sets them with read_dict.
+    /// The defaults, under the file's values (configparser's read_dict).
     fn with_defaults() -> Ini {
         let mut ini = Ini::default();
         for (section, keys) in DEFAULTS {
@@ -380,13 +380,13 @@ pub fn parse_targets(text: &str) -> Result<Vec<(String, u16)>, String> {
     Ok(out)
 }
 
-/// platmon.py's --frontends value as it passes it on: None when not given or empty, else split at commas.
+/// The --frontends value as serve passes it on: None when not given or empty, else split at commas.
 pub fn frontends(value: Option<&str>) -> Option<Vec<&str>> {
     value.filter(|v| !v.is_empty()).map(|v| v.split(',').collect())
 }
 
-/// platmon.load_config(path, frontends): defaults < the file < frontends (enables exactly those). Err with
-/// the message platmon.py gives.
+/// The configuration of path and frontends: defaults < the file < frontends (enables exactly those). Err
+/// with the message serve prints.
 pub fn load(path: Option<&str>, frontends: Option<&[&str]>) -> Result<Config, String> {
     let mut ini = Ini::with_defaults();
     if let Some(path) = path {

@@ -1,4 +1,4 @@
-//! runtime/replay.py: complete publications kept for a while, so a consumer can fetch them after its own
+//! Replay: complete publications kept for a while, so a consumer can fetch them after its own
 //! cursor. Each publication is serialized once by its publisher, outside the replay lock; a request takes
 //! references to the payloads under the lock and decodes them outside it. Ages and `stale` are computed
 //! per answer. Contract: docs/reference/replay.md.
@@ -31,7 +31,7 @@ struct Entry {
 
 #[derive(Default)]
 struct Inner {
-    records: VecDeque<Entry>, // in insertion order, as Python's OrderedDict
+    records: VecDeque<Entry>, // in insertion order
     latest: Vec<(String, i64)>,
     bytes: usize,
 }

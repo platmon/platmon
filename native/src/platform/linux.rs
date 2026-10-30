@@ -47,7 +47,7 @@ pub fn listen(ip: Ipv4Addr, port: u16, backlog: i32) -> std::io::Result<TcpListe
 }
 
 extern "C" fn on_term(_: libc::c_int) {
-    unsafe { libc::_exit(0) } // as platmon.py: a clean exit on SIGTERM (systemd stop, docker stop)
+    unsafe { libc::_exit(0) } // a clean exit on SIGTERM (systemd stop, docker stop)
 }
 
 /// Exits at once, with status 0, when the service is asked to stop.

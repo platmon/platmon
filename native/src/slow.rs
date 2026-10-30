@@ -1,4 +1,4 @@
-//! runtime/slow.py: low-frequency groups, each read on its own cadence by its own thread, apart from the core
+//! Low-frequency groups, each read on its own cadence by its own thread, apart from the core
 //! Sampler, and served by /api/observations with their own id, times, age and state. A blocked read stalls
 //! only its group (its age grows, collecting_for_ms says for how long); no new thread is started for it.
 //! Contract: docs/reference/observations.md.
@@ -84,7 +84,7 @@ impl Slow {
         self.state.lock().unwrap().since = Some(started);
     }
 
-    /// Publishes one observation as one update (completed_at is read under the lock, as in Python), then,
+    /// Publishes one observation as one update (completed_at is read under the lock), then,
     /// outside the lock, gives it to replay and history.
     pub fn finish(&self, mut group: Group, data: Result<Value, String>, started_at: f64, started: i64, completed: i64,
                   completed_at: impl FnOnce() -> f64) -> Arc<Observation> {
@@ -125,7 +125,7 @@ impl Slow {
         self.entry_of(last.as_deref(), now, since)
     }
 
-    /// Slow._entry: one publication with ages as of now; Python's key order (state last).
+    /// One publication with ages as of now, in the recorded answers' key order (state last).
     fn entry_of(&self, last: Option<&Observation>, now: i64, since: Option<i64>) -> Value {
         let mut e = Value::obj();
         e.set("interval_ms", ms(self.interval_ns).into());
@@ -164,7 +164,7 @@ pub struct Observations {
 }
 
 impl Observations {
-    /// The /api/observations body; each group reads the clock for its own entry, as Python's view() does.
+    /// The /api/observations body; each group reads the clock for its own entry.
     pub fn view(&self, now: impl Fn() -> i64) -> Value {
         let mut v = Value::obj();
         v.set("schema_version", SCHEMA_VERSION.into());

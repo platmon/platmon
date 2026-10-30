@@ -1,6 +1,6 @@
 //! frontends/cli.py render(): the plain-text screen /text answers with, from an /api/stats snapshot and an
 //! /api/observations answer. Where Python would raise (a key missing, None formatted as a number), Err:
-//! the server then closes the connection without an answer, as Python's handler does.
+//! the server then closes the connection without an answer.
 use crate::json::Value;
 
 type R<T> = Result<T, ()>;

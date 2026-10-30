@@ -26,7 +26,7 @@ fn rss_kib() -> (i64, i64) {
 }
 
 #[cfg(target_os = "linux")]
-/// What the loop reports besides CPU (as the Python collector's loop did, tools/perf/bench.sh): collection times, missed 1 s deadlines,
+/// What the loop reports besides CPU (tools/perf/bench.sh): collection times, missed 1 s deadlines,
 /// RSS over the run, per group how often each state came up, the number of source ids of the last
 /// collection, and how many different read scopes (read_scope) came up, with the last one.
 #[derive(Default)]
