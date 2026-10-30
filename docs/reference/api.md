@@ -11,7 +11,8 @@
 
 platmon answers on port 9797 (`[http]` in `platmon.ini`). There is no authentication: run it on trusted
 networks only. Every answer of `/api/stats`, `/api/status`, `/api/observations`, `/api/history`, `/api/samples`, `/api/observation-samples` and `/text`
-carries `Cache-Control: no-store`.
+carries `Cache-Control: no-store`. Requests are HTTP/1.x `GET` (`METHOD PATH VERSION`), answered as HTTP/1.0;
+a request without a version (HTTP/0.9) answers 400 and another version 505.
 
 | Path | Answer |
 | --- | --- |
@@ -21,7 +22,7 @@ carries `Cache-Control: no-store`.
 | `/api/history` | recent numbers of the published snapshots, when `[history]` is on; 404 otherwise ([history.md](history.md)) |
 | `/api/samples` | full published core snapshots after a cursor; bounded memory replay ([replay.md](replay.md)) |
 | `/api/observation-samples` | full publications of one slow group after its own cursor ([replay.md](replay.md)) |
-| `/text` | the `platmon` terminal screen as plain text; 503 when there is no current snapshot |
+| `/text` | the `platmon` terminal screen as plain text; 503 when there is no current snapshot, 500 when the snapshot has a value the screen cannot show (`/api/stats` still has it) |
 | `/` | the web page (only with `web = yes`) |
 
 One background thread collects a snapshot every `interval`; HTTP requests only read the latest one and

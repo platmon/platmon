@@ -12,7 +12,8 @@ difference, an early exit, a nonzero exit or a hang must fail.
 
 The recorded HTTP responses are unstamped (unstamped()), and so are the server's before they are compared.
 --bless runs the server alone and rewrites each scenario's file whose server answered every operation and
-exited with 0, from its answers, unstamped.
+exited with 0, from its answers, unstamped. With the text scenario, its /text answers are also checked
+against frontends/cli.py's render() of the same snapshots (screen_parity).
 
   runtime_fixture.py BINARY [--bless] [SCENARIO ...]
   runtime_fixture.py --self-test"""
@@ -26,6 +27,8 @@ import golden
 from fixture import Broken, ask, diff
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "frontends"))
+from cli import render  # noqa: E402  the terminal client, one standalone file
 GOLDEN = os.path.join(HERE, "golden", "runtime")
 TIMEOUT = 30
 S, MS = 1_000_000_000, 1_000_000
@@ -439,10 +442,16 @@ def stats_screen(n):
     return st
 
 
+def screen(label, t):
+    """/text at t, then the /api/stats and /api/observations it was drawn from (screen_parity)."""
+    return [http(label, t, "/text"), http(f"{label}: /api/stats", t, "/api/stats"),
+            http(f"{label}: /api/observations", t, "/api/observations")]
+
+
 def text_steps():
     """The /text screen from each side's real server: snapshots and slow observations of every kind."""
     out, t = [setup(slow=[("storage", 30.0), ("wifi", 5.0), ("battery", 60.0), ("probe", 10.0)])], T0
-    out.append(http("no snapshot yet: 503", t, "/text"))
+    out += screen("no snapshot yet: 503", t)
     obs = [("storage", {"partitions": [{"disk": "nvme0n1", "mount_points": ["/"]}, {"disk": "nvme0n1", "mount_points": []},
                                        {"disk": "sda", "mount_points": []}],
                         "filesystems": [{"device": "nvme0n1p1", "major": 259, "minor": 1, "fstype": "ext4",
@@ -480,21 +489,21 @@ def text_steps():
     for n in range(4):
         stats = stats_screen(n)
         out += collection(f"variant {n}", t + (n + 1) * S, MS, result(stats, {}, required(t + (n + 1) * S, t + (n + 1) * S + 5)))
-        out.append(http(f"variant {n}: the screen", t + (n + 1) * S + 2 * MS, "/text"))
-    out.append(http("200 s later: the snapshot stale", t + 200 * S, "/text"))
+        out += screen(f"variant {n}: the screen", t + (n + 1) * S + 2 * MS)
+    out += screen("200 s later: the snapshot stale", t + 200 * S)
     out += collection("a fresh snapshot", t + 200 * S, MS, result(stats_screen(0), {}, required(t + 200 * S, t + 200 * S + 5)))
-    out.append(http("observations not current", t + 200 * S + 2 * MS, "/text"))
+    out += screen("observations not current", t + 200 * S + 2 * MS)
     bad = stats_screen(0)
-    bad["temperature"]["cpu"] = None  # Python cannot format it: no answer
+    bad["temperature"]["cpu"] = None  # the screen cannot format it: 500
     out += collection("a temperature without a value", t + 201 * S, MS, result(bad, {}, required(t + 201 * S, t + 201 * S + 5)))
-    out.append(http("no answer on both", t + 201 * S + 2 * MS, "/text"))
+    out += screen("a temperature without a value: 500", t + 201 * S + 2 * MS)
     nomodel = stats_screen(0)
     del nomodel["model"]
     out += collection("no model", t + 202 * S, MS, result(nomodel, {}, required(t + 202 * S, t + 202 * S + 5)))
-    out.append(http("no answer on both", t + 202 * S + 2 * MS, "/text"))
+    out += screen("no model: 500", t + 202 * S + 2 * MS)
     out += observation("storage of another shape", "storage", t + 203 * S, MS, {"filesystems": [{"mount_points": []}]})
     out += collection("a good snapshot", t + 203 * S, MS, result(stats_screen(1), {}, required(t + 203 * S, t + 203 * S + 5)))
-    out.append(http("storage that cannot be shown: no answer", t + 203 * S + 2 * MS, "/text"))
+    out += screen("storage that cannot be shown: 500", t + 203 * S + 2 * MS)
     return out
 
 
@@ -591,6 +600,33 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT, record=None):
     return problems, report
 
 
+def screen_parity(binary):
+    """The server's /text against frontends/cli.py's render() of the /api/stats and /api/observations answers
+    at the same moment, for every screen() of text_steps: 503 without a snapshot; else the same text, or 500
+    where render() raises. Problems, as text lines."""
+    record, out = [], []
+    problems, report = compare(text_steps(), None, [binary, "runtime-script"], record=record)
+    if problems:
+        return [f"text steps: {line}" for line in report]
+    answers = [(json.loads(request), answer.get("response", "")) for request, answer in record]
+    for i, (op, response) in enumerate(answers):
+        if not op.get("request", "").startswith("GET /text "):
+            continue
+        (_, stats), (_, obs) = answers[i + 1], answers[i + 2]
+        status, body = response.split("\r\n", 1)[0], response.partition("\r\n\r\n")[2]
+        if stats.startswith("HTTP/1.0 503"):
+            want = ("HTTP/1.0 503 Service Unavailable", None)
+        else:
+            try:
+                want = ("HTTP/1.0 200 OK", render(json.loads(stats.partition("\r\n\r\n")[2]),
+                                                   json.loads(obs.partition("\r\n\r\n")[2])) + "\n")
+            except Exception:  # what the platmon command would fail on
+                want = ("HTTP/1.0 500 Internal Server Error", None)
+        if status != want[0] or want[1] is not None and body != want[1]:
+            out.append(f"/text at {op['now']}: {status} {body[:120]!r}, frontends/cli.py: {want[0]} {(want[1] or '')[:120]!r}")
+    return out
+
+
 def run(name, binary, bless=False):
     """One scenario, against its recorded answers; bless: the server alone, its answers then recorded."""
     path = os.path.join(GOLDEN, f"{name}.jsonl")
@@ -656,6 +692,11 @@ def main():
     names = names or list(SCENARIOS)
     failed = sum(run(n, os.path.abspath(binary), bless) > 0 for n in names)
     print(f"{len(names) - failed}/{len(names)} scenarios {'blessed' if bless else 'equal'}")
+    if "text" in names:
+        parity = screen_parity(os.path.abspath(binary))
+        print(f"/text and frontends/cli.py: {'the same screens' if not parity else 'DIFFERENT'}")
+        print("\n".join(f"  {p}" for p in parity[:20]))
+        failed += bool(parity)
     sys.exit(1 if failed else 0)
 
 

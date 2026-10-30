@@ -97,8 +97,9 @@ Publication and the live API (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
 - HTTP/1.0 on std sockets, one thread per connection, at most 32 (excess ones closed before a thread
   starts), backlog 5, 10 s per request read, 10 s per response write without progress, 64 KiB writes;
   request line and header limits (the blank line that ends the headers counts), errors and their status
-  lines as `http.server` gives them; HEAD gets the 501's headers without its page; HTTP/0.9, also when
-  said, gets the body alone.
+  lines as `http.server` gives them; HEAD gets the 501's headers without its page; a request without a
+  version (HTTP/0.9) gets 400 and a version other than 1.x 505, with a status line like every answer but an
+  empty request line's ([ADR 0002](../docs/development/adr/0002-api-contract-not-python-answers.md)).
 - Slow groups: one thread each, the next observation an interval after the last one started; their entries
   as `runtime/slow.py` writes them.
 
@@ -326,7 +327,7 @@ refusals as processes) the same on all three hosts.
 | `history` | `/api/history` after core and slow publications: CPU, memory, GPU, temperatures and rails by source id or name, interfaces by namespace and ifindex, disks; gaps from values without a rate, a break after a failure and after 9 s without a publication, missing series as null, another namespace, storage tokens, Wi-Fi only while connected, battery fields that are there, probe targets (IPv6 bracketed), an observation taking over 3 intervals and one in error as null, one started before its last one ignored, expiry, 70 temperatures and 8 CPUs against the 64-series limit (dropped counted once, kept series keeping their slots against newcomers); prefix, seconds, points (gap-keeping buckets, 1 point) and 16 invalid or edge queries |
 | `replay` | `/api/samples` and `/api/observation-samples`: from the start, pages, a cursor at and ahead of the latest, another instance (409), 14 invalid or edge queries, a failed and a too slow collection (`gap_before`), a record over `max_bytes` (a missing range, the latest id known at once), capacity evicting the oldest, observation records stale later, a group without a stream (404), everything expired (the cursor still moves on) |
 | `features_off` | history and replay off (404s), status with levels, stats, observations, an unknown path, HEAD |
-| `text` | `/text` before a snapshot (503), four snapshots (CPU rows and the sampling note, GPU and NPU with and without load, swap, a full disk, temperatures, rails, fans, interfaces with errors and over 12 rows, disks, PSI) with storage, Wi-Fi, battery and probe observations of every kind, a stale snapshot, observations no longer current, and three snapshots or observations Python cannot render (no answer on both) |
+| `text` | `/text` before a snapshot (503), four snapshots (CPU rows and the sampling note, GPU and NPU with and without load, swap, a full disk, temperatures, rails, fans, interfaces with errors and over 12 rows, disks, PSI) with storage, Wi-Fi, battery and probe observations of every kind, a stale snapshot, observations no longer current, and three snapshots or observations the screen cannot show (500); every `/text` is also compared with `frontends/cli.py`'s `render()` of the `/api/stats` and `/api/observations` answers at the same moment |
 
 Eighteen deliberate defects in copies of the runtime code (state boundaries, failure counting, the
 degraded rule, span limits, the clock check, the passive rule, the fallback, `core` handling, the place of

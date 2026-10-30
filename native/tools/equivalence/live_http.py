@@ -11,8 +11,8 @@ the process it started is stopped (and restarted once), by its own handle.
   /api/observations
 - raw requests at the protocol's edges (HEAD, HTTP/0.9, versions, header and line limits): the answer's
   shape from its bytes (status line and headers or none, header names, a body or none), as the Python
-  service gave it (RAW); for HTTP/2.0 and an invalid version (a known difference from some CPython releases)
-  the body alone, no status line (KNOWN)
+  service gave it except where ADR 0002 changed it: every request but an empty line gets a status line,
+  HTTP/0.9 is refused (RAW)
 - /api/history: the envelope's keys, schema, retention and cadence of the defaults, every point [int, float,
   number or null]; /api/samples: the envelope's keys and JSON types, records with /api/stats' keys and
   sample.stale
@@ -262,6 +262,9 @@ RAW = {  # request -> what is compared of the answer: bare (no status line), sta
     "HTTP/0.9 said": b"GET /api/status HTTP/0.9\r\n\r\n",
     "HTTP/0.9 two words": b"GET /api/status\r\n\r\n",
     "HTTP/00.9": b"GET /api/status HTTP/00.9\r\n\r\n",
+    "HTTP/1.1": b"GET /api/status HTTP/1.1\r\n\r\n",
+    "HTTP/2.0": b"GET /api/status HTTP/2.0\r\n\r\n",
+    "bad version": b"GET /api/status HTTP/x\r\n\r\n",
     "99 headers": b"GET /api/status HTTP/1.0\r\n" + b"A: b\r\n" * 99 + b"\r\n",
     "100 headers": b"GET /api/status HTTP/1.0\r\n" + b"A: b\r\n" * 100 + b"\r\n",
     "long header": b"GET /api/status HTTP/1.0\r\nA: " + b"x" * 70000 + b"\r\n\r\n",
@@ -272,12 +275,16 @@ RAW = {  # request -> what is compared of the answer: bare (no status line), sta
 
 
 ERROR_HEADERS, OK_HEADERS = ["Connection", "Content-Length", "Content-Type"], ["Cache-Control", "Content-Length", "Content-Type"]
-RAW_EXPECTED = {  # the Python service's answers
+RAW_EXPECTED = {  # the Python service's answers, but for HTTP/0.9 and the versions it answered bare (ADR 0002)
     "HEAD": {"bare": False, "status": "HTTP/1.0 501 Unsupported method ('HEAD')", "headers": ERROR_HEADERS, "body": False},
     "POST": {"bare": False, "status": "HTTP/1.0 501 Unsupported method ('POST')", "headers": ERROR_HEADERS, "body": True},
-    "HTTP/0.9 said": {"bare": True, "body": True},
-    "HTTP/0.9 two words": {"bare": True, "body": True},
-    "HTTP/00.9": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
+    "HTTP/0.9 said": {"bare": False, "status": "HTTP/1.0 505 Invalid HTTP version (0.9)", "headers": ERROR_HEADERS, "body": True},
+    "HTTP/0.9 two words": {"bare": False, "status": "HTTP/1.0 400 Bad request syntax ('GET /api/status')", "headers": ERROR_HEADERS,
+                           "body": True},
+    "HTTP/00.9": {"bare": False, "status": "HTTP/1.0 505 Invalid HTTP version (00.9)", "headers": ERROR_HEADERS, "body": True},
+    "HTTP/1.1": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
+    "HTTP/2.0": {"bare": False, "status": "HTTP/1.0 505 Invalid HTTP version (2.0)", "headers": ERROR_HEADERS, "body": True},
+    "bad version": {"bare": False, "status": "HTTP/1.0 400 Bad request version ('HTTP/x')", "headers": ERROR_HEADERS, "body": True},
     "99 headers": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
     "100 headers": {"bare": False, "status": "HTTP/1.0 431 Too many headers", "headers": ERROR_HEADERS, "body": True},
     "long header": {"bare": False, "status": "HTTP/1.0 431 Line too long", "headers": ERROR_HEADERS, "body": True},
@@ -286,15 +293,6 @@ RAW_EXPECTED = {  # the Python service's answers
     "//path": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
 }
 
-
-# A known difference between CPython releases: 3.13.16 answers these with a status line and headers;
-# 3.10.12, 3.13.5 and 3.14.4, which the server was verified against, and the server answer with the body
-# alone.
-KNOWN = {
-    "HTTP/2.0": b"GET /api/status HTTP/2.0\r\n\r\n",
-    "bad version": b"GET /api/status HTTP/x\r\n\r\n",
-}
-KNOWN_RUST = {"bare": True, "body": True}
 
 
 def raw(port, request):
@@ -375,7 +373,6 @@ def check(port, interval, pid):
     bodies["/api/history"] = json.loads(fetch(port, "/api/history?points=5")[2])
     bodies["/api/samples"] = json.loads(fetch(port, "/api/samples?limit=2")[2])
     return {"endpoints": eps, "bodies": bodies, "raw": {k: raw(port, r) for k, r in RAW.items()},
-            "known": {k: raw(port, r) for k, r in KNOWN.items()},
             "replay": replay_walk(port), "concurrent": concurrent(port, interval),
             "connection_limit": connection_limit(port), "request_timeout": request_timeout(port), "burst": burst(port, pid)}
 
@@ -438,9 +435,6 @@ def problems(r, stopped, restarted):
     for name in RAW:
         if r["raw"][name] != RAW_EXPECTED[name]:
             out.append(f"raw {name}: {r['raw'][name]} != {RAW_EXPECTED[name]}")
-    for name in KNOWN:
-        if r["known"][name] != KNOWN_RUST:
-            out.append(f"known difference {name}: {r['known'][name]} != {KNOWN_RUST}")
     h = r["bodies"]["/api/history"]
     if list(h) != HISTORY_KEYS or any(h[k] != v for k, v in HISTORY.items()) or set(h["series"]) != set(h["series_intervals_ms"]):
         out.append(f"/api/history: {json.dumps({k: h[k] for k in h if k != 'series'})[:300]}")
@@ -501,7 +495,7 @@ def main():
               "interfaces": len(stats.get("network", {}).get("interfaces", [])),
               "groups": {g: o["state"] for g, o in r["bodies"]["/api/observations"]["groups"].items()},
               "history_series": len(r["bodies"]["/api/history"]["series"]),
-              "codes": {p: r["endpoints"][p]["code"] for p in PATHS}, "raw": r["raw"], "known": r["known"],
+              "codes": {p: r["endpoints"][p]["code"] for p in PATHS}, "raw": r["raw"],
               "restart": restarted["code"], "stop": stopped,
               **{k: r[k] for k in ("replay", "concurrent", "connection_limit", "request_timeout", "burst")},
               "differences": out}

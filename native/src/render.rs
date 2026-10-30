@@ -1,6 +1,6 @@
 //! frontends/cli.py render(): the plain-text screen /text answers with, from an /api/stats snapshot and an
-//! /api/observations answer. Where Python would raise (a key missing, None formatted as a number), Err:
-//! the server then closes the connection without an answer.
+//! /api/observations answer. Where frontends/cli.py raises (a key missing, None formatted as a number), Err:
+//! /text then answers 500 (runtime_fixture.py checks both on the same snapshots).
 use crate::json::Value;
 
 type R<T> = Result<T, ()>;
