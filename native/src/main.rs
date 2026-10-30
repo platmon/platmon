@@ -99,7 +99,9 @@ fn main() {
         Some("observe-script") => return harness::observe_script(&args[2..]),
         Some("replay-cost") => return harness::replay_cost(&args[2..]),
         Some("build-info") => return println!("{}", ALLOCATOR_MARK),
-        Some("collect" | "script" | "loop") => return harness::collect_command(&args),
+        Some("collect") => return harness::collect_command(&args),
+        #[cfg(target_os = "linux")]
+        Some("script" | "loop") => return harness::collect_command(&args), // elsewhere: the usage, exit 2
         _ => {}
     }
     eprintln!("{}", USAGE);
