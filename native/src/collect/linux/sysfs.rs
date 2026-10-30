@@ -373,7 +373,7 @@ pub mod fake {
         pub fn new(base: i64) -> Root {
             use std::sync::atomic::{AtomicU32, Ordering};
             static N: AtomicU32 = AtomicU32::new(0);
-            let dir = std::env::temp_dir().join(format!("platmon-native-root-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+            let dir = std::env::temp_dir().join(format!("platmon-server-root-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
             std::fs::create_dir_all(&dir).unwrap();
             ROOT.with(|r| *r.borrow_mut() = Some(dir.to_str().unwrap().to_string()));
             crate::metadata::set_clocks(base, 1_700_000_000_000_000);
@@ -468,7 +468,7 @@ mod tests {
     /// succeeds once the writer comes.
     #[test]
     fn interrupted_open_is_retried() {
-        let dir = std::env::temp_dir().join(format!("platmon-native-eintr-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("platmon-server-eintr-{}", std::process::id()));
         let _ = fs::create_dir(&dir);
         let fifo = dir.join("fifo");
         let path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();

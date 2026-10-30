@@ -8,7 +8,7 @@
 
 - Date: 2026-10-30
 - Status: Accepted
-- Scope: platmon-native's answers, its equivalence checks and the comments that cite Python behavior
+- Scope: platmon-server's answers, its equivalence checks and the comments that cite Python behavior
 
 ## Context
 
@@ -30,7 +30,7 @@ The server keeps the versioning contract, not the Python service's answers.
 | --- | --- |
 | The HTTP API's paths, fields, types and meanings ([api.md](../reference/api.md)) | Answers outside the API's documented fields: error pages and their texts, HTTP/0.9 handling |
 | `platmon.ini` keys, defaults and syntax (sections, comments, continuation lines, case): users' files are written for it | Configuration error messages, when a clearer one helps |
-| Command options of `platmon-native` and `platmon` | `/text` and the CLI's screen, kept equal to each other |
+| Command options of `platmon-server` and `platmon` | `/text` and the CLI's screen, kept equal to each other |
 
 The recorded answers stay in the repository as regression data. `fixture.sh --bless`,
 `runtime_fixture.py BINARY --bless` and `config_fixture.py BINARY --bless` run the server alone and

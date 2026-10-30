@@ -34,7 +34,7 @@ and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
 ## Versioning
 
 The `VERSION` file (one line, `MAJOR.MINOR.PATCH`) is the single source of the application version.
-The server reads it at build time (`platmon-native --version`; `native/build.sh` and the Dockerfile put it
+The server reads it at build time (`platmon-server --version`; `native/build.sh` and the Dockerfile put it
 beside the crate), and the builder also writes it into the package's unit (`--app-version`, which overrides
 it); the server shows it on its web page and logs it at start. `frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/frontends/test_cli.py`
 fails until they say the same, so a release changes both. Check versions with:
@@ -165,7 +165,8 @@ gh attestation verify platmon_<version>-<revision>_<arch>.deb --repo platmon/pla
 Use the release's own tag, including a `-<revision>` suffix when it has one.
 The published packages 1.0.0-1 to 1.3.0-1 have no attestation.
 
-The server goes to `/usr/lib/platmon/platmon-native`, its web files to `/usr/share/platmon/`,
+The server goes to `/usr/lib/platmon/platmon-server` (with a `platmon-native` link, its name up to 1.6.0),
+its web files to `/usr/share/platmon/`,
 the vendor unit to `/usr/lib/systemd/system/platmon.service`, and config to `/etc/platmon/platmon.ini`;
 `platmon-cli` puts the client in `/usr/bin/platmon` and its manual (`man platmon`).
 
@@ -190,11 +191,11 @@ your conffile policy explicitly; do not assume a prompt is answered automaticall
 Existing explicit `enabled = no` values remain effective. Omitted options follow the
 new version's defaults, so read its changelog before updating.
 
-Upgrades validate the preserved INI with the new server (`platmon-native config-check`)
+Upgrades validate the preserved INI with the new server (`platmon-server config-check`)
 before restarting the service, so an INI it refuses leaves the running service alone. They
 preserve an administrator's disabled/masked service state and respect Debian's service-start
 policy. After a start or restart, the package waits up to 20 s for the service to stay running
-and for `platmon-native health` to pass: `/api/stats` answers 200 (a current snapshot, as
+and for `platmon-server health` to pass: `/api/stats` answers 200 (a current snapshot, as
 `/api/status` says ready) on the configured address (`0.0.0.0` is checked on `127.0.0.1`). The
 maintainer scripts are plain `sh` and use no Python; a service that was not started (disabled, masked or held by
 policy) is reported and not checked. A config, restart or health-check failure fails

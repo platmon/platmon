@@ -1,4 +1,4 @@
-"""The whole service, `platmon-native serve` builds against each other on one host (B is --binary, any other
+"""The whole service, `platmon-server serve` builds against each other on one host (B is --binary, any other
 name a --variant), in the order given (e.g. "S M M S"), the same platmon.ini (the defaults, 1 s collection,
 127.0.0.1:PORT), the same user, one service at a time. Step 3C ran the Python service (A) against B; it was
 removed in 1.6.0. Only the processes this tool starts are stopped, by their own handles. One JSON line per

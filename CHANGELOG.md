@@ -6,20 +6,26 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- The server binary is `platmon-server` (it was `platmon-native`, named apart from the Python server, which
+  is gone): `/usr/lib/platmon/platmon-server` in the package, `/opt/platmon/platmon-server` in the source
+  installation and the container, and `native/target/<target>/release/platmon-server` from the build. A
+  `platmon-native` link beside it keeps scripts that call the old path working. Its log lines, `--version`
+  and the HTTP `Server` header say `platmon-server`; the package stays `platmon` and its options do not
+  change.
 - The Debian package no longer depends on python3. The `platmon` command moves to the new package
   `platmon-cli` (`Architecture: all`, needs Python 3.9+), which `platmon` recommends: `apt install platmon`
   and `apt upgrade` install it (`apt-get upgrade` keeps `platmon` back at the old version until `apt install
   platmon`), and `--no-install-recommends` leaves it out on a headless device. The maintainer scripts check the
-  configuration and the started service with `platmon-native config-check` and `health` instead of Python.
+  configuration and the started service with `platmon-server config-check` and `health` instead of Python.
 - The source installation and the container run the native server, as the Debian package does: the
   Python server is no longer installed by any of them. `deploy/systemd/install.sh` installs this
   checkout's build (`native/build.sh`, or `native/build-armhf.sh` on 32-bit ARM, run first; both need
   Docker) and the web page, with the package's unit. The Dockerfile builds the server in a
-  `rust:1.88-slim` stage and runs it on `debian:13-slim` (no Python in the image). `platmon-native health
+  `rust:1.88-slim` stage and runs it on `debian:13-slim` (no Python in the image). `platmon-server health
   [CONFIG]` is the image's health check: it asks `/api/stats` where the configuration listens.
 - **Breaking:** the Python server (`platmon.py`, `collector/`, `runtime/`), deprecated in 1.5.0, is
   removed, with `benchmarks/` and its tests: `python3 platmon.py` no longer runs a service. Every
-  installation already runs `platmon-native`; the HTTP API, `platmon.ini` keys and command options do not
+  installation already runs `platmon-server`; the HTTP API, `platmon.ini` keys and command options do not
   change, and the `platmon` command stays the Python client. Its tests were ported to Rust or are shown by
   the native checks against its recorded answers (docs/development/python-test-port.md).
 - Internal: the application version is the `VERSION` file. `native/tools/` is split into `equivalence/`

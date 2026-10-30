@@ -1,0 +1,15 @@
+# platmon candidate check: the platmon-server build under test, on the candidate's INI and port.
+# Beside platmon.service, never in its place; not enabled. Hardening as the product unit.
+[Unit]
+Description=platmon candidate check: platmon-server
+After=network.target
+Conflicts=platmon-server-candidate-fakesmi.service
+
+[Service]
+ExecStart=/usr/lib/platmon-candidate/platmon-server serve /etc/platmon-candidate/platmon.ini --web /usr/share/platmon/frontends/web --app-version 1.3.0
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+Restart=on-failure
+RestartSec=5

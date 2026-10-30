@@ -2,7 +2,7 @@
 
   hub_check.py --hub PATH/TO/platmon-hub [--hosts pc,orin=user@host,...] --out DIR
 
-Starts the candidate unit (platmon-native-candidate.service, 127.0.0.1:19797) on every host, a
+Starts the candidate unit (platmon-server-candidate.service, 127.0.0.1:19797) on every host, a
 temporary Hub (the given platmon-hub executable, raw capture on, a new database, its own port; boards
 through an SSH tunnel), then, at fixed times: a restart of every agent (180 s), a SIGKILL of every agent
 (systemd restarts it, 300 s), the Hub stopped for 60 s (420 s) and started again on the same database,
@@ -51,7 +51,7 @@ def free_port():
 
 class Host:
     def __init__(self, name, ssh):
-        self.name, self.ssh, self.unit = name, ssh, "platmon-native-candidate.service"
+        self.name, self.ssh, self.unit = name, ssh, "platmon-server-candidate.service"
         self.node_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"platmon-hub-check/{name}"))
         self.port, self.tunnel, self.instances = AGENT_PORT, None, []
 

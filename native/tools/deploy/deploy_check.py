@@ -6,7 +6,7 @@ units are started, stopped or killed, through the sudo rules install.sh wrote; p
 script; CPU, VmRSS and threads from /proc, which anyone may read. One JSON line per check or hour.
 
   python3 deploy_check.py checks --out OUT.jsonl            # start, recovery, stopping (about 15 min)
-  python3 deploy_check.py soak --out OUT.jsonl [--hours 24]  # the long run, platmon-native-candidate
+  python3 deploy_check.py soak --out OUT.jsonl [--hours 24]  # the long run, platmon-server-candidate
   python3 deploy_check.py report OUT.jsonl [--settled-mib N]  # the judgement, set before the runs
 
 checks, in order; a check passes with no problem in its line:
@@ -56,7 +56,7 @@ import walk  # noqa: E402
 import worker  # noqa: E402
 
 PORT = 19797
-NATIVE, FAKE = "platmon-native-candidate.service", "platmon-native-candidate-fakesmi.service"
+NATIVE, FAKE = "platmon-server-candidate.service", "platmon-server-candidate-fakesmi.service"
 UNITS = (NATIVE, FAKE)
 INI = "/etc/platmon-candidate/platmon.ini"
 SYSTEMCTL = "/usr/bin/systemctl"
@@ -599,7 +599,7 @@ def setup(kind):
         with open(path, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
     return {"kind": kind, "host": socket.gethostname(), "machine": os.uname().machine, "python": sys.version.split()[0],
-            "user": os.getuid(), "binary_sha256": sha("/usr/lib/platmon-candidate/platmon-native"),
+            "user": os.getuid(), "binary_sha256": sha("/usr/lib/platmon-candidate/platmon-server"),
             "ini_sha256": ini_sha(), "units": {u: show(u, "FragmentPath", "User", "DynamicUser")
                                                for u in UNITS},
             "tools_sha256": {os.path.basename(f): sha(f) for f in (__file__, ab.__file__, walk.__file__, worker.__file__)},

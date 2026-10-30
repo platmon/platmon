@@ -4,23 +4,23 @@
 //! passive groups Network, Disk I/O and Pressure as the service enables them by default, and the nvidia-smi
 //! fallback.
 //!
-//!   platmon-native collect            one recorded collection 1 s after a first one, as JSON
+//!   platmon-server collect            one recorded collection 1 s after a first one, as JSON
 //!                                     {"stats", "sensors" (with spans), "required", "passive", "clock"}
-//!   platmon-native script             fixture tests: for each stdin line "BASE_NS WALL_US", one collection
+//!   platmon-server script             fixture tests: for each stdin line "BASE_NS WALL_US", one collection
 //!                                     on those clocks (see metadata::set_clocks), one JSON line each
 //!                                     ({"error": ...} for a failed collection)
-//!   platmon-native loop SECONDS [WARMUP]  collect every 1 s (after WARMUP s, default 3), print own CPU
+//!   platmon-server loop SECONDS [WARMUP]  collect every 1 s (after WARMUP s, default 3), print own CPU
 //!                                     (user/sys %), RSS, collection times and group states as JSON
-//!   platmon-native serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]
+//!   platmon-server serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]
 //!                                     the service: platmon.ini, the Sampler, slow
 //!                                     groups, history, replay and the HTTP API (src/runtime.rs, src/http.rs)
-//!   platmon-native service [CONFIG] [serve's options]
+//!   platmon-server service [CONFIG] [serve's options]
 //!                                     Windows only: serve as a service the service control manager runs
 //!                                     (platform/windows.rs, run_service)
-//!   platmon-native health [CONFIG]    whether the server CONFIG configures answers: GET /api/stats on its
+//!   platmon-server health [CONFIG]    whether the server CONFIG configures answers: GET /api/stats on its
 //!                                     address, which it prints as "HOST PORT"; exit 0 on 200, 1 otherwise,
 //!                                     2 for a configuration serve refuses (the container's health check)
-//!   platmon-native runtime-script     tools/equivalence/runtime_fixture.py: Sampler and slow-group operations with
+//!   platmon-server runtime-script     tools/equivalence/runtime_fixture.py: Sampler and slow-group operations with
 //!                                     given times and collections, one JSON line per stdin line
 // Elsewhere the shared helpers the Linux collectors call have no caller yet.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -60,8 +60,8 @@ pub const ALLOCATOR: &str = if cfg!(feature = "cache-alloc") { "cache-alloc" } e
 
 /// `build-info`: the allocator, also in the binary's own bytes, so that build.sh can check a binary of
 /// either target without running it.
-pub const ALLOCATOR_MARK: &str = if cfg!(feature = "cache-alloc") { "platmon-native-allocator=cache-alloc;" }
-    else if cfg!(feature = "mimalloc") { "platmon-native-allocator=mimalloc;" } else { "platmon-native-allocator=system;" };
+pub const ALLOCATOR_MARK: &str = if cfg!(feature = "cache-alloc") { "platmon-server-allocator=cache-alloc;" }
+    else if cfg!(feature = "mimalloc") { "platmon-server-allocator=mimalloc;" } else { "platmon-server-allocator=system;" };
 
 /// The application version: the repository's VERSION file, read at build time (the build scripts and the
 /// Dockerfile put it beside native/); serve's --app-version overrides it.
@@ -69,7 +69,7 @@ fn version() -> &'static str {
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../VERSION")).trim()
 }
 
-const USAGE: &str = "usage: platmon-native COMMAND
+const USAGE: &str = "usage: platmon-server COMMAND
   serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]
                           the service: collect and answer HTTP as CONFIG (platmon.ini) says
   health [CONFIG]         exit 0 when the server CONFIG configures answers /api/stats, 1 if not, 2 if CONFIG is refused
@@ -85,7 +85,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("--help" | "-h" | "help") => return println!("{}", USAGE),
-        Some("--version" | "-V") => return println!("platmon-native {}", version()),
+        Some("--version" | "-V") => return println!("platmon-server {}", version()),
         Some("serve") => return serve(&args[2..]),
         #[cfg(windows)]
         Some("service") => {
@@ -126,22 +126,22 @@ fn config_check(args: &[String]) {
     };
     println!("{}", out.to_string(false));
     if let Some(Value::Str(e)) = out.get("error") {
-        eprintln!("platmon-native config-check: error: {}", e);
+        eprintln!("platmon-server config-check: error: {}", e);
         std::process::exit(1);
     }
 }
 
 /// health [CONFIG]: GET /api/stats where serve would listen with CONFIG (127.0.0.1 for 0.0.0.0), within 4 s.
 fn health(path: Option<&str>) {
-    let cfg = config::load(path, None).unwrap_or_else(|e| { eprintln!("platmon-native health: error: {}", e); std::process::exit(2) });
+    let cfg = config::load(path, None).unwrap_or_else(|e| { eprintln!("platmon-server health: error: {}", e); std::process::exit(2) });
     let bind = cfg.text("http", "bind");
     let host = if bind == "0.0.0.0" { "127.0.0.1".to_string() } else { bind };
     let port = cfg.int("http", "port");
     println!("{} {}", host, port);
     match http::get_status(&host, port as u16, "/api/stats", std::time::Duration::from_secs(4)) {
         Ok(200) => {}
-        Ok(code) => { eprintln!("platmon-native health: /api/stats answered {}", code); std::process::exit(1) }
-        Err(e) => { eprintln!("platmon-native health: {}:{}: {}", host, port, e); std::process::exit(1) }
+        Ok(code) => { eprintln!("platmon-server health: /api/stats answered {}", code); std::process::exit(1) }
+        Err(e) => { eprintln!("platmon-server health: {}:{}: {}", host, port, e); std::process::exit(1) }
     }
 }
 
@@ -171,12 +171,12 @@ fn serve(args: &[String]) {
         }
     }
     let names = config::frontends(frontends.as_deref());
-    let cfg = config::load(path.as_deref(), names.as_deref()).unwrap_or_else(|e| { eprintln!("platmon-native serve: error: {}", e); std::process::exit(2) });
+    let cfg = config::load(path.as_deref(), names.as_deref()).unwrap_or_else(|e| { eprintln!("platmon-server serve: error: {}", e); std::process::exit(2) });
     platform::exit_on_terminate();
     let interval = cfg.float("core", "interval");
     let mut c = Collector::new((3.0 * interval).max(5.0), [cfg.flag("network", "enabled"), cfg.flag("disk_io", "enabled"),
                                                             cfg.flag("pressure", "enabled")]);
-    println!("platmon-native: platform {}, version {}", c.platform, version);
+    println!("platmon-server: platform {}, version {}", c.platform, version);
     let source = metadata::clock_source();
     let mut sampler = runtime::Sampler::new(interval, None, runtime::uuid4(), source);
     let slow_names = slow_groups(&cfg);
@@ -197,7 +197,7 @@ fn serve(args: &[String]) {
                                                                 clock_source: source });
     let levels = config::levels_for(&cfg, c.platform);
     let (bind, port) = (cfg.text("http", "bind"), cfg.int("http", "port") as u16);
-    let listener = http::bind(&bind, port).unwrap_or_else(|e| { eprintln!("platmon-native: cannot listen on {}:{}: {}", bind, port, e); std::process::exit(1) });
+    let listener = http::bind(&bind, port).unwrap_or_else(|e| { eprintln!("platmon-server: cannot listen on {}:{}: {}", bind, port, e); std::process::exit(1) });
     let s = sampler.clone();
     std::thread::Builder::new().name("sampler".into()).spawn(move || {
         static STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -242,7 +242,7 @@ mod tests {
             (Some("[probe]\ntargets = 127.0.0.1:9797\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT, ("probe", 10.0)], true),
             (Some("[probe]\nenabled = no\ntargets = 127.0.0.1:9797\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT], true),
             (Some("[probe]\ntargets = , ,\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT], true)];
-        let path = std::env::temp_dir().join(format!("platmon-native-slow-{}.ini", std::process::id()));
+        let path = std::env::temp_dir().join(format!("platmon-server-slow-{}.ini", std::process::id()));
         for (text, groups, history) in cases {
             if let Some(t) = text {
                 std::fs::write(&path, t).unwrap();

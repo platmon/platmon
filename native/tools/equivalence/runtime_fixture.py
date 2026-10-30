@@ -1,4 +1,4 @@
-"""Deterministic equivalence of the runtime (step 3A): platmon-native's Sampler and slow groups
+"""Deterministic equivalence of the runtime (step 3A): platmon-server's Sampler and slow groups
 (`runtime-script`) against the recorded answers (golden.py, golden/runtime/<scenario>.jsonl, first
 recorded from the Python service before its removal in 1.6.0) for the same operations with the same times and collections, and
 every answer must be the same, byte for byte: the /api/stats body (or none), the /api/status body without

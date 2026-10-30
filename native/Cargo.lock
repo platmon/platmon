@@ -43,7 +43,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "platmon-native"
+name = "platmon-server"
 version = "0.0.0"
 dependencies = [
  "libc",

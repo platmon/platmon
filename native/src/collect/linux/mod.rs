@@ -55,7 +55,7 @@ enum Board { Jetson, None }
 fn detect() -> (&'static str, Board) {
     // a compatible string that is not UTF-8 stops the service
     let compatible = sysfs::read(&format!("{}/compatible", sysfs::device_tree()))
-        .unwrap_or_else(|e| { eprintln!("platmon-native: {}", e); std::process::exit(1) }).unwrap_or_default();
+        .unwrap_or_else(|e| { eprintln!("platmon-server: {}", e); std::process::exit(1) }).unwrap_or_default();
     for (key, name, board) in [("nvidia,tegra234", "Jetson Orin", Board::Jetson), ("nvidia,tegra194", "Jetson Xavier", Board::Jetson),
                                ("nvidia,tegra", "Jetson", Board::Jetson), ("raspberrypi", "Raspberry Pi", Board::None)] {
         if compatible.contains(key) {

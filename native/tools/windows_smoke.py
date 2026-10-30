@@ -62,7 +62,7 @@ def main(binary):
             print("      " + detail[:800].replace("\n", "\n      "))  # a collection's output is long
 
     r = run(binary, ["build-info"])
-    check("build-info", r.returncode == 0 and r.stdout.strip() == "platmon-native-allocator=system;", repr(r))
+    check("build-info", r.returncode == 0 and r.stdout.strip() == "platmon-server-allocator=system;", repr(r))
 
     r = run(binary, ["collect"])
     out = json.loads(r.stdout) if r.returncode == 0 else {}

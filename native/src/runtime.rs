@@ -516,7 +516,7 @@ fn check(stats: &mut Value, sensors: &Value, required: &Value, passive: &Value, 
 pub fn uuid4() -> String {
     let mut b = [0u8; 16];
     if !crate::platform::random_bytes(&mut b) {
-        eprintln!("platmon-native: getrandom failed");
+        eprintln!("platmon-server: getrandom failed");
         std::process::exit(1);
     }
     b[6] = (b[6] & 0x0f) | 0x40;

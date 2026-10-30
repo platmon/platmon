@@ -243,7 +243,7 @@ pub fn collect_command(args: &[String]) {
             println!("{}", v.to_string(false));
         }
         _ => {
-            eprintln!("usage: platmon-native collect | script | loop SECONDS [WARMUP] | serve [OPTIONS] | runtime-script");
+            eprintln!("usage: platmon-server collect | script | loop SECONDS [WARMUP] | serve [OPTIONS] | runtime-script");
             std::process::exit(2);
         }
     }

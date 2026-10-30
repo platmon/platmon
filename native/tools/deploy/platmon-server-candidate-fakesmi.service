@@ -1,0 +1,16 @@
+# platmon candidate check: platmon-server with a slow fake nvidia-smi first on PATH, to stop the service while
+# the command runs. Only for that check; otherwise as platmon-server-candidate.service.
+[Unit]
+Description=platmon candidate check: platmon-server, fake nvidia-smi
+After=network.target
+Conflicts=platmon-server-candidate.service
+
+[Service]
+ExecStart=/usr/lib/platmon-candidate/platmon-server serve /etc/platmon-candidate/platmon.ini --web /usr/share/platmon/frontends/web --app-version 1.3.0
+Environment=PATH=/usr/lib/platmon-candidate/fakebin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+Restart=on-failure
+RestartSec=5

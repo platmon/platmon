@@ -43,6 +43,8 @@ def inside(first, second):
     invoke("dpkg", "-i", str(first))
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == first_version
     assert not Path("/usr/bin/platmon").exists()
+    # the server's name up to 1.6.0 still runs it
+    assert invoke("/usr/lib/platmon/platmon-native", "--version") == "platmon-server " + first_version.split("-")[0]
     invoke("dpkg", "-i", str(first_cli))
     assert invoke("/usr/bin/platmon", "--version") == "platmon " + first_version.split("-")[0]
     assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-cli: /usr/bin/platmon"
@@ -62,7 +64,8 @@ def inside(first, second):
     invoke("systemctl", "unmask", "platmon.service")
     invoke("dpkg", "--remove", "platmon")
     assert ini.read_text() == custom
-    assert not Path("/usr/lib/platmon/platmon-native").exists()
+    assert not Path("/usr/lib/platmon/platmon-server").exists()
+    assert not os.path.lexists("/usr/lib/platmon/platmon-native")
     assert Path("/usr/bin/platmon").exists()  # its own package
     invoke("dpkg", "--remove", "platmon-cli")
     assert not Path("/usr/bin/platmon").exists()
@@ -73,7 +76,7 @@ def inside(first, second):
     unit.write_text("[Service]\nExecStart=/old/platmon.py\n")
     invoke("dpkg", "-i", str(first), success=False)
     assert unit.read_text().endswith("ExecStart=/old/platmon.py\n")
-    assert not Path("/usr/lib/platmon/platmon-native").exists()
+    assert not Path("/usr/lib/platmon/platmon-server").exists()
     unit.unlink()  # Only the fixture created above is removed.
     # Migration preserves a pre-existing INI and administrator-owned local command.
     ini.parent.mkdir(parents=True, exist_ok=True)

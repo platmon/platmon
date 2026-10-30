@@ -5,7 +5,7 @@ case "$1" in
         # Validate the preserved config before enabling or restarting any service: config-check exits 1
         # for a file it refuses, with the reason on stderr after "error: ".
         status=0
-        why=$(/usr/lib/platmon/platmon-native config-check /etc/platmon/platmon.ini 2>&1 >/dev/null) || status=$?
+        why=$(/usr/lib/platmon/platmon-server config-check /etc/platmon/platmon.ini 2>&1 >/dev/null) || status=$?
         if [ "$status" -eq 1 ]; then
             echo "invalid platmon config: ${why#*error: }" >&2
             exit 1
@@ -27,7 +27,7 @@ case "$1" in
                 deb-systemd-invoke start platmon.service
             fi
             # A service that was started must stay running and answer /api/stats on the configured address
-            # (`platmon-native health`: a current snapshot, as /api/status says ready) within 20 s.
+            # (`platmon-server health`: a current snapshot, as /api/status says ready) within 20 s.
             # Failing here leaves the package unconfigured; installing the previous package recovers.
             state() { systemctl show platmon.service -p "$1" --value; }
             if [ "$(state ActiveState)" = inactive ] && [ "$(state Result)" = success ]; then
@@ -40,14 +40,14 @@ case "$1" in
                         why="the service stopped ($(state ActiveState)/$(state SubState), result $(state Result))"
                         break
                     fi
-                    if why=$(/usr/lib/platmon/platmon-native health /etc/platmon/platmon.ini 2>&1 >/dev/null); then
+                    if why=$(/usr/lib/platmon/platmon-server health /etc/platmon/platmon.ini 2>&1 >/dev/null); then
                         healthy=true
                         break
                     fi
                     sleep 0.5
                 done
                 if [ "$healthy" != true ]; then
-                    echo "platmon.service failed its health check: ${why#platmon-native health: }; see journalctl -u platmon." \
+                    echo "platmon.service failed its health check: ${why#platmon-server health: }; see journalctl -u platmon." \
                         "To go back, install the previous package: sudo apt install --allow-downgrades platmon=VERSION" >&2
                     exit 1
                 fi

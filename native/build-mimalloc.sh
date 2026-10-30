@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the mimalloc variant for this machine's own architecture, in the same rust:1.88-slim image as
 # build.sh, natively (its C needs a C compiler for the target; this image has none for the other one):
-#   native/build-mimalloc.sh   -> native/target/mimalloc/<arch>-unknown-linux-musl/release/platmon-native
+#   native/build-mimalloc.sh   -> native/target/mimalloc/<arch>-unknown-linux-musl/release/platmon-server
 # mimalloc's C is compiled by musl-gcc (Debian's musl-tools) at the compiler's default CPU baseline, never
 # -march=native; the compile commands go to target/mimalloc/<arch>-cc.txt.
 set -euo pipefail
@@ -19,4 +19,4 @@ docker run --rm -v "$PWD":/src -w /src -e HOST_UID="$(id -u)" -e HOST_GID="$(id 
   cargo test -q --release --locked --features mimalloc --target $t --target-dir target/mimalloc 2>&1 | grep -E "test result|FAILED|panicked"
   chown -R $HOST_UID:$HOST_GID target'
 cat "target/mimalloc/$arch-cc.txt"
-sha256sum "target/mimalloc/$arch-unknown-linux-musl/release/platmon-native"
+sha256sum "target/mimalloc/$arch-unknown-linux-musl/release/platmon-server"

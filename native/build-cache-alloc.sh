@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The cache-alloc build, kept as the record of the 2026-10-18/19 measurements (native/README.md as of b96aba8); not a release build:
-#   native/build-cache-alloc.sh   -> native/target/cache-alloc/{x86_64,aarch64}-unknown-linux-musl/release/platmon-native
+#   native/build-cache-alloc.sh   -> native/target/cache-alloc/{x86_64,aarch64}-unknown-linux-musl/release/platmon-server
 set -euo pipefail
 cd "$(dirname "$0")"
 docker run --rm -u "$(id -u):$(id -g)" -e CARGO_HOME=/src/target/cargo-home -v "$PWD":/src -v "$PWD/../VERSION":/VERSION:ro -w /src rust:1.88-slim bash -euo pipefail -c '
@@ -9,4 +9,4 @@ docker run --rm -u "$(id -u):$(id -g)" -e CARGO_HOME=/src/target/cargo-home -v "
     RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static" cargo build -q --release --locked --target $t \
       --features cache-alloc --target-dir target/cache-alloc
   done'
-sha256sum target/cache-alloc/*/release/platmon-native
+sha256sum target/cache-alloc/*/release/platmon-server

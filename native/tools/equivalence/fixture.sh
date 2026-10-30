@@ -3,15 +3,15 @@
 # throwaway container: it needs to mount the trees over /sys and /proc, which an unprivileged process cannot,
 # and to add interfaces to its own network namespace (--network none: nothing but lo, and nothing reaches the
 # host). Builds the local image
-# platmon-native-fixture:local (Debian 13 and its python3; never pushed) on first use.
+# platmon-server-fixture:local (Debian 13 and its python3; never pushed) on first use.
 #   native/build.sh && native/tools/equivalence/fixture.sh [SCENARIO ...]
 #   native/tools/equivalence/fixture.sh --bless [SCENARIO ...]   # rewrite golden/fixture from the server's answers
-#   BINARY=native/target/<dir>/x86_64-unknown-linux-musl/release/platmon-native native/tools/equivalence/fixture.sh   # another build
+#   BINARY=native/target/<dir>/x86_64-unknown-linux-musl/release/platmon-server native/tools/equivalence/fixture.sh   # another build
 # The host name and the tmpfs sizes are fixed, as they were when the answers were recorded.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
-binary=${BINARY:-native/target/x86_64-unknown-linux-musl/release/platmon-native}  # relative to the repository
-image=platmon-native-fixture:local
+binary=${BINARY:-native/target/x86_64-unknown-linux-musl/release/platmon-server}  # relative to the repository
+image=platmon-server-fixture:local
 golden=native/tools/equivalence/golden/fixture
 bless=()  # --bless: golden/fixture writable, its files given back to this user afterwards
 for arg in "$@"; do
