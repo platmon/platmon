@@ -46,7 +46,7 @@ impl Probe {
 }
 
 // tests/collector/test_probe.py, ported (docs/development/python-test-port.md): the observation; connect_ms
-// is tested in linux/observe.rs, target parsing in config.rs.
+// is tested in linux/observe/probe.rs, target parsing in config.rs.
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;

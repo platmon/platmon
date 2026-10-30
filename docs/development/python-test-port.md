@@ -35,18 +35,18 @@ R 13
 
 | test | mark | where |
 | --- | --- | --- |
-| `test_charge_family_battery` | R | observe.rs |
-| `test_energy_family_battery_keeps_the_sign` | R | observe.rs |
-| `test_an_attribute_the_driver_does_not_expose_is_not_a_problem` | R | observe.rs |
-| `test_no_supply_is_unavailable_not_an_error` | R | observe.rs |
-| `test_empty_bay_reports_absent_without_inventing_numbers` | R | observe.rs |
-| `test_external_supplies_and_their_order` | R | observe.rs |
-| `test_a_ups_holds_charge_like_a_battery` | R | observe.rs |
-| `test_a_supply_without_a_type_is_left_out` | R | observe.rs |
-| `test_a_value_that_is_not_one_is_invalid_data` | R | observe.rs |
-| `test_an_over_long_enum_is_not_one` | R | observe.rs |
-| `test_an_unreadable_attribute_is_reported_and_the_rest_kept` | R | observe.rs |
-| `test_the_host_class_reads` | R | observe.rs |
+| `test_charge_family_battery` | R | observe/battery.rs |
+| `test_energy_family_battery_keeps_the_sign` | R | observe/battery.rs |
+| `test_an_attribute_the_driver_does_not_expose_is_not_a_problem` | R | observe/battery.rs |
+| `test_no_supply_is_unavailable_not_an_error` | R | observe/battery.rs |
+| `test_empty_bay_reports_absent_without_inventing_numbers` | R | observe/battery.rs |
+| `test_external_supplies_and_their_order` | R | observe/battery.rs |
+| `test_a_ups_holds_charge_like_a_battery` | R | observe/battery.rs |
+| `test_a_supply_without_a_type_is_left_out` | R | observe/battery.rs |
+| `test_a_value_that_is_not_one_is_invalid_data` | R | observe/battery.rs |
+| `test_an_over_long_enum_is_not_one` | R | observe/battery.rs |
+| `test_an_unreadable_attribute_is_reported_and_the_rest_kept` | R | observe/battery.rs |
+| `test_the_host_class_reads` | R | observe/battery.rs |
 | `test_config_section` | R | config.rs battery_section |
 
 ## `tests/collector/test_common.py`
@@ -289,12 +289,12 @@ R 11, K 1
 | --- | --- | --- |
 | `test_parse_targets` | R | config.rs parse_targets_like_python |
 | `test_parse_targets_refuses` | R | config.rs parse_targets_like_python; config_fixture |
-| `test_connect_to_loopback_listener` | R | observe.rs |
-| `test_refused_is_a_failure_not_a_time` | R | observe.rs |
-| `test_timeout_is_reported_without_a_time` | R | observe.rs (a full accept queue instead of a patched select) |
+| `test_connect_to_loopback_listener` | R | observe/probe.rs |
+| `test_refused_is_a_failure_not_a_time` | R | observe/probe.rs |
+| `test_timeout_is_reported_without_a_time` | R | observe/probe.rs (a full accept queue instead of a patched select) |
 | `test_observation_keeps_a_bounded_failure_window` | R | probe.rs |
 | `test_targets_are_probed_one_after_another` | R | probe.rs |
-| `test_socket_creation_error_does_not_escape` | R | observe.rs a_socket_that_cannot_be_made_is_an_error |
+| `test_socket_creation_error_does_not_escape` | R | observe/probe.rs a_socket_that_cannot_be_made_is_an_error |
 | `test_socket_error_keeps_other_targets_and_failure_window` | R | probe.rs |
 | `test_config_refuses` | R | config.rs probe_config_refusals_and_defaults; config_fixture |
 | `test_enabled_by_default_without_targets` | R | config.rs probe_config_refusals_and_defaults |
@@ -355,15 +355,15 @@ R 19, G 5, P 3, K 1, X 1
 
 | test | mark | where |
 | --- | --- | --- |
-| `test_parse_mountinfo_escapes_optional_fields_and_bad_lines` | R | observe.rs |
-| `test_read_only_is_the_filesystem_not_this_process_mount` | R | observe.rs |
-| `test_parse_partitions` | R | observe.rs parse_partitions_rows |
-| `test_local_block_filesystems_once_each_with_all_mount_points` | R | observe.rs (the kernel's statvfs of the test tree) |
+| `test_parse_mountinfo_escapes_optional_fields_and_bad_lines` | R | observe/storage.rs |
+| `test_read_only_is_the_filesystem_not_this_process_mount` | R | observe/storage.rs |
+| `test_parse_partitions` | R | observe/storage.rs parse_partitions_rows |
+| `test_local_block_filesystems_once_each_with_all_mount_points` | R | observe/storage.rs (the kernel's statvfs of the test tree) |
 | `test_a_measured_zero_is_zero` | X | statvfs is the kernel's: a test cannot make a filesystem of 0 blocks |
-| `test_statvfs_failure_keeps_the_entry_without_numbers` | R | observe.rs: ENOENT, EACCES and a replaced mount; EIO cannot be made with a test tree |
-| `test_unreadable_mountinfo_or_partitions` | R | observe.rs |
-| `test_nothing_found_is_unavailable` | R | observe.rs |
-| `test_a_device_number_without_a_name_is_kept` | R | observe.rs |
+| `test_statvfs_failure_keeps_the_entry_without_numbers` | R | observe/storage.rs: ENOENT, EACCES and a replaced mount; EIO cannot be made with a test tree |
+| `test_unreadable_mountinfo_or_partitions` | R | observe/storage.rs |
+| `test_nothing_found_is_unavailable` | R | observe/storage.rs |
+| `test_a_device_number_without_a_name_is_kept` | R | observe/storage.rs |
 | `test_starting_then_observed_then_stale` | G | runtime observations (starting, at stale_after, stale) |
 | `test_an_unexpected_error_is_the_groups_own` | G | runtime observations (battery raised: internal_error) |
 | `test_a_blocked_observation_stalls_only_its_group` | G | slow.rs a_blocked_read_stalls_only_its_group; runtime observations (while it runs) |
@@ -372,18 +372,18 @@ R 19, G 5, P 3, K 1, X 1
 | `test_storage_is_on_by_default_and_its_interval_is_checked` | R | config.rs storage_section |
 | `test_slow_groups_and_history_follow_configuration` | R | main.rs slow_groups_and_history_follow_configuration |
 | `test_observations_endpoint` | G | runtime observations; live_http.py |
-| `test_real_host_observation` | R | observe.rs |
+| `test_real_host_observation` | R | observe/storage.rs |
 | `test_http_answers_while_a_group_is_blocked_and_stale` | G | slow.rs a_blocked_read_stalls_only_its_group; runtime observations (observations while both run) |
 | `test_cli_storage_lines_and_ages` | K | tests/frontends/test_cli.py `test_storage_lines_and_ages` |
-| `test_only_local_filesystem_lines_are_converted` | R | observe.rs parse_mountinfo_escapes_optional_fields_and_bad_lines (the native parser always filters) |
-| `test_capacity_is_bound_to_verified_mount_descriptor` | R | observe.rs statvfs_failure_keeps_the_entry_without_numbers (replaced) |
-| `test_replaced_mount_has_no_capacity_and_an_explicit_reason` | R | observe.rs statvfs_failure_keeps_the_entry_without_numbers (replaced) |
-| `test_capacity_descriptor_closes_on_statvfs_failure` | P | Python's patched os.close: observe.rs capacity closes its descriptor after every result by construction |
-| `test_storage_skips_file_binds_before_a_directory` | R | observe.rs |
-| `test_only_file_binds_keep_unknown_capacity` | R | observe.rs |
-| `test_file_bind_fallback_keeps_descriptor_identity_check` | R | observe.rs storage_skips_file_binds_before_a_directory (the tree's real device) |
-| `test_capacity_does_not_require_directory_read_permission` | R | observe.rs |
-| `test_capacity_rejects_symlinks_and_regular_files` | R | observe.rs capacity_rejects_symlinks_and_regular_files_and_other_filesystems |
+| `test_only_local_filesystem_lines_are_converted` | R | observe/storage.rs parse_mountinfo_escapes_optional_fields_and_bad_lines (the native parser always filters) |
+| `test_capacity_is_bound_to_verified_mount_descriptor` | R | observe/storage.rs statvfs_failure_keeps_the_entry_without_numbers (replaced) |
+| `test_replaced_mount_has_no_capacity_and_an_explicit_reason` | R | observe/storage.rs statvfs_failure_keeps_the_entry_without_numbers (replaced) |
+| `test_capacity_descriptor_closes_on_statvfs_failure` | P | Python's patched os.close: observe/storage.rs capacity closes its descriptor after every result by construction |
+| `test_storage_skips_file_binds_before_a_directory` | R | observe/storage.rs |
+| `test_only_file_binds_keep_unknown_capacity` | R | observe/storage.rs |
+| `test_file_bind_fallback_keeps_descriptor_identity_check` | R | observe/storage.rs storage_skips_file_binds_before_a_directory (the tree's real device) |
+| `test_capacity_does_not_require_directory_read_permission` | R | observe/storage.rs |
+| `test_capacity_rejects_symlinks_and_regular_files` | R | observe/storage.rs capacity_rejects_symlinks_and_regular_files_and_other_filesystems |
 
 ## `tests/collector/test_wifi.py`
 
@@ -391,22 +391,22 @@ R 17, K 1
 
 | test | mark | where |
 | --- | --- | --- |
-| `test_connected_rows_from_the_boards` | R | observe.rs |
-| `test_unupdated_signal_does_not_determine_connection` | R | observe.rs |
-| `test_a_value_without_dbm_is_not_called_dbm` | R | observe.rs |
-| `test_noise_when_the_driver_gives_it` | R | observe.rs |
-| `test_bad_rows_and_files` | R | observe.rs |
-| `test_observation_states` | R | observe.rs |
-| `test_real_host_file` | R | observe.rs |
-| `test_observation_exports_known_interface_identity` | R | observe.rs |
-| `test_unavailable_identity_is_not_invented` | R | observe.rs |
-| `test_signal_not_updated_does_not_claim_disconnection` | R | observe.rs |
-| `test_connection_states_are_not_inferred_from_signal` | R | observe.rs |
-| `test_carrier_and_index_from_fake_sysfs` | R | observe.rs |
-| `test_interface_replaced_during_carrier_read_is_unknown` | R | observe.rs |
-| `test_raw_zero_and_invalid_signal_range` | R | observe.rs |
-| `test_down_carrier_is_disconnected_without_issue` | R | observe.rs |
-| `test_carrier_errors_are_not_all_treated_as_down` | R | observe.rs |
+| `test_connected_rows_from_the_boards` | R | observe/wifi.rs |
+| `test_unupdated_signal_does_not_determine_connection` | R | observe/wifi.rs |
+| `test_a_value_without_dbm_is_not_called_dbm` | R | observe/wifi.rs |
+| `test_noise_when_the_driver_gives_it` | R | observe/wifi.rs |
+| `test_bad_rows_and_files` | R | observe/wifi.rs |
+| `test_observation_states` | R | observe/wifi.rs |
+| `test_real_host_file` | R | observe/wifi.rs |
+| `test_observation_exports_known_interface_identity` | R | observe/wifi.rs |
+| `test_unavailable_identity_is_not_invented` | R | observe/wifi.rs |
+| `test_signal_not_updated_does_not_claim_disconnection` | R | observe/wifi.rs |
+| `test_connection_states_are_not_inferred_from_signal` | R | observe/wifi.rs |
+| `test_carrier_and_index_from_fake_sysfs` | R | observe/wifi.rs |
+| `test_interface_replaced_during_carrier_read_is_unknown` | R | observe/wifi.rs |
+| `test_raw_zero_and_invalid_signal_range` | R | observe/wifi.rs |
+| `test_down_carrier_is_disconnected_without_issue` | R | observe/wifi.rs |
+| `test_carrier_errors_are_not_all_treated_as_down` | R | observe/wifi.rs |
 | `test_wifi_is_on_by_default_with_a_5_s_candidate_interval` | R | config.rs wifi_section |
 | `test_cli_lines` | K | tests/frontends/test_cli.py `test_wifi_lines` |
 

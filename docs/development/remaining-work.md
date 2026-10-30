@@ -93,7 +93,7 @@ the reasons do not have to be rediscovered. None of them is a defect in what shi
 | Item | What it would take | Why it waited |
 | --- | --- | --- |
 | A battery level in `[thresholds]` | Done: `battery` and `wifi` levels, warning above critical, compared at or below by `low_level()` / `lowLevel` (docs/guides/interfaces.md) | — |
-| `temp`, `time_to_empty_now`, `time_to_full_now` | Three more standard `power_supply` attributes in the battery reader (`native/src/collect/linux/observe.rs`); absent ones already cost nothing | `temp` is a temperature and `/api/stats` already has a `temperature` table, so where it belongs is a design question, not a field to add. The two time estimates are a driver's own extrapolation, not a reading |
+| `temp`, `time_to_empty_now`, `time_to_full_now` | Three more standard `power_supply` attributes in the battery reader (`native/src/collect/linux/observe/battery.rs`); absent ones already cost nothing | `temp` is a temperature and `/api/stats` already has a `temperature` table, so where it belongs is a design question, not a field to add. The two time estimates are a driver's own extrapolation, not a reading |
 | What reading a battery costs the battery | A power measurement on a battery-powered host, with the group off and on | It is the reason the default interval is 60 s rather than the 10 s floor, and it is the one number behind that choice that is not measured |
 | Battery in a fleet server's own history | Done in `platmon-hub` ([#31](https://github.com/platmon/platmon-hub/pull/31)): `battery` is among the observation groups its history stores | — |
 

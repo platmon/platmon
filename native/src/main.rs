@@ -123,7 +123,7 @@ fn slow_groups(cfg: &config::Config) -> Vec<&'static str> {
 }
 
 /// serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]: the configuration as config::load
-/// reads it; the slow groups are on as configured, with their readers (src/collect/linux/observe.rs).
+/// reads it; the slow groups are on as configured, with their readers (src/collect/linux/observe/).
 fn serve(args: &[String]) {
     let (mut path, mut web_dir, mut version, mut frontends) = (None, None, "0.0.0".to_string(), None);
     let mut it = args.iter();

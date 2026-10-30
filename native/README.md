@@ -113,7 +113,7 @@ Service features:
 - `platmon.ini` (`src/config.rs`): configparser's syntax (sections, `=`/`:`, comments, continuation lines,
   DEFAULT, duplicate and parsing errors with its messages), `check()`, `levels()`, the probe targets, the
   same refusals; groups, history, replay and the web page on and off as configured.
-- The slow readers (`src/collect/linux/observe.rs`): storage (partitions of physical disks, local filesystems by device
+- The slow readers (`src/collect/linux/observe/`, one file per group): storage (partitions of physical disks, local filesystems by device
   number, statvfs through a pinned descriptor), Wi-Fi (`/proc/net/wireless`, the namespace and ifindex,
   the carrier), battery (`/sys/class/power_supply`), the TCP connect probe.
 
@@ -644,7 +644,7 @@ instance id, the listening socket and the exit on a stop request, one module per
 functions. `platform/linux.rs` is the code `main.rs`, `metadata.rs`, `runtime.rs` and `http.rs` had,
 unchanged. `src/collect/mod.rs` keeps what both collectors use (the CPU counters' windows and reasons, the
 required reads' spans, `Collected`); `src/collect/linux/` (`sysfs.rs`, `common.rs`, `passive.rs`,
-`observe.rs`, the device readers) and the commands only it serves (`script`, `loop`, `observe-script`) build
+`observe/`, the device readers) and the commands only it serves (`script`, `loop`, `observe-script`) build
 on Linux only.
 
 On `x86_64-pc-windows-msvc`:
