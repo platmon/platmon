@@ -14,8 +14,10 @@ The Debian package, the source installation and the container run the server bui
 It was ported module by module from a Python server (`platmon.py`, `collector/`, `runtime/`), deprecated in
 1.5.0 and removed after 1.6.0; the HTTP API, `platmon.ini` and its messages, and `/text` are its contracts,
 and the Python answers recorded before the removal are what the equivalence checks compare with
-([native/README.md](../../native/README.md)). Comments in `native/src/` still name the Python module or test
-a part was ported from; they are in the git history up to 1.6.0. `src/main.rs` loads and validates the
+([native/README.md](../../native/README.md)). Comments in `native/src/` describe the Rust code; where they name
+Python, they mean its language or standard library (the recorded answers fix that behavior), or the Python test
+a Rust test was ported from ([Python test port](python-test-port.md)). The Python modules are in the git history
+up to 1.6.0. `src/main.rs` loads and validates the
 configuration, constructs the readers and workers, and starts the HTTP frontend.
 
 ## Collection and runtime
