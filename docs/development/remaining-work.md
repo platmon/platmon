@@ -6,7 +6,8 @@
 > - Windows: unreleased until the real-PC checks below pass. Linux: armhf on a real device, a 24 h soak
 >   since 1.5.0, an apt upgrade from 1.5.0 on a real device, a remote probe target.
 > - Python server: deprecated in 1.5.0, removed for the next minor release (below); not released yet.
-> - Also recorded, not started: battery follow-ups and a desktop tray frontend.
+> - Also recorded, not started: battery follow-ups, a desktop tray frontend, and a separate network
+>   process (deferred; no Unix socket).
 
 Merging, production rollout and releases always wait for the owner's approval. The staged plan of
 2026-10-09 to 2026-10-11 (Disk I/O → UI → storage → PSI → Wi-Fi → probe → history → release readiness)
@@ -119,6 +120,18 @@ It would stay a source platmon **reads**, not one that pushes to it. Three reaso
 Deferred until a second real source exists, so that the format is settled by the field model rather than
 by one device's payload. The external device keeps whatever else it reports — motion, actuators, anything
 else on its bus — out of platmon: only the fields this group defines would be read.
+
+## Decided: what the service serves (2026-10-30)
+
+The owner asked for the web page and the CLI to be independent of the service, reading it, without
+breaking platmon-hub. The existing `[http] bind` and `web` keys already give the three shapes (everything,
+the API without the page, this host only), on Linux and Windows alike; they are documented in
+[deployment](../guides/deployment.md#choosing-what-is-served).
+
+| Option | Decision | Why |
+| --- | --- | --- |
+| A Unix socket for local clients | Not added | Loopback TCP (`bind = 127.0.0.1`) already keeps the API on the host, with the same code on Windows; a socket would add a second transport per OS (AF_UNIX or named pipes) for file-permission access control the read-only API does not need. Revisit if per-user access is required |
+| A separate network process (a gateway on 9797 relaying a loopback core API, with the page) | Deferred | It would isolate a network-side failure from collection and keep `/proc` and `/sys` out of the process that accepts connections; it costs a second process and unit, two port settings, and a relay for `/api/replay`'s large answers. Today the server builds with `panic = "abort"`, so a panic while answering a request would end collection too; none is known. Measure its memory and latency against [budget.md](../performance/budget.md) before starting |
 
 ## Planned: desktop tray (2026-10-18)
 
