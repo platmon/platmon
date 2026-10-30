@@ -110,6 +110,7 @@ fn phrase(code: u16) -> (&'static str, &'static str) {
         409 => ("Conflict", "Request conflict"),
         414 => ("URI Too Long", "URI is too long."), // RFC 9110's name, Python 3.13+ (3.10: Request-URI Too Long)
         431 => ("Request Header Fields Too Large", "The server refused this request because the request header fields are too large."),
+        500 => ("Internal Server Error", "Server got itself in trouble"),
         501 => ("Not Implemented", "Server does not support this operation"),
         503 => ("Service Unavailable", "The server cannot process the request due to a high load"),
         505 => ("HTTP Version Not Supported", "Cannot fulfill request."),
@@ -338,7 +339,9 @@ impl Server {
                 let obs = self.observations.view(self.clock);
                 match crate::render::render(&stats, Some(&obs)) {
                     Ok(text) => x.reply(full, 200, (text + "\n").as_bytes(), "text/plain; charset=utf-8"),
-                    Err(()) => Ok(()), // as recorded: no answer when the screen cannot be rendered
+                    // a value the screen has no form for (the platmon command fails on the same snapshot)
+                    Err(()) => x.reply(full, 500, b"this snapshot cannot be shown as the screen; /api/stats has it\n",
+                                       "text/plain; charset=utf-8"),
                 }
             }
             "/" | "/index.html" if self.web.is_some() => {

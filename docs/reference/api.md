@@ -21,7 +21,7 @@ carries `Cache-Control: no-store`.
 | `/api/history` | recent numbers of the published snapshots, when `[history]` is on; 404 otherwise ([history.md](history.md)) |
 | `/api/samples` | full published core snapshots after a cursor; bounded memory replay ([replay.md](replay.md)) |
 | `/api/observation-samples` | full publications of one slow group after its own cursor ([replay.md](replay.md)) |
-| `/text` | the `platmon` terminal screen as plain text; 503 when there is no current snapshot |
+| `/text` | the `platmon` terminal screen as plain text; 503 when there is no current snapshot, 500 when the snapshot has a value the screen cannot show (`/api/stats` still has it) |
 | `/` | the web page (only with `web = yes`) |
 
 One background thread collects a snapshot every `interval`; HTTP requests only read the latest one and
