@@ -1,4 +1,4 @@
-//! Linux: /proc, /sys, the device tree and tegrastats, read directly (collector/ in the Python service).
+//! Linux: /proc, /sys, the device tree and tegrastats, read directly.
 pub mod accel;
 pub mod common;
 pub mod jetson;
@@ -35,7 +35,7 @@ impl Groups {
                  network: g("network"), disk_io: g("disk_io"), pressure: g("pressure") }
     }
 
-    /// The groups of a collection, the passive ones only where they are on (Python adds them only then).
+    /// The groups of a collection, the passive ones only where they are on.
     fn into_vec(self, passive: [bool; 3]) -> Vec<Group> {
         let mut out = vec![self.cpu_frequency, self.gpu, self.npu, self.temperature, self.power, self.fans, self.power_mode,
                            self.board_info];
@@ -51,9 +51,9 @@ impl Groups {
 #[derive(Clone, Copy, PartialEq)]
 enum Board { Jetson, None }
 
-/// core.detect: (platform, board module) from the device tree's compatible string.
+/// (platform, board) from the device tree's compatible string.
 fn detect() -> (&'static str, Board) {
-    // not UTF-8: Python's import of collector.core fails, so the service does not start either
+    // a compatible string that is not UTF-8 stops the service
     let compatible = sysfs::read(&format!("{}/compatible", sysfs::device_tree()))
         .unwrap_or_else(|e| { eprintln!("platmon-native: {}", e); std::process::exit(1) }).unwrap_or_default();
     for (key, name, board) in [("nvidia,tegra234", "Jetson Orin", Board::Jetson), ("nvidia,tegra194", "Jetson Xavier", Board::Jetson),
@@ -100,7 +100,7 @@ impl Collector {
                 stats.set(&k, v);
             }
         }
-        stats.set("fans", Value::Null); // keeps Python's key order; filled below
+        stats.set("fans", Value::Null); // keeps the recorded answers' key order; filled below
         if self.board == Board::Jetson {
             jetson::extend(&mut stats, &mut fans, &mut g);
         } else {

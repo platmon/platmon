@@ -1,4 +1,4 @@
-//! collector/gpu.py (DRM class, then nvidia-smi: nvidia.rs) and collector/npu.py (accel class).
+//! The GPU (DRM class, then nvidia-smi: nvidia.rs) and the NPU (accel class).
 use crate::json::{round_to, Value};
 use crate::metadata::{clock, source, Group, Slot};
 use super::sysfs::{self, driver_of, entries};
@@ -41,7 +41,7 @@ pub struct Accel {
 }
 
 impl Accel {
-    /// max_gap: nanoseconds, round(max_gap * 1e9) of the Python Gpu/Npu
+    /// max_gap: nanoseconds, round(seconds * 1e9)
     pub fn gpu(max_gap: i64) -> Accel { Accel { kind: "gpu", max_gap, last: Vec::new(), nvidia_smi: super::nvidia::find() } }
     pub fn npu(max_gap: i64) -> Accel { Accel { kind: "npu", max_gap, last: Vec::new(), nvidia_smi: None } }
 

@@ -1,4 +1,4 @@
-//! The slow groups' readers: collector/storage.py, wifi.py, battery.py and probe.py, each called by its
+//! The slow groups' readers: storage, Wi-Fi, battery and probe, each called by its
 //! group's thread (src/slow.rs) with the group's diagnostics. Contracts: docs/reference/storage.md,
 //! wifi.md, battery.md, probe.md.
 use crate::config::Config;
@@ -9,10 +9,10 @@ use crate::slow::Reader;
 use crate::pystr::{py_space, py_split};
 use super::sysfs::{self, ReadError};
 
-/// The slow groups in platmon.py's order.
+/// The slow groups in their order (of /api/observations and the replay streams).
 pub const GROUPS: [&str; 4] = ["storage", "wifi", "battery", "probe"];
 
-/// The reader of a group, configured as platmon.py configures it.
+/// The reader of a group, configured from cfg.
 pub fn reader(name: &str, cfg: &Config) -> Reader {
     match name {
         "storage" => Box::new(|g| Ok(storage(g))),
@@ -307,7 +307,7 @@ fn parse_wireless(text: &str) -> Result<(Vec<Value>, Vec<(String, &'static str)>
     Ok((out, bad))
 }
 
-/// Why link_connected failed, as Python's exception types tell it apart.
+/// Why link_connected failed: the three failures the Wi-Fi reader tells apart.
 enum LinkError {
     Missing,
     Os(std::io::Error),
@@ -373,7 +373,7 @@ pub fn wifi(g: &mut Group) -> Value {
     let (mut ns, mut index) = (Value::Null, Vec::new());
     if !interfaces.is_empty() {
         use std::os::unix::fs::MetadataExt;
-        // as Python: the namespace is kept when only the index listing fails
+        // the namespace is kept when only the index listing fails
         let listed = std::fs::metadata(&*sysfs::at(NETNS)).and_then(|st| {
             ns = namespace_id(st.dev(), st.ino()).into();
             if_indexes()

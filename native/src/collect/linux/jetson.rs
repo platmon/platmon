@@ -1,4 +1,4 @@
-//! collector/jetson.py: Tegra GPU load and clock, nvpmodel power mode, pwm_tach fans, L4T release.
+//! The Jetson extension: Tegra GPU load and clock, nvpmodel power mode, pwm_tach fans, L4T release.
 use super::common::{next_fan_id, Fan};
 use crate::json::Value;
 use crate::metadata::{source, Group, Slot};

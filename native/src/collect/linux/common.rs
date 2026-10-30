@@ -1,4 +1,4 @@
-//! collector/common.py: fields every Linux host has (CPU, clocks, thermal zones, hwmon, memory, disk, identity).
+//! Fields every Linux host has (CPU, clocks, thermal zones, hwmon, memory, disk, identity).
 use crate::json::{round_to, Value};
 use crate::metadata::{self, source, Group, Slot, Span};
 use super::sysfs::{self, entries, hwmon_chips, numbered};
