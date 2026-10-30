@@ -186,8 +186,9 @@ Upgrades validate the preserved INI with the new server (`platmon-native config-
 before restarting the service, so an INI it refuses leaves the running service alone. They
 preserve an administrator's disabled/masked service state and respect Debian's service-start
 policy. After a start or restart, the package waits up to 20 s for the service to stay running
-and, with HTTP on, for its `/api/status` to answer ready on the configured address (`0.0.0.0`
-is checked on `127.0.0.1`); a service that was not started (disabled, masked or held by
+and for `platmon-native health` to pass: `/api/stats` answers 200 (a current snapshot, as
+`/api/status` says ready) on the configured address (`0.0.0.0` is checked on `127.0.0.1`). The
+maintainer scripts are plain `sh` and use no Python; a service that was not started (disabled, masked or held by
 policy) is reported and not checked. A config, restart or health-check failure fails
 configuration: dpkg reports the package half-configured and the unit keeps retrying. It is
 not an automatic rollback; install the previous package (see [Rollback](#rollback)) or fix
