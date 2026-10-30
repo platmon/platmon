@@ -1,9 +1,9 @@
-"""Live check of the HTTP runtime on a real host: starts `platmon-native serve` with platmon.ini's defaults on
+"""Live check of the HTTP runtime on a real host: starts `platmon-server serve` with platmon.ini's defaults on
 a local port and checks it. What does not depend on the host is checked against the answers the Python
 service gave (recorded 2026-10-29, before its removal in 1.6.0, when this compared the two servers). Only
 the process it started is stopped (and restarted once), by its own handle.
 
-  python3 live_http.py PATH/TO/platmon-native [--json OUT]
+  python3 live_http.py PATH/TO/platmon-server [--json OUT]
 
 - every path: status code, Content-Type, Cache-Control as the Python service answered (PATHS); the web page
   and its files: the bytes of frontends/web (the page with the version filled in)

@@ -135,7 +135,7 @@ source installation and the container install the same server and web files; `na
 server with the Python server's recorded answers. The source archive additionally includes `native/`,
 deployment files, build tools, tests and documentation.
 
-Installed paths are `/usr/lib/platmon/platmon-native` for the Debian server and `/usr/share/platmon` for its
+Installed paths are `/usr/lib/platmon/platmon-server` for the Debian server and `/usr/share/platmon` for its
 web files, `/opt/platmon` for the source installation's and the container's server and web files, `/etc/platmon/platmon.ini` for service configuration and
 `platmon.service` for the systemd unit.
 

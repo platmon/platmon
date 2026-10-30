@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# B C C B: two platmon-native builds (B, C, e.g. the system allocator and the cache-alloc build), 30 s warmup +
+# B C C B: two platmon-server builds (B, C, e.g. the system allocator and the cache-alloc build), 30 s warmup +
 # 120 s each, one JSON line per window. Each line has CPU, RSS over the run, collection times, missed deadlines
 # and how often each group was in each state, so a cheaper run can be told apart from one that read less.
 # stderr (group problems as the service logs them) goes to OUT.jsonl.log.
-#   native/tools/perf/bench.sh PATH/TO/platmon-native OUT.jsonl PATH/TO/OTHER
+#   native/tools/perf/bench.sh PATH/TO/platmon-server OUT.jsonl PATH/TO/OTHER
 set -euo pipefail
 bin=$1 out=$2 other=$3
 : > "$out"; : > "$out.log"

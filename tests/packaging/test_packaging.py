@@ -36,7 +36,7 @@ def source_install(tmp_path):
     config.write_text("custom config")
     unit = tmp_path / "etc/platmon.service"
     unit.write_text("old unit\n")
-    server = repo / "native/target/x86_64-unknown-linux-musl/release/platmon-native"  # uname -m is x86_64 below
+    server = repo / "native/target/x86_64-unknown-linux-musl/release/platmon-server"  # uname -m is x86_64 below
     server.parent.mkdir(parents=True)
     # config-check as the server gives it: the settings, or {"error": ...} and exit 1
     server.write_text('#!/bin/sh\n[ "$1" = config-check ] || exit 0\necho "${CONFIG_CHECK:-{\\"core\\": {}}}"\n'
@@ -46,7 +46,7 @@ def source_install(tmp_path):
     (repo / "frontends/web/new-code").write_text("candidate")
     (repo / "packaging/debian").mkdir(parents=True)
     (repo / "packaging/debian/platmon.service").write_text(
-        "ExecStart=/usr/lib/platmon/platmon-native serve --web /usr/share/platmon/frontends/web --app-version @VERSION@\n")
+        "ExecStart=/usr/lib/platmon/platmon-server serve --web /usr/share/platmon/frontends/web --app-version @VERSION@\n")
     (repo / "scripts/packaging").mkdir(parents=True)
     (repo / "scripts/packaging/package.py").write_text("print('9.8.7')\n")
     installer = scripts / "install.sh"
@@ -97,17 +97,18 @@ def test_source_update_success_retains_backup(source_install):
     result = run("bash", str(installer), env=env)
     assert result.returncode == 0, result.stderr
     assert (prefix / "frontends/web/new-code").read_text() == "candidate"
-    assert os.access(prefix / "platmon-native", os.X_OK)
+    assert os.access(prefix / "platmon-server", os.X_OK)
+    assert os.readlink(prefix / "platmon-native") == "platmon-server"  # the name up to 1.6.0
     backups = list(prefix.parent.glob(".platmon-install.*/previous/old-code"))
     assert len(backups) == 1 and backups[0].read_text() == "previous release"
     # the Debian package's unit, with the installed paths and the checkout's version
-    assert unit.read_text() == "ExecStart=/opt/platmon/platmon-native serve --web /opt/platmon/frontends/web --app-version 9.8.7\n"
+    assert unit.read_text() == "ExecStart=/opt/platmon/platmon-server serve --web /opt/platmon/frontends/web --app-version 9.8.7\n"
     assert config.read_text() == "custom config"
 
 
 def test_source_install_without_a_build_says_how_to_make_one(source_install):
     installer, prefix, config, unit, env = source_install
-    (installer.parents[2] / "native/target/x86_64-unknown-linux-musl/release/platmon-native").unlink()
+    (installer.parents[2] / "native/target/x86_64-unknown-linux-musl/release/platmon-server").unlink()
     result = run("bash", str(installer), env=env)
     assert result.returncode != 0 and "run native/build.sh first" in result.stderr, result.stderr
     assert (prefix / "old-code").read_text() == "previous release" and unit.read_text() == "old unit\n"
@@ -174,11 +175,12 @@ def test_package_contents_and_config_ownership(package, binaries, tmp_path, arch
     assert run("dpkg-deb", "-R", str(package), str(root)).returncode == 0
     assert (root / "DEBIAN/conffiles").read_text() == "/etc/platmon/platmon.ini\n"
     unit = (root / "usr/lib/systemd/system/platmon.service").read_text()
-    assert (f"ExecStart=/usr/lib/platmon/platmon-native serve /etc/platmon/platmon.ini "
+    assert (f"ExecStart=/usr/lib/platmon/platmon-server serve /etc/platmon/platmon.ini "
             f"--web /usr/share/platmon/frontends/web --app-version {version()}\n") in unit
     assert "DynamicUser=yes" in unit and "@VERSION@" not in unit
-    server = root / "usr/lib/platmon/platmon-native"
+    server = root / "usr/lib/platmon/platmon-server"
     assert server.read_bytes() == binaries[arch].read_bytes() and os.access(server, os.X_OK)
+    assert os.readlink(root / "usr/lib/platmon/platmon-native") == "platmon-server"  # the name up to 1.6.0
     # The Python server stays in the source tree (source install, container), not in the package.
     assert not (root / "usr/share/platmon/platmon.py").exists() and not list(root.rglob("*.py"))
     assert (root / "usr/share/platmon/frontends/web/assets/brand/favicon.svg").is_file()
@@ -198,7 +200,7 @@ def test_package_contents_and_config_ownership(package, binaries, tmp_path, arch
     for line in (root / "DEBIAN/md5sums").read_text().splitlines():
         digest, relative = line.split("  ")
         checksums[relative] = digest
-    expected = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
+    expected = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file() and not p.is_symlink()
                 and root / "DEBIAN" not in p.parents and p != root / "etc/platmon/platmon.ini"}
     assert set(checksums) == expected
 
@@ -327,7 +329,7 @@ def test_server_binary_checked(tmp_path, case, message):
     elif case == "cut short":
         path.write_bytes(b"\x7fELF")
     elif case == "mimalloc":
-        fake_server(path, "amd64", mark=b"platmon-native-allocator=mimalloc;")
+        fake_server(path, "amd64", mark=b"platmon-server-allocator=mimalloc;")
     with pytest.raises(ValueError, match=message):
         check_binary("amd64", path)
     with pytest.raises(ValueError, match=message):

@@ -444,7 +444,7 @@ mod tests {
 
     #[test]
     fn probe_config_refusals_and_defaults() {
-        let dir = std::env::temp_dir().join(format!("platmon-native-config-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("platmon-server-config-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         for (i, (text, error)) in [("[probe]\ntargets = host.example:80\n", "targets"),
                                    ("[probe]\nenabled = yes\ntargets = 192.0.2.1:1, 192.0.2.2:1\ntimeout = 5\ninterval = 10\n", "interval must be longer"),
@@ -464,7 +464,7 @@ mod tests {
         // tests/collector/test_battery.py test_config_section
         let cfg = load(None, None).ok().unwrap();
         assert!(cfg.flag("battery", "enabled") && cfg.float("battery", "interval") == 60.0);
-        let path = std::env::temp_dir().join(format!("platmon-native-battery-{}.ini", std::process::id()));
+        let path = std::env::temp_dir().join(format!("platmon-server-battery-{}.ini", std::process::id()));
         std::fs::write(&path, "[battery]\ninterval = 5\n").unwrap();
         let e = load(Some(path.to_str().unwrap()), None).err().unwrap();
         assert!(e.contains("[battery] interval = 5.0 is out of range (10 to 3600)"), "{}", e);
@@ -478,7 +478,7 @@ mod tests {
         // tests/collector/test_wifi.py test_wifi_is_on_by_default_with_a_5_s_candidate_interval
         let cfg = load(None, None).ok().unwrap();
         assert!(cfg.flag("wifi", "enabled") && cfg.float("wifi", "interval") == 5.0);
-        let path = std::env::temp_dir().join(format!("platmon-native-wifi-{}.ini", std::process::id()));
+        let path = std::env::temp_dir().join(format!("platmon-server-wifi-{}.ini", std::process::id()));
         std::fs::write(&path, "[wifi]\ninterval = 0.5\n").unwrap();
         assert!(load(Some(path.to_str().unwrap()), None).err().unwrap().contains("out of range"));
         let _ = std::fs::remove_file(&path);
@@ -489,7 +489,7 @@ mod tests {
         // tests/collector/test_storage.py test_storage_is_on_by_default_and_its_interval_is_checked
         let cfg = load(None, None).ok().unwrap();
         assert!(cfg.flag("storage", "enabled") && cfg.float("storage", "interval") == 30.0);
-        let path = std::env::temp_dir().join(format!("platmon-native-storage-{}.ini", std::process::id()));
+        let path = std::env::temp_dir().join(format!("platmon-server-storage-{}.ini", std::process::id()));
         for (text, error) in [("[storage]\ninterval = 1\n", "out of range"), ("[storage]\nenabled = sometimes\n", "valid bool")] {
             std::fs::write(&path, text).unwrap();
             let e = load(Some(path.to_str().unwrap()), None).err().unwrap();
@@ -502,7 +502,7 @@ mod tests {
     fn network_section() {
         // tests/collector/test_network_integration.py: on by default; a bad value and an unknown key refused
         assert!(load(None, None).ok().unwrap().flag("network", "enabled"));
-        let path = std::env::temp_dir().join(format!("platmon-native-network-{}.ini", std::process::id()));
+        let path = std::env::temp_dir().join(format!("platmon-server-network-{}.ini", std::process::id()));
         for (text, error) in [("[network]\nenabled = maybe\n", "is not a valid bool"), ("[network]\ninterval = 5\n", "unknown key")] {
             std::fs::write(&path, text).unwrap();
             let e = load(Some(path.to_str().unwrap()), None).err().unwrap();
@@ -515,7 +515,7 @@ mod tests {
     fn ini(text: &str) -> std::path::PathBuf {
         use std::sync::atomic::{AtomicU32, Ordering};
         static N: AtomicU32 = AtomicU32::new(0);
-        let path = std::env::temp_dir().join(format!("platmon-native-cfg-{}-{}.ini", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let path = std::env::temp_dir().join(format!("platmon-server-cfg-{}-{}.ini", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         std::fs::write(&path, text).unwrap();
         path
     }

@@ -1,11 +1,11 @@
-"""Deterministic equivalence: platmon-native against the recorded answers (golden.py,
+"""Deterministic equivalence: platmon-server against the recorded answers (golden.py,
 golden/fixture/<scenario>.jsonl) on the same fake /sys and /proc trees with the same clocks, compared exactly (no tolerance: every value, JSON type, key order, span,
 required read, collectors state and source id). Runs inside the container fixture.sh starts, where
 /sys and /proc are bind mounts of the trees written here; never on a host.
 
 Each scenario writes a tree, starts both sides (as nobody, so file modes apply), and runs its steps:
 before a step its change is applied to the tree, then each side answers one collection on the step's
-clocks (the recorded answer, `platmon-native script`). Every step says whether it expects a collection or a
+clocks (the recorded answer, `platmon-server script`). Every step says whether it expects a collection or a
 failed collection (only /proc/stat missing and a model that is not text fail); both sides must give it,
 collections must be equal, and both sides must exit with 0 at the end. A failed collection is the
 collector's {"error"} answer; exiting, not answering in time or writing something else is a broken side,

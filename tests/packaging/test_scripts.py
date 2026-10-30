@@ -98,7 +98,7 @@ if args[0] == "inspect":
 elif "ps" in args:
     print("candidate")
 elif "exec" in args:
-    assert args[-3:] == ["/opt/platmon/platmon-native", "health", "/opt/platmon/platmon.ini"]
+    assert args[-3:] == ["/opt/platmon/platmon-server", "health", "/opt/platmon/platmon.ini"]
     print(os.environ["TEST_LISTENER"])
 elif "port" in args:
     assert os.environ["TEST_MODE"] != "host", "host mode must not query port mappings"

@@ -20,12 +20,13 @@ RUN set -eu; \
     RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static" \
       cargo build --release --locked --no-default-features --target "$target"; \
     mkdir /out; \
-    cp "target/$target/release/platmon-native" /out/
+    cp "target/$target/release/platmon-server" /out/
 
 # A plain Debian base: the server is one static binary, so no NVIDIA runtime, L4T base or Python is needed.
 FROM debian:13-slim
 WORKDIR /opt/platmon
-COPY --from=build /out/platmon-native ./
+COPY --from=build /out/platmon-server ./
+RUN ln -s platmon-server platmon-native  # its name up to 1.6.0
 COPY VERSION ./
 COPY platmon.ini ./
 COPY frontends/web ./frontends/web
@@ -36,6 +37,6 @@ EXPOSE 9797
 # /api/stats answers 503 while there is no current data, which marks the container unhealthy. health follows
 # the configured bind and port, including isolated checks on a non-default host port.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD ["/opt/platmon/platmon-native", "health", "/opt/platmon/platmon.ini"]
+  CMD ["/opt/platmon/platmon-server", "health", "/opt/platmon/platmon.ini"]
 # exec: the server is the container's process (compose's init forwards docker stop's SIGTERM to it)
-ENTRYPOINT ["/bin/sh", "-c", "exec /opt/platmon/platmon-native serve \"$0\" --web /opt/platmon/frontends/web --app-version \"$(cat /opt/platmon/VERSION)\"", "/opt/platmon/platmon.ini"]
+ENTRYPOINT ["/bin/sh", "-c", "exec /opt/platmon/platmon-server serve \"$0\" --web /opt/platmon/frontends/web --app-version \"$(cat /opt/platmon/VERSION)\"", "/opt/platmon/platmon.ini"]

@@ -62,7 +62,7 @@ for _ in $(seq 30); do
             host=localhost
             if [ "$mode" = host ]; then
                 # the server prints the address it checks: "HOST PORT", 127.0.0.1 for a bind of 0.0.0.0
-                listen=$(docker compose "${files[@]}" exec -T platmon /opt/platmon/platmon-native health /opt/platmon/platmon.ini)
+                listen=$(docker compose "${files[@]}" exec -T platmon /opt/platmon/platmon-server health /opt/platmon/platmon.ini)
                 read -r host port <<< "$listen"
                 [ "$host" != 127.0.0.1 ] || host=localhost
             else

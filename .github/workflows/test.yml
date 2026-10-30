@@ -37,7 +37,7 @@ jobs:
         run: native/build-armhf.sh
       - name: Compare with the recorded answers
         env:
-          SERVER: native/target/x86_64-unknown-linux-musl/release/platmon-native
+          SERVER: native/target/x86_64-unknown-linux-musl/release/platmon-server
         run: |
           python3 native/tools/equivalence/config_fixture.py "$SERVER"
           python3 native/tools/equivalence/runtime_fixture.py "$SERVER"
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server
-          path: native/target/*-unknown-linux-musl*/release/platmon-native
+          path: native/target/*-unknown-linux-musl*/release/platmon-server
           if-no-files-found: error
 
   # Windows: the server builds with the MSVC toolchain and its tests pass; the smoke test (tools/windows_smoke.py)
@@ -67,7 +67,7 @@ jobs:
       - name: Build
         run: cargo build --release --locked --no-default-features
       - name: Smoke test
-        run: python tools/windows_smoke.py target/release/platmon-native.exe
+        run: python tools/windows_smoke.py target/release/platmon-server.exe
 
   package:
     needs: [test, native]

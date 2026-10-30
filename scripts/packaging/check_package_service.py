@@ -19,7 +19,7 @@ import time
 import urllib.request
 import uuid
 
-SERVER = "/usr/lib/platmon/platmon-native"
+SERVER = "/usr/lib/platmon/platmon-server"
 INI = Path("/etc/platmon/platmon.ini")
 CUSTOM = "[http]\nport = 19797\n[history]\nretention = 300\n"
 PORT = 19797

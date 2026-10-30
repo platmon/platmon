@@ -1,4 +1,4 @@
-"""The recorded answers: what fixture.py and runtime_fixture.py compare platmon-native with. They were
+"""The recorded answers: what fixture.py and runtime_fixture.py compare platmon-server with. They were
 recorded from the Python service before its removal (1.6.0) and are regression data, not a reference to
 match (docs/development/adr/0002-api-contract-not-python-answers.md): after an intended change, the
 harnesses' --bless rewrites them from the server's answers, and the diff is reviewed with the change. Each

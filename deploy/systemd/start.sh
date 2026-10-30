@@ -21,7 +21,7 @@ if command -v docker >/dev/null && [ -n "$(docker ps -q --filter label=com.docke
 fi
 
 # where to check: the installed server reads the config and prints "host port" (exit 2: an invalid config)
-health() { "$prefix/platmon-native" health "$config"; }
+health() { "$prefix/platmon-server" health "$config"; }
 status=0
 listen=$(health 2>/dev/null) || status=$?
 if [ "$status" -eq 2 ]; then

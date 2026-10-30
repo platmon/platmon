@@ -20,7 +20,7 @@ TCP port 9797.
 flowchart TB
     subgraph Host["Monitored Linux host - choose one deployment"]
         Choice{"Installation method"}
-        Choice --> Deb["Debian package<br/>server: /usr/lib/platmon/platmon-native"]
+        Choice --> Deb["Debian package<br/>server: /usr/lib/platmon/platmon-server"]
         Choice --> Source["Source installation<br/>code: /opt/platmon"]
         Deb --> Unit["systemd: platmon.service<br/>config: /etc/platmon/platmon.ini"]
         Source --> Unit
@@ -42,7 +42,7 @@ alone does not expose every host filesystem. See [Docker observation scope](../r
 For Ubuntu/Debian-derived Linux, the `.deb` is the primary distribution.
 Install it from the signed APT repository, or a checksum-verified package
 file with APT, then use `systemctl` and `platmon` to operate it. The package installs the service as
-`platmon.service` (the static native server, `/usr/lib/platmon/platmon-native`), web files under
+`platmon.service` (the static native server, `/usr/lib/platmon/platmon-server`), web files under
 `/usr/share/platmon` and configuration at `/etc/platmon/platmon.ini`. The source installation and
 the container below run the same server, built from the checkout.
 
@@ -85,7 +85,7 @@ use APT for packages.
 ## Docker on native Linux
 
 The image builds the server in a Rust build stage (as `native/build.sh` does) and runs it on a plain
-Debian base; its health check is `platmon-native health`. No ready-made image is published. Build locally from the repository
+Debian base; its health check is `platmon-server health`. No ready-made image is published. Build locally from the repository
 (see [Container image licensing](#container-image-licensing)):
 
 ```sh

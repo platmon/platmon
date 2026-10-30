@@ -31,7 +31,7 @@ def check(package, cli_package=None):
         root = work / "root"
         subprocess.run(["dpkg-deb", "-R", str(package), str(root)], check=True)
         subprocess.run(["dpkg-deb", "-x", str(cli_package), str(root)], check=True)  # the platmon command
-        server, cli = root / "usr/lib/platmon/platmon-native", root / "usr/bin/platmon"
+        server, cli = root / "usr/lib/platmon/platmon-server", root / "usr/bin/platmon"
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
         # PYTHONPATH must not accidentally make the source checkout available.
         env.pop("PYTHONPATH", None)
@@ -41,7 +41,7 @@ def check(package, cli_package=None):
         # The server's arguments are the packaged unit's, with the extracted paths and a test config.
         unit = (root / "usr/lib/systemd/system/platmon.service").read_text(encoding="utf-8")
         exec_start = next(line for line in unit.splitlines() if line.startswith("ExecStart=")).split()
-        expected = ["ExecStart=/usr/lib/platmon/platmon-native", "serve", "/etc/platmon/platmon.ini", "--web",
+        expected = ["ExecStart=/usr/lib/platmon/platmon-server", "serve", "/etc/platmon/platmon.ini", "--web",
                     "/usr/share/platmon/frontends/web", "--app-version", release]
         if exec_start != expected:
             raise ValueError(f"unexpected ExecStart: {exec_start}")

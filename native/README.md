@@ -1,4 +1,4 @@
-# platmon-native
+# platmon-server
 
 > **TL;DR**
 > - The Rust server the Debian package runs since 1.4.0: static musl binaries for x86_64, aarch64 and
@@ -79,9 +79,9 @@ identity starts a new series; series that went away are dropped after the retent
 restart, and moves the cursor on also when everything asked for has expired. Published data can be
 reused, but never a finished answer: ages and `stale` are computed per answer, also for replayed samples.
 
-`platmon-native serve [platmon.ini] [--frontends LIST] --web DIR [--app-version V]` (the version defaults to
+`platmon-server serve [platmon.ini] [--frontends LIST] --web DIR [--app-version V]` (the version defaults to
 the repository's `VERSION`, read at build time; without `--web` the start log says the page is off;
-`platmon-native --help` lists the commands):
+`platmon-server --help` lists the commands):
 
 Publication and the live API (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
 - One writer thread collects every interval. A publication is immutable: its stats (with the passive
@@ -122,7 +122,7 @@ Service features:
 
 ## Support scope
 
-Written down 2026-10-20 for candidate 1 and kept for the released server: `platmon-native serve` built by
+Written down 2026-10-20 for candidate 1 and kept for the released server: `platmon-server serve` built by
 `build.sh`, the system allocator. Four kinds: **implemented** (in the source, compared with the
 Python service on fixtures), **verified on hardware** (also run live on a host below), **unverified**
 (implemented, not shown on hardware or not by a fixture either), **unsupported** (not implemented).
@@ -164,14 +164,14 @@ rather than publish a number it cannot hold (a float to integer cast saturates).
 **Build.** `build.sh` is the release build: the system allocator only (`--no-default-features`; `--all-features`
 is never a build of it, and the two allocator features cannot be built together), `Cargo.lock` as
 committed (`--locked`), both musl targets, each binary checked to carry the system allocator's mark
-(`platmon-native build-info` prints it), then the SHA-256. `build-cache-alloc.sh` and
+(`platmon-server build-info` prints it), then the SHA-256. `build-cache-alloc.sh` and
 `build-mimalloc.sh` build the two records, never a release. Candidate 1, with its source, build,
 binaries, running conditions and comparison, is fixed in [CANDIDATE.md](CANDIDATE.md).
 
 ## Use
 
 ```sh
-B=native/target/x86_64-unknown-linux-musl/release/platmon-native
+B=native/target/x86_64-unknown-linux-musl/release/platmon-server
 native/build.sh                     # in a rust:1.88 container; unit tests, then the system allocator build for both targets
 native/build-cache-alloc.sh         # the cache-alloc build (a record, for bench.sh), into target/cache-alloc
 native/build-armhf.sh               # the 32-bit ARM build (armhf) and its unit tests, not run here
@@ -180,7 +180,7 @@ python3 native/tools/equivalence/runtime_fixture.py $B
 python3 native/tools/equivalence/config_fixture.py $B
 python3 native/tools/equivalence/live_http.py $B
 native/tools/equivalence/fixture.sh --bless; python3 native/tools/equivalence/runtime_fixture.py $B --bless; python3 native/tools/equivalence/config_fixture.py $B --bless   # after an intended change: rewrite golden/ from the server, review the diff
-native/tools/perf/bench.sh $B out.jsonl native/target/cache-alloc/x86_64-unknown-linux-musl/release/platmon-native
+native/tools/perf/bench.sh $B out.jsonl native/target/cache-alloc/x86_64-unknown-linux-musl/release/platmon-server
 python3 native/tools/perf/service_ab.py --tree . --binary $B --variant M=OTHER --order "B M M B" --out ab.jsonl   # about 2.5 h; --quick to try it
 python3 native/tools/perf/ab_report.py ab.jsonl
 $B replay-cost core.jsonl 20
@@ -195,14 +195,14 @@ service's; `--bless` rewrites them, [ADR 0002](../docs/development/adr/0002-api-
 `worker.py`, which the live, A/B and deployment checks share, and the Windows smoke test stay in `tools/`.
 
 The candidate units (`native/tools/deploy/`) run a build beside `platmon.service` on 127.0.0.1:19797:
-`platmon-native-candidate` and `platmon-native-candidate-fakesmi` (the same with a slow fake nvidia-smi).
+`platmon-server-candidate` and `platmon-server-candidate-fakesmi` (the same with a slow fake nvidia-smi).
 Since 1.4.0 the checks are the native server's alone: `start` on the INI, then restart, SIGKILL, the held
 port and the stops. The Python unit and its swap and rollback checks, used for candidate 1 below, are gone
 with the package's Python server; `uninstall.sh` still removes that unit where an earlier install left it.
 
 - `equivalence/fixture.sh` / `fixture.py`: **the equivalence test.** Fake `/sys` and `/proc` trees are
   mounted over the real ones in a throwaway container (a local Debian 13 image with python3, built on first
-  use and never pushed). The server runs as `nobody`, so file modes apply, on set clocks (`platmon-native
+  use and never pushed). The server runs as `nobody`, so file modes apply, on set clocks (`platmon-server
   script`; the elapsed clock advances 1 µs per call, wall time is fixed), and its every output value is
   compared exactly with the Python collector's recorded answer for the same tree and clocks: JSON types, key
   order, numbers, read spans, required reads, `collectors` and source ids. No tolerance. Each step states
@@ -222,7 +222,7 @@ with the package's Python server; `uninstall.sh` still removes that unit where a
   kernel's release and machine, an interface's index, the network namespace's id and the tmpfs devices are
   tokens resolved when replayed. They are not recorded again: a change of the server's answers is a change
   of its contract.
-- `equivalence/runtime_fixture.py`: **the runtime equivalence test.** `platmon-native runtime-script` gets
+- `equivalence/runtime_fixture.py`: **the runtime equivalence test.** `platmon-server runtime-script` gets
   the operations the Python service's Sampler, slow groups, History, Replay and HTTP server got when its
   answers were recorded: a collection begins, a view is taken while it runs, it ends with a given
   collection or error; the same for observations; raw HTTP requests to the real server. Every answer must
@@ -230,11 +230,11 @@ with the package's Python server; `uninstall.sh` still removes that unit where a
   without their `Date` and `Server` headers and without the markup of error pages (it differed between
   Python versions; the status line with the message stays). Runs on the host, reads no tree; the same
   self-test and deadlines as `fixture.py`.
-- `equivalence/config_fixture.py`: platmon.ini files read by `platmon-native config-check` against
+- `equivalence/config_fixture.py`: platmon.ini files read by `platmon-server config-check` against
   `platmon.load_config`'s recorded answers: every setting with its type, the levels and the probe targets,
-  or the same refusal message, also with a `--frontends` value; then `platmon-native serve`'s refusals as
+  or the same refusal message, also with a `--frontends` value; then `platmon-server serve`'s refusals as
   a process; last, the shipped `platmon.ini` must read as no file does (every value in it is the default).
-- `equivalence/live_http.py`: **a live check of the service.** Starts `platmon-native serve` with the
+- `equivalence/live_http.py`: **a live check of the service.** Starts `platmon-server serve` with the
   defaults on a local port and checks it, against the Python service's answers where they do not depend on
   the host (see its docstring). It stops only the process it started, by its handle.
 - `perf/bench.sh`: two builds (B, C) over the same scope, B C C B, with 30 s warmup and 120 s windows. Each
@@ -722,7 +722,7 @@ On `x86_64-pc-windows-msvc`:
 - The stop request: Ctrl+C, Ctrl+Break, the console closed, logoff and shutdown exit with status 0, as
   SIGTERM does on Linux (`SetConsoleCtrlHandler`).
 - `service [CONFIG] [serve's options]`: `serve` as a Windows service in its own process, for the service
-  control manager (`sc.exe create platmon binPath= "C:\path\platmon-native.exe service C:\path\platmon.ini"`).
+  control manager (`sc.exe create platmon binPath= "C:\path\platmon-server.exe service C:\path\platmon.ini"`).
   It reports running once connected, and on a stop or shutdown request reports stopped and exits with
   status 0; a user's logoff does not stop it. Outside the service control manager it exits with status 2.
   Not provided: an installer, a default configuration path, recovery actions and a log: the server's

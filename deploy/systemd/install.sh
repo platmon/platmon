@@ -35,7 +35,7 @@ case "$(uname -m)" in
     armv6l | armv7l | armv8l) target=arm-unknown-linux-musleabihf build=native/build-armhf.sh ;;
     *) echo "no native build for $(uname -m)" >&2; exit 1 ;;
 esac
-binary=$repo/native/target/$target/release/platmon-native
+binary=$repo/native/target/$target/release/platmon-server
 if [ ! -x "$binary" ]; then
     echo "no server built for this machine: run $build first (it needs Docker), then this again" >&2
     exit 1
@@ -92,7 +92,8 @@ rollback() {
 }
 trap rollback EXIT
 mkdir -p "$work/code/frontends"
-install -m 755 "$binary" "$work/code/platmon-native"
+install -m 755 "$binary" "$work/code/platmon-server"
+ln -s platmon-server "$work/code/platmon-native"  # its name up to 1.6.0, for scripts that call it there
 cp -r "$repo/frontends/web" "$work/code/frontends/"
 chmod -R a+rX "$work/code"
 # the Debian package's unit, with this install's paths and version

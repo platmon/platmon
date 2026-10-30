@@ -136,7 +136,7 @@ struct Exchange<'a> {
 
 impl Exchange<'_> {
     fn head(&mut self, code: u16, message: &str, headers: &[(&str, String)]) -> std::io::Result<()> {
-        let mut h = format!("HTTP/1.0 {} {}\r\nServer: platmon-native\r\nDate: {}\r\n", code, message, http_date());
+        let mut h = format!("HTTP/1.0 {} {}\r\nServer: platmon-server\r\nDate: {}\r\n", code, message, http_date());
         for (k, v) in headers {
             h.push_str(&format!("{}: {}\r\n", k, v));
         }
@@ -580,7 +580,7 @@ mod tests {
     fn a_reader_that_stops_is_dropped() {
         // an answer far larger than the socket buffers, a client that never reads it: the write stops making
         // progress, times out, and the one connection slot is free again while the core keeps collecting
-        let dir = std::env::temp_dir().join(format!("platmon-native-web-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("platmon-server-web-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("app.js"), vec![b'x'; 64 << 20]).unwrap();
         let web = dir.to_str().unwrap().to_string();
@@ -625,7 +625,7 @@ mod tests {
     // tests/runtime/test_server.py, ported where live_http.py and runtime_fixture.py do not show it
     // (docs/development/python-test-port.md).
     fn web_dir(name: &str, files: &[(&str, &[u8])]) -> String {
-        let dir = std::env::temp_dir().join(format!("platmon-native-{}-{}", name, std::process::id()));
+        let dir = std::env::temp_dir().join(format!("platmon-server-{}-{}", name, std::process::id()));
         for (path, bytes) in files {
             let p = dir.join(path);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();

@@ -1,8 +1,8 @@
-"""platmon.ini read by `platmon-native config-check`, compared exactly with the recorded answers
+"""platmon.ini read by `platmon-server config-check`, compared exactly with the recorded answers
 (golden/config.json, first recorded from the Python service's platmon.load_config before its removal in
 1.6.0; the temporary directory as ${dir}): every setting with its type, the levels (with a platform's temperature default) and the probe
 targets, or the same refusal message; also with a --frontends value, as platmon.py passed it on. Then
-refusals as the server gives them (`platmon-native serve`: exit 2, the message platmon.py gave), only for
+refusals as the server gives them (`platmon-server serve`: exit 2, the message platmon.py gave), only for
 configurations it must refuse, so nothing starts listening. Last, the shipped platmon.ini must read as no
 file does: every value in it is the default. Runs on the host: the files are written to a temporary
 directory. --bless records the server's answers instead and rewrites golden/config.json when every refusal

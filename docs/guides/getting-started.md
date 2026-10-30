@@ -88,7 +88,7 @@ sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}
   "./${platmon_dist}/platmon-cli_${platmon_version}-1_all.deb"
 ```
 
-The `platmon` package installs the server in `/usr/lib/platmon/platmon-native`, the web files in
+The `platmon` package installs the server in `/usr/lib/platmon/platmon-server`, the web files in
 `/usr/share/platmon`, and configuration in `/etc/platmon/platmon.ini`; `platmon-cli` installs the
 `platmon` command in `/usr/bin`.
 APT preserves an edited config on upgrade. If an existing **source or Docker**
@@ -162,7 +162,7 @@ To run the service in the foreground while developing:
 
 ```sh
 native/build.sh   # once: the server for this checkout, in Docker
-native/target/x86_64-unknown-linux-musl/release/platmon-native serve [platmon.ini] --web frontends/web
+native/target/x86_64-unknown-linux-musl/release/platmon-server serve [platmon.ini] --web frontends/web
 ```
 
 The optional square-bracket argument indicates a configuration path; without it the built-in defaults

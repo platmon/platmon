@@ -3,7 +3,7 @@ Description=platmon platform monitor
 After=network.target
 
 [Service]
-ExecStart=/usr/lib/platmon/platmon-native serve /etc/platmon/platmon.ini --web /usr/share/platmon/frontends/web --app-version @VERSION@
+ExecStart=/usr/lib/platmon/platmon-server serve /etc/platmon/platmon.ini --web /usr/share/platmon/frontends/web --app-version @VERSION@
 DynamicUser=yes
 ProtectSystem=strict
 ProtectHome=yes

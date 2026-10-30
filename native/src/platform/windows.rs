@@ -130,7 +130,7 @@ pub fn run_service(serve: impl Fn() + Send + Sync + 'static) {
     let table = [svc::SERVICE_TABLE_ENTRYW { lpServiceName: name.as_mut_ptr(), lpServiceProc: Some(service_main) },
                  svc::SERVICE_TABLE_ENTRYW::default()];
     if unsafe { svc::StartServiceCtrlDispatcherW(table.as_ptr()) } == 0 {
-        eprintln!("platmon-native service: {} (the service control manager starts it; serve runs in a console)",
+        eprintln!("platmon-server service: {} (the service control manager starts it; serve runs in a console)",
                   std::io::Error::last_os_error());
         std::process::exit(2);
     }

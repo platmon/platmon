@@ -30,7 +30,7 @@ ARCHES = {"amd64": ("x86_64-unknown-linux-musl", 62, 64), "arm64": ("aarch64-unk
           "armhf": ("arm-unknown-linux-musleabihf", 40, 32)}
 # What a release packages: build.sh's two binaries and build-armhf.sh's.
 RELEASED = ("amd64", "arm64", "armhf")
-ALLOCATOR_MARK = b"platmon-native-allocator=system;"
+ALLOCATOR_MARK = b"platmon-server-allocator=system;"
 
 
 def file_md5(path):
@@ -65,7 +65,7 @@ def source_files(root):
 
 
 def default_binary(arch, root=ROOT):
-    return root / "native/target" / ARCHES[arch][0] / "release/platmon-native"
+    return root / "native/target" / ARCHES[arch][0] / "release/platmon-server"
 
 
 def check_binary(arch, path):
@@ -171,10 +171,12 @@ def build_deb(root, deb, arch, server, release, revision, epoch):
                 if path.is_symlink():
                     raise ValueError(f"unexpected web file: {path}")
                 copy_file(path, stage / "usr/share/platmon/frontends/web" / path.relative_to(web))
-        binary = stage / "usr/lib/platmon/platmon-native"
+        binary = stage / "usr/lib/platmon/platmon-server"
         binary.parent.mkdir(parents=True)
         binary.write_bytes(server)
         binary.chmod(0o755)
+        # its name up to 1.6.0, for scripts that call it there (health, config-check)
+        (binary.parent / "platmon-native").symlink_to(binary.name)
         unit = stage / "usr/lib/systemd/system/platmon.service"
         copy_file(root / "packaging/debian/platmon.service", unit)
         unit.write_text(unit.read_text(encoding="utf-8").replace("@VERSION@", release), encoding="utf-8")
@@ -231,18 +233,18 @@ def pack(root, stage, deb, package, scripts, names, overrides, fields, revision,
     conffiles = set((control / "conffiles").read_text().splitlines()) if "conffiles" in names else set()
     md5sums = "".join(
         f"{file_md5(path)}  {path.relative_to(stage).as_posix()}\n"
-        for path in sorted(stage.rglob("*")) if path.is_file()
+        for path in sorted(stage.rglob("*")) if path.is_file() and not path.is_symlink()
         and control not in path.parents and "/" + path.relative_to(stage).as_posix() not in conffiles)
     (control / "md5sums").write_text(md5sums, encoding="utf-8")
-    size = sum(p.stat().st_size for p in stage.rglob("*") if p.is_file())
+    size = sum(p.stat().st_size for p in stage.rglob("*") if p.is_file() and not p.is_symlink())
     template = (scripts / "control").read_text(encoding="utf-8")
     for key, value in {**fields, "@SIZE@": str((size + 1023) // 1024)}.items():
         template = template.replace(key, value)
     (control / "control").write_text(template, encoding="utf-8")
     for path in stage.rglob("*"):
-        if path.is_dir():
+        if path.is_dir() and not path.is_symlink():
             path.chmod(0o755)
-        os.utime(path, (epoch, epoch))
+        os.utime(path, (epoch, epoch), follow_symlinks=False)
     stage.chmod(0o755)
     os.utime(stage, (epoch, epoch))
     env = dict(os.environ, SOURCE_DATE_EPOCH=str(epoch), DPKG_DEB_THREADS_MAX="2")
