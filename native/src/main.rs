@@ -73,7 +73,7 @@ const USAGE: &str = "usage: platmon-native COMMAND
   serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]
                           the service: collect and answer HTTP as CONFIG (platmon.ini) says
   health [CONFIG]         exit 0 when the server CONFIG configures answers /api/stats, 1 if not, 2 if CONFIG is refused
-  config-check [CONFIG]   the settings serve would use as JSON; {\"error\": ...} and exit 1 if refused
+  config-check [CONFIG]   the settings serve would use as JSON; {\"error\": ...}, the reason on stderr and exit 1 if refused
   collect                 one collection, 1 s after a first one, as JSON
   service [CONFIG] [serve's options]
                           Windows: serve under the service control manager
@@ -125,7 +125,8 @@ fn config_check(args: &[String]) {
         Err(e) => { let mut v = Value::obj(); v.set("error", e.into()); v }
     };
     println!("{}", out.to_string(false));
-    if out.get("error").is_some() {
+    if let Some(Value::Str(e)) = out.get("error") {
+        eprintln!("platmon-native config-check: error: {}", e);
         std::process::exit(1);
     }
 }
