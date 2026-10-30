@@ -292,10 +292,10 @@ R 11, K 1
 | `test_connect_to_loopback_listener` | R | observe/probe.rs |
 | `test_refused_is_a_failure_not_a_time` | R | observe/probe.rs |
 | `test_timeout_is_reported_without_a_time` | R | observe/probe.rs (a full accept queue instead of a patched select) |
-| `test_observation_keeps_a_bounded_failure_window` | R | probe.rs |
-| `test_targets_are_probed_one_after_another` | R | probe.rs |
+| `test_observation_keeps_a_bounded_failure_window` | R | collect/probe.rs |
+| `test_targets_are_probed_one_after_another` | R | collect/probe.rs |
 | `test_socket_creation_error_does_not_escape` | R | observe/probe.rs a_socket_that_cannot_be_made_is_an_error |
-| `test_socket_error_keeps_other_targets_and_failure_window` | R | probe.rs |
+| `test_socket_error_keeps_other_targets_and_failure_window` | R | collect/probe.rs |
 | `test_config_refuses` | R | config.rs probe_config_refusals_and_defaults; config_fixture |
 | `test_enabled_by_default_without_targets` | R | config.rs probe_config_refusals_and_defaults |
 | `test_cli_lines` | K | tests/frontends/test_cli.py `test_probe_lines` |
