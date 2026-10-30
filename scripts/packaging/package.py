@@ -161,26 +161,42 @@ def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
     return debs
 
 
+def stage_server(root, stage, server, release):
+    """The server's files, the same in every package format: the binary, its unit and configuration, the
+    web page."""
+    web = root / "frontends/web"
+    for path in sorted(web.rglob("*")):
+        if path.is_file() and path.suffix in (".html", ".css", ".js", ".svg", ".json"):
+            if path.is_symlink():
+                raise ValueError(f"unexpected web file: {path}")
+            copy_file(path, stage / "usr/share/platmon/frontends/web" / path.relative_to(web))
+    binary = stage / "usr/lib/platmon/platmon-server"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(server)
+    binary.chmod(0o755)
+    # its name up to 1.6.0, for scripts that call it there (health, config-check)
+    (binary.parent / "platmon-native").symlink_to(binary.name)
+    unit = stage / "usr/lib/systemd/system/platmon.service"
+    copy_file(root / "packaging/debian/platmon.service", unit)
+    unit.write_text(unit.read_text(encoding="utf-8").replace("@VERSION@", release), encoding="utf-8")
+    copy_file(root / "platmon.ini", stage / "etc/platmon/platmon.ini")
+
+
+def stage_cli(root, stage, epoch):
+    """platmon-cli's files, the same in every package format: the platmon command and its manual."""
+    cli = stage / "usr/bin/platmon"
+    copy_file(root / "frontends/cli.py", cli, executable=True)
+    cli.write_text(cli.read_text(encoding="utf-8").replace(
+        "#!/usr/bin/env python3\n", "#!/usr/bin/python3\n", 1), encoding="utf-8")
+    write_gzip((root / "packaging/debian/platmon.1").read_bytes(),
+               stage / "usr/share/man/man1/platmon.1.gz", epoch)
+
+
 def build_deb(root, deb, arch, server, release, revision, epoch):
     """platmon for one architecture: the server, its unit and configuration, the web page."""
     with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
         stage = Path(directory)
-        web = root / "frontends/web"
-        for path in sorted(web.rglob("*")):
-            if path.is_file() and path.suffix in (".html", ".css", ".js", ".svg", ".json"):
-                if path.is_symlink():
-                    raise ValueError(f"unexpected web file: {path}")
-                copy_file(path, stage / "usr/share/platmon/frontends/web" / path.relative_to(web))
-        binary = stage / "usr/lib/platmon/platmon-server"
-        binary.parent.mkdir(parents=True)
-        binary.write_bytes(server)
-        binary.chmod(0o755)
-        # its name up to 1.6.0, for scripts that call it there (health, config-check)
-        (binary.parent / "platmon-native").symlink_to(binary.name)
-        unit = stage / "usr/lib/systemd/system/platmon.service"
-        copy_file(root / "packaging/debian/platmon.service", unit)
-        unit.write_text(unit.read_text(encoding="utf-8").replace("@VERSION@", release), encoding="utf-8")
-        copy_file(root / "platmon.ini", stage / "etc/platmon/platmon.ini")
+        stage_server(root, stage, server, release)
         docs(root, stage, "platmon", release, revision, epoch, extra=((root / "README.md", "README.md.gz"),
                                                                        (root / "docs/reference/packaging.md", "packaging.md.gz")))
         overrides = (root / "packaging/debian/lintian-overrides").read_text(encoding="utf-8")
@@ -193,12 +209,7 @@ def build_cli_deb(root, deb, release, revision, epoch):
     this release, which had the command (1.6.0 and earlier); later ones are released with it."""
     with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
         stage = Path(directory)
-        cli = stage / "usr/bin/platmon"
-        copy_file(root / "frontends/cli.py", cli, executable=True)
-        cli.write_text(cli.read_text(encoding="utf-8").replace(
-            "#!/usr/bin/env python3\n", "#!/usr/bin/python3\n", 1), encoding="utf-8")
-        write_gzip((root / "packaging/debian/platmon.1").read_bytes(),
-                   stage / "usr/share/man/man1/platmon.1.gz", epoch)
+        stage_cli(root, stage, epoch)
         docs(root, stage, "platmon-cli", release, revision, epoch)
         pack(root, stage, deb, "platmon-cli", root / "packaging/debian/cli", ("postinst",), "",
              {"@VERSION@": f"{release}-{revision}", "@UPSTREAM@": release}, revision, epoch)

@@ -3,9 +3,11 @@
 
   python3 scripts/packaging/prepare_test_image.py ubuntu:24.04 platmon-package-test:local
   python3 scripts/packaging/prepare_test_image.py --platform linux/arm/v7 debian:13 platmon-package-test:local
+  python3 scripts/packaging/prepare_test_image.py fedora:44 platmon-rpm-test:local
 
 An Ubuntu (or Debian) userspace, of another architecture under QEMU with --platform, with the OS tools the checks need (PACKAGES), installed once per job instead of in
-each check's fresh container. A mirror in the middle of a sync answers with indexes of an unexpected
+each check's fresh container; a Fedora or Enterprise Linux one (dnf) gets RPM_PACKAGES for the .rpm checks.
+A mirror in the middle of a sync answers with indexes of an unexpected
 size or hash, which apt does not retry, and a stalled mirror can hang an install: so the update and
 install run up to ATTEMPTS times, each within ATTEMPT_TIMEOUT seconds and PAUSE seconds apart, and a
 failure stops here with apt's output instead of inside a check. The image stays on this host and is
@@ -15,19 +17,22 @@ import argparse
 import subprocess
 
 PACKAGES = ("python3", "systemd", "init-system-helpers")
+RPM_PACKAGES = ("python3", "systemd")
 ATTEMPTS = 3
 ATTEMPT_TIMEOUT = 300
 PAUSE = 30
 
 
 def dockerfile(base):
-    install = ("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "
-               + " ".join(PACKAGES))
+    install = ("if command -v apt-get >/dev/null; then apt-get update && "
+               "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " + " ".join(PACKAGES)
+               + "; else dnf install -y --setopt=install_weak_deps=False " + " ".join(RPM_PACKAGES)
+               + " && dnf clean all; fi")
     return (f"FROM {base}\n"
             f"RUN for attempt in $(seq {ATTEMPTS}); do "
             f"timeout {ATTEMPT_TIMEOUT} sh -c '{install}' && break; "
-            f"if [ $attempt = {ATTEMPTS} ]; then echo 'apt failed {ATTEMPTS} times' >&2; exit 1; fi; "
-            f"echo \"apt attempt $attempt failed; again in {PAUSE} s\" >&2; sleep {PAUSE}; "
+            f"if [ $attempt = {ATTEMPTS} ]; then echo 'install failed {ATTEMPTS} times' >&2; exit 1; fi; "
+            f"echo \"install attempt $attempt failed; again in {PAUSE} s\" >&2; sleep {PAUSE}; "
             "done && rm -rf /var/lib/apt/lists/*\n")
 
 

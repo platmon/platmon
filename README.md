@@ -58,6 +58,9 @@ sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}
   "./${platmon_dist}/platmon-cli_${platmon_version}-1_all.deb"
 ```
 
+On Fedora or Enterprise Linux 9+ (x86_64, aarch64), build the `.rpm` packages from this checkout
+([RPM packages](docs/reference/packaging.md#rpm-packages); not released yet).
+
 ```sh
 platmon --once           # one snapshot
 platmon                  # interactive terminal view

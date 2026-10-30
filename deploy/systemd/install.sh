@@ -21,6 +21,10 @@ if command -v dpkg-query >/dev/null && [ "$(dpkg-query -W -f='${db:Status-Status
     echo "platmon is managed by dpkg; update it with apt, not this source installer" >&2
     exit 1
 fi
+if command -v rpm >/dev/null && rpm -q --quiet platmon 2>/dev/null; then
+    echo "platmon is managed by rpm; update it with dnf, not this source installer" >&2
+    exit 1
+fi
 
 # both ways serve port 9797; use one at a time
 if command -v docker >/dev/null && [ -n "$(docker ps -q --filter label=com.docker.compose.project=platmon 2>/dev/null)" ]; then

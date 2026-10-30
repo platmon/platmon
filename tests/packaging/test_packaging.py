@@ -70,6 +70,7 @@ def source_install(tmp_path):
         "uname": "echo x86_64\n",
         "docker": "exit 1\n",
         "dpkg-query": "exit 1\n",
+        "rpm": "exit 1\n",
         "systemctl": 'echo "$*" >> "$SERVICE_CALLS"\n[ "$1" != is-active ]\n',
         "cp": '[ "${COPY_FAIL:-0}" = 0 ] || exit 1\nexec /bin/cp "$@"\n',
     }
@@ -369,12 +370,13 @@ def test_lifecycle_inside_mode_refuses_host(script, inside):
     assert "requires the disposable package test container" in result.stderr
 
 
-def test_source_installer_refuses_dpkg_owned_install(source_install):
+@pytest.mark.parametrize("manager, owned", [("dpkg", ("dpkg-query", "echo installed")), ("rpm", ("rpm", "exit 0"))])
+def test_source_installer_refuses_package_owned_install(source_install, manager, owned):
     installer, prefix, config, unit, env = source_install
-    command = Path(env["PATH"].split(os.pathsep)[0]) / "dpkg-query"
-    command.write_text("#!/bin/sh\necho installed\n")
+    command = Path(env["PATH"].split(os.pathsep)[0]) / owned[0]
+    command.write_text(f"#!/bin/sh\n{owned[1]}\n")
     result = run("bash", str(installer), env=env)
-    assert result.returncode != 0 and "managed by dpkg" in result.stderr
+    assert result.returncode != 0 and f"managed by {manager}" in result.stderr
     assert (prefix / "old-code").read_text() == "previous release"
     assert unit.read_text() == "old unit\n"
 

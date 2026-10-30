@@ -1,0 +1,8 @@
+# rpmlint -c packaging/rpm/rpmlint.toml: what is so by design (docs/reference/packaging.md).
+Filters = [
+    # The server is one static musl binary, for every distribution of its architecture.
+    "statically-linked-binary /usr/lib/platmon/platmon-server",
+    "position-independent-executable-suggested /usr/lib/platmon/platmon-server",
+    # platmon-cli, the other package's name, in the description.
+    "spelling-error \\('cli'",
+]

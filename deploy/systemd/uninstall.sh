@@ -14,6 +14,10 @@ if command -v dpkg-query >/dev/null && [ "$(dpkg-query -W -f='${db:Status-Status
     echo "platmon is managed by dpkg; use apt remove platmon (or apt purge platmon)" >&2
     exit 1
 fi
+if command -v rpm >/dev/null && rpm -q --quiet platmon 2>/dev/null; then
+    echo "platmon is managed by rpm; use dnf remove platmon" >&2
+    exit 1
+fi
 
 unit=/etc/systemd/system/platmon.service
 if [ -f "$unit" ]; then
