@@ -45,7 +45,7 @@ version=$(python3 "$repo/scripts/packaging/package.py" --version)
 # check the config with this checkout's server before replacing anything
 candidate_config=$config
 [ -f "$config" ] || candidate_config=$repo/platmon.ini
-checked=$("$binary" config-check "$candidate_config")
+checked=$("$binary" config-check "$candidate_config") || true  # exit 1 with {"error": ...} when refused
 case $checked in
     '{"error":'*) echo "invalid config: $(printf '%s' "$checked" | sed 's/^{"error":"//; s/"}$//')" >&2; exit 1 ;;
 esac
