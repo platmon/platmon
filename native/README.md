@@ -1,28 +1,30 @@
 # platmon-server
 
 > **TL;DR**
-> - The Rust server the Debian package runs since 1.4.0: static musl binaries for x86_64, aarch64 and
->   armhf, a port of the Python service with the same HTTP API, `platmon.ini` and `/text`. Every
->   installation runs it; the Python service was removed after 1.6.0.
-> - Checked against the Python service on fake trees, configurations, the runtime and live HTTP, then as
->   a service on the boards and with the released Hub. CI's `native` job compares with its recorded
->   answers (`tools/equivalence/golden/`).
+> - The server every installation runs: static musl binaries for x86_64, aarch64 and armhf, packaged
+>   since 1.4.0. It replaced the Python service (removed after 1.6.0) and kept its HTTP API, `platmon.ini`
+>   and `/text`.
+> - Checked against the Python service on fake trees, configurations, the runtime and live HTTP while it
+>   was there, then as a service on the boards and with the released Hub. CI's `native` job compares with
+>   the recorded answers (`tools/equivalence/golden/`), regression data that `--bless` rewrites after an
+>   intended change ([ADR 0002](../docs/development/adr/0002-api-contract-not-python-answers.md)).
 > - The Windows build collects every group except pressure, NPU, power, fans, power mode and board info,
 >   but is not released ([Windows](#windows-not-released)).
 
-The platmon server the Debian package runs: a port of the Python service (`platmon.py`, `collector/`,
-`runtime/`) that keeps its contracts, so that the two give the same answers. It began on 2026-10-18 as
-next step 1 of [rust-feasibility.md](../docs/performance/rust-feasibility.md); candidate 1
+The platmon server the Debian package, the source installation and the container run. It was ported from the
+Python service (`platmon.py`, `collector/`, `runtime/`), keeping its contracts, so that the two gave the
+same answers; where this file names those files, they are in the git history up to 1.6.0. It began on
+2026-10-18 as next step 1 of [rust-feasibility.md](../docs/performance/rust-feasibility.md); candidate 1
 ([CANDIDATE.md](CANDIDATE.md)) passed the [final comparison](#final-comparison-candidate-1) and became the
 packaged server in 1.4.0. The Python service, deprecated in 1.5.0, was removed after 1.6.0; its answers,
-recorded before (`tools/equivalence/golden/`), stay the reference the server is compared with, and the
-results below that name it were measured against it while it was there. The development record of the steps before candidate 1 (the step plans, the CPU runs of steps 1 and
-2, the whole-service A/B of step 3C, the replay cost split and the allocator comparison) is in this file
-as of `b96aba8`.
+recorded before (`tools/equivalence/golden/`), stay as regression data the server is compared with (ADR
+0002), and the results below that name it were measured against it while it was there. The development
+record of the steps before candidate 1 (the step plans, the CPU runs of steps 1 and 2, the whole-service A/B
+of step 3C, the replay cost split and the allocator comparison) is in this file as of `b96aba8`.
 
 ## Scope
 
-The whole default service, with the same output as the Python one:
+The whole default service, with the output the Python one gave:
 
 - the core collection: CPU usage per core and `cpu_sampling`; CPU clocks, thermal zones, hwmon
   temperatures, power (including INA3221 rails) and fans; memory, disk, `system`, `model`; the Jetson
@@ -92,8 +94,8 @@ Publication and the live API (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
   writer inside serialization and reads the previous snapshot meanwhile).
 - States, freshness, `collection_failed`, `collection_too_slow`, consecutive failures and the data age with
   its basis follow `runtime/sampler.py`, including every reason to fall back to the collection start.
-- JSON as `json.dumps` writes it (`", "`, `": "`, non-ASCII escaped), so the answers are byte for byte the
-  Python service's for the same state.
+- JSON as `json.dumps` writes it (`", "`, `": "`, non-ASCII escaped), so the answers were byte for byte the
+  Python service's for the same state; ADR 0002 keeps this format.
 - HTTP/1.0 on std sockets, one thread per connection, at most 32 (excess ones closed before a thread
   starts), backlog 5, 10 s per request read, 10 s per response write without progress, 64 KiB writes;
   request line and header limits (the blank line that ends the headers counts), errors and their status
@@ -123,8 +125,8 @@ Service features:
 ## Support scope
 
 Written down 2026-10-20 for candidate 1 and kept for the released server: `platmon-server serve` built by
-`build.sh`, the system allocator. Four kinds: **implemented** (in the source, compared with the
-Python service on fixtures), **verified on hardware** (also run live on a host below), **unverified**
+`build.sh`, the system allocator. Four kinds: **implemented** (in the source, compared with the Python
+service's answers on fixtures), **verified on hardware** (also run live on a host below), **unverified**
 (implemented, not shown on hardware or not by a fixture either), **unsupported** (not implemented).
 
 | area | implemented and compared | verified on hardware | unverified / unsupported |
@@ -220,8 +222,8 @@ with the package's Python server; `uninstall.sh` still removes that unit where a
   Python side. A recording holds what depends on the tree and the requests alone: the host name and tmpfs
   sizes are fixed (`fixture.sh`), the probe's ports are fixed, an HTTP response is kept unstamped, and the
   kernel's release and machine, an interface's index, the network namespace's id and the tmpfs devices are
-  tokens resolved when replayed. They are not recorded again: a change of the server's answers is a change
-  of its contract.
+  tokens resolved when replayed. They are regression data: after an intended change the harnesses'
+  `--bless` rewrites them from the server, and the diff is reviewed with the change (ADR 0002).
 - `equivalence/runtime_fixture.py`: **the runtime equivalence test.** `platmon-server runtime-script` gets
   the operations the Python service's Sampler, slow groups, History, Replay and HTTP server got when its
   answers were recorded: a collection begins, a view is taken while it runs, it ends with a given
@@ -235,8 +237,8 @@ with the package's Python server; `uninstall.sh` still removes that unit where a
   or the same refusal message, also with a `--frontends` value; then `platmon-server serve`'s refusals as
   a process; last, the shipped `platmon.ini` must read as no file does (every value in it is the default).
 - `equivalence/live_http.py`: **a live check of the service.** Starts `platmon-server serve` with the
-  defaults on a local port and checks it, against the Python service's answers where they do not depend on
-  the host (see its docstring). It stops only the process it started, by its handle.
+  defaults on a local port and checks it, against what the Python service answered where it did not
+  depend on the host (see its docstring). It stops only the process it started, by its handle.
 - `perf/bench.sh`: two builds (B, C) over the same scope, B C C B, with 30 s warmup and 120 s windows. Each
   window reports its own CPU (`getrusage`), RSS at the start, every 30 collections and the end, collection
   time p50/p95/max, missed 1 s deadlines, how often each group was in each state, the number of source ids
@@ -657,7 +659,7 @@ On `x86_64-pc-windows-msvc`:
   `tools/windows_smoke.py`, which runs `collect` and `serve` on the runner.
 - `serve` and `collect` run; `config-check`, `runtime-script`, `replay-cost` and `build-info` too. `script`,
   `loop` and `observe-script` print the usage (they drive Linux's fake trees and `rusage`).
-- `src/collect/windows/`, Rust only (the Python service has no Windows collector to compare with): the
+- `src/collect/windows/`, Rust only (the Python service had no Windows collector to compare with): the
   required data in the fields, types and key order of a Linux collection, `platform` `"Windows"`.
   - `cpu`: per-CPU usage from `NtQuerySystemInformation` (`SystemProcessorPerformanceInformation`, 100 ns
     units) through the same `CpuCounters` as Linux: user, kernel time without idle as system (it includes
