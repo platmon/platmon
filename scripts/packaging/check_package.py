@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Extract and smoke-test a .deb outside the checkout, without installing it, on a host of its architecture."""
+"""Extract and smoke-test platmon's .deb and platmon-cli's outside the checkout, without installing them, on a
+host of the server's architecture."""
 import argparse
 import json
 import os
@@ -13,9 +14,14 @@ import urllib.error
 import urllib.request
 
 
-def check(package):
+def check(package, cli_package=None):
     package = Path(package).resolve()
-    release = subprocess.check_output(["dpkg-deb", "-f", str(package), "Version"], text=True).strip().split("-")[0]
+    full = subprocess.check_output(["dpkg-deb", "-f", str(package), "Version"], text=True).strip()
+    release = full.split("-")[0]
+    # platmon-cli of the same version, beside it, as package.py writes them
+    cli_package = Path(cli_package).resolve() if cli_package else package.parent / f"platmon-cli_{full}_all.deb"
+    if not cli_package.is_file():
+        raise ValueError(f"no {cli_package.name} beside {package.name}")
     arch = subprocess.check_output(["dpkg-deb", "-f", str(package), "Architecture"], text=True).strip()
     host = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
     if arch != host:
@@ -24,6 +30,7 @@ def check(package):
         work = Path(directory)
         root = work / "root"
         subprocess.run(["dpkg-deb", "-R", str(package), str(root)], check=True)
+        subprocess.run(["dpkg-deb", "-x", str(cli_package), str(root)], check=True)  # the platmon command
         server, cli = root / "usr/lib/platmon/platmon-native", root / "usr/bin/platmon"
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
         # PYTHONPATH must not accidentally make the source checkout available.
@@ -85,15 +92,16 @@ def check(package):
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=5)
-    print(f"package smoke passed: {package.name} (server, CLI, API, web and SVG)")
+    print(f"package smoke passed: {package.name} and {cli_package.name} (server, CLI, API, web and SVG)")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("package")
+    parser.add_argument("package", help="platmon's .deb for this host's architecture")
+    parser.add_argument("cli_package", nargs="?", help="platmon-cli's .deb (default: the one of the same version beside it)")
     args = parser.parse_args()
     try:
-        check(args.package)
+        check(args.package, args.cli_package)
     except (OSError, ValueError, subprocess.SubprocessError) as e:
         parser.exit(1, f"package check failed: {e}\n")
 

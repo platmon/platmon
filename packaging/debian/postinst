@@ -13,9 +13,6 @@ case "$1" in
             echo "platmon config check failed (exit $status): $why" >&2
             exit 1
         fi
-        if [ -e /usr/local/bin/platmon ] || [ -e /usr/local/sbin/platmon ]; then
-            echo "a local platmon command may shadow /usr/bin/platmon; check command -v platmon" >&2
-        fi
         deb-systemd-helper unmask platmon.service >/dev/null || true
         if deb-systemd-helper --quiet was-enabled platmon.service; then
             deb-systemd-helper enable platmon.service >/dev/null || true
