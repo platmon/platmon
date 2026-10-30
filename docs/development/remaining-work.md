@@ -3,8 +3,9 @@
 > **TL;DR**
 > - What is still open, checked against the repository on 2026-10-30; the evidence for each release is in
 >   [release readiness](../releases/readiness.md).
-> - Windows: unreleased until the real-PC checks below pass. Linux: armhf on a real device, a 24 h soak
->   since 1.5.0, an apt upgrade from 1.5.0 on a real device, a remote probe target.
+> - Windows: unreleased until the real-PC checks below pass. Linux: armhf on a real device, `hub_check.py`
+>   since 1.4.0 (a 24 h soak of `main` passed on 2026-10-31), an apt upgrade from 1.5.0 on a real device, a
+>   remote probe target.
 > - Python server: deprecated in 1.5.0, removed for the next minor release (below); not released yet.
 > - Also recorded, not started: battery follow-ups, a desktop tray frontend, and a separate network
 >   process (deferred; no Unix socket).
@@ -56,8 +57,16 @@ Open since the gates in [release readiness](../releases/readiness.md):
 
 - **armhf on a real device:** 1.6.0's armhf package was checked under QEMU only; the systemd service
   start, its health check and the sandbox are unchecked on armhf.
-- **24 h soak and `hub_check.py`:** last run at 1.4.0; 1.5.0 and 1.6.0 had one-hour checks by the owner's
-  choice.
+- **24 h soak and `hub_check.py`:** both last ran at 1.4.0; 1.5.0 and 1.6.0 had one-hour checks by the
+  owner's choice. On 2026-10-30/31 `main` at `0ba5e2c` (the Python server removed; aarch64 build
+  `40a73583`) ran `deploy_check.py soak --hours 24` on the Orin Nano as the candidate unit, after its
+  checks (9/9): **PASS** (`report --settled-mib 14`). 105,960 Hub-like requests, no error, loss or walk
+  problem, no automatic restart; CPU 0.77–0.90 % of a core per hour; settled PSS 10.6 → 11.4 MiB (budget
+  14; 1.4.0's 24 h run rose 10.5 → 11.3), concurrency peaks up to 12.3 MiB; 5 threads, 4 descriptors
+  throughout. Raw: the Orin's `~/platmon-soak-0ba5e2c/` (`checks-orin.jsonl`, `soak-orin.jsonl`). Later
+  changes on `main` (the HTTP edges and `/text` 500, the binary's commands, the package split, the
+  rename) ran after it; the next release's gate says whether this run covers them. `hub_check.py` was
+  not run.
 - **apt upgrade on a real device:** the Orin Nano upgraded from 1.4.0 to 1.6.0 under apt and rebooted
   (2026-10-28, [release readiness](../releases/readiness.md#160-release-gate-2026-10-25)); the upgrade
   from 1.5.0 and the Hub reconnecting after it were checked only in CI's containers or not at all.
