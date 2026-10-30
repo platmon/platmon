@@ -63,9 +63,29 @@ pub const ALLOCATOR: &str = if cfg!(feature = "cache-alloc") { "cache-alloc" } e
 pub const ALLOCATOR_MARK: &str = if cfg!(feature = "cache-alloc") { "platmon-native-allocator=cache-alloc;" }
     else if cfg!(feature = "mimalloc") { "platmon-native-allocator=mimalloc;" } else { "platmon-native-allocator=system;" };
 
+/// The application version: the repository's VERSION file, read at build time (the build scripts and the
+/// Dockerfile put it beside native/); serve's --app-version overrides it.
+fn version() -> &'static str {
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../VERSION")).trim()
+}
+
+const USAGE: &str = "usage: platmon-native COMMAND
+  serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]
+                          the service: collect and answer HTTP as CONFIG (platmon.ini) says
+  health [CONFIG]         exit 0 when the server CONFIG configures answers /api/stats, 1 if not, 2 if CONFIG is refused
+  config-check [CONFIG]   the settings serve would use as JSON; {\"error\": ...} and exit 1 if refused
+  collect                 one collection, 1 s after a first one, as JSON
+  service [CONFIG] [serve's options]
+                          Windows: serve under the service control manager
+  --version, --help
+Test and measurement commands (native/README.md): script, loop, observe-script, runtime-script, replay-cost,
+build-info";
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("--help" | "-h" | "help") => return println!("{}", USAGE),
+        Some("--version" | "-V") => return println!("platmon-native {}", version()),
         Some("serve") => return serve(&args[2..]),
         #[cfg(windows)]
         Some("service") => {
@@ -79,14 +99,18 @@ fn main() {
         Some("observe-script") => return harness::observe_script(&args[2..]),
         Some("replay-cost") => return harness::replay_cost(&args[2..]),
         Some("build-info") => return println!("{}", ALLOCATOR_MARK),
+        Some("collect") => return harness::collect_command(&args),
+        #[cfg(target_os = "linux")]
+        Some("script" | "loop") => return harness::collect_command(&args), // elsewhere: the usage, exit 2
         _ => {}
     }
-    harness::collect_command(&args);
+    eprintln!("{}", USAGE);
+    std::process::exit(2);
 }
 
-/// config-check [CONFIG [PLATFORM [FRONTENDS]]]: the configuration as serve would use it, {"error": ...} if
-/// refused (tools/equivalence/config_fixture.py compares it with the recorded answers); empty CONFIG or PLATFORM: none,
-/// FRONTENDS: the --frontends value.
+/// config-check [CONFIG [PLATFORM [FRONTENDS]]]: the configuration as serve would use it, {"error": ...} and
+/// exit 1 if refused (tools/equivalence/config_fixture.py compares it with the recorded answers); empty CONFIG
+/// or PLATFORM: none, FRONTENDS: the --frontends value.
 fn config_check(args: &[String]) {
     let platform = args.get(1).map(String::as_str).filter(|p| !p.is_empty());
     let frontends = config::frontends(args.get(2).map(String::as_str));
@@ -101,6 +125,9 @@ fn config_check(args: &[String]) {
         Err(e) => { let mut v = Value::obj(); v.set("error", e.into()); v }
     };
     println!("{}", out.to_string(false));
+    if out.get("error").is_some() {
+        std::process::exit(1);
+    }
 }
 
 /// health [CONFIG]: GET /api/stats where serve would listen with CONFIG (127.0.0.1 for 0.0.0.0), within 4 s.
@@ -125,7 +152,7 @@ fn slow_groups(cfg: &config::Config) -> Vec<&'static str> {
 /// serve [CONFIG] [--frontends LIST] [--web DIR] [--app-version V]: the configuration as config::load
 /// reads it; the slow groups are on as configured, with their readers (src/collect/linux/observe/).
 fn serve(args: &[String]) {
-    let (mut path, mut web_dir, mut version, mut frontends) = (None, None, "0.0.0".to_string(), None);
+    let (mut path, mut web_dir, mut version, mut frontends) = (None, None, version().to_string(), None);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -179,7 +206,12 @@ fn serve(args: &[String]) {
         g.start(observe::reader(&g.name, &cfg));
     }
     println!("platmon http on {}:{}", bind, port);
-    let web = cfg.flag("http", "web").then_some(web_dir).flatten();
+    let web = cfg.flag("http", "web").then_some(web_dir.clone()).flatten();
+    match (&web, cfg.flag("http", "web")) {
+        (Some(dir), _) => println!("platmon web page at / from {}", dir),
+        (None, true) => println!("platmon web page: off, no --web DIR given (API only)"),
+        (None, false) => println!("platmon web page: off, web = no (API only)"),
+    }
     std::sync::Arc::new(http::Server::new(sampler, observations, web, version, levels)).serve(listener);
 }
 
@@ -188,6 +220,12 @@ fn serve(args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_is_the_version_file() {
+        let parts: Vec<&str> = version().split('.').collect();
+        assert!(parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())), "{:?}", version());
+    }
 
     #[test]
     fn slow_groups_and_history_follow_configuration() {

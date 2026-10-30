@@ -4,7 +4,8 @@ case "$1" in
     configure)
         # Validate the preserved config before enabling or restarting any service.
         # The server prints the settings it would use, or {"error": ...} with the same text as before.
-        PLATMON_CONFIG=$(/usr/lib/platmon/platmon-native config-check /etc/platmon/platmon.ini)
+        # exit 1 with {"error": ...} for a refused file: the message below says why
+        PLATMON_CONFIG=$(/usr/lib/platmon/platmon-native config-check /etc/platmon/platmon.ini) || true
         export PLATMON_CONFIG
         python3 -B -c '
 import json

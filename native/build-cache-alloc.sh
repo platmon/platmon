@@ -3,7 +3,7 @@
 #   native/build-cache-alloc.sh   -> native/target/cache-alloc/{x86_64,aarch64}-unknown-linux-musl/release/platmon-native
 set -euo pipefail
 cd "$(dirname "$0")"
-docker run --rm -u "$(id -u):$(id -g)" -e CARGO_HOME=/src/target/cargo-home -v "$PWD":/src -w /src rust:1.88-slim bash -euo pipefail -c '
+docker run --rm -u "$(id -u):$(id -g)" -e CARGO_HOME=/src/target/cargo-home -v "$PWD":/src -v "$PWD/../VERSION":/VERSION:ro -w /src rust:1.88-slim bash -euo pipefail -c '
   rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl >/dev/null
   for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
     RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static" cargo build -q --release --locked --target $t \

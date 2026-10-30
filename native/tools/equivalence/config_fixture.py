@@ -160,7 +160,12 @@ class Golden:
 
 
 def config_check(binary, args):
-    return json.loads(subprocess.run([binary, "config-check"] + args, capture_output=True, text=True, check=True).stdout)
+    """The settings, or {"error"}; exit 1 for a refusal and 0 otherwise, else an exception."""
+    p = subprocess.run([binary, "config-check"] + args, capture_output=True, text=True)
+    out = json.loads(p.stdout)
+    if p.returncode != (1 if "error" in out else 0):
+        raise SystemExit(f"config-check {args}: exit {p.returncode} with {p.stdout[:120]!r}")
+    return out
 
 
 def main():

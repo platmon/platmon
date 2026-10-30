@@ -38,7 +38,9 @@ def source_install(tmp_path):
     unit.write_text("old unit\n")
     server = repo / "native/target/x86_64-unknown-linux-musl/release/platmon-native"  # uname -m is x86_64 below
     server.parent.mkdir(parents=True)
-    server.write_text('#!/bin/sh\n[ "$1" = config-check ] && echo "${CONFIG_CHECK:-{\\"core\\": {}}}"\nexit 0\n')
+    # config-check as the server gives it: the settings, or {"error": ...} and exit 1
+    server.write_text('#!/bin/sh\n[ "$1" = config-check ] || exit 0\necho "${CONFIG_CHECK:-{\\"core\\": {}}}"\n'
+                      'case "${CONFIG_CHECK:-}" in *error*) exit 1 ;; esac\n')
     server.chmod(0o755)
     (repo / "frontends/web").mkdir(parents=True)
     (repo / "frontends/web/new-code").write_text("candidate")

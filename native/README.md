@@ -79,7 +79,9 @@ identity starts a new series; series that went away are dropped after the retent
 restart, and moves the cursor on also when everything asked for has expired. Published data can be
 reused, but never a finished answer: ages and `stale` are computed per answer, also for replayed samples.
 
-`platmon-native serve [platmon.ini] [--frontends LIST] --web DIR --app-version V`:
+`platmon-native serve [platmon.ini] [--frontends LIST] --web DIR [--app-version V]` (the version defaults to
+the repository's `VERSION`, read at build time; without `--web` the start log says the page is off;
+`platmon-native --help` lists the commands):
 
 Publication and the live API (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
 - One writer thread collects every interval. A publication is immutable: its stats (with the passive

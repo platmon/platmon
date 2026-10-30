@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 t=arm-unknown-linux-musleabihf
-docker run --rm -u "$(id -u):$(id -g)" -e CARGO_HOME=/src/target/cargo-home -v "$PWD":/src -w /src rust:1.88-slim bash -euo pipefail -c '
+docker run --rm -u "$(id -u):$(id -g)" -e CARGO_HOME=/src/target/cargo-home -v "$PWD":/src -v "$PWD/../VERSION":/VERSION:ro -w /src rust:1.88-slim bash -euo pipefail -c '
   rustup target add '"$t"' >/dev/null
   export RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static"
   cargo build -q --release --locked --no-default-features --target '"$t"'
