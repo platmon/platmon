@@ -1,8 +1,8 @@
 # Packaging and releases
 
 > **TL;DR**
-> - One `.deb` per architecture (amd64, arm64, armhf) with the static native server; the `platmon` command
->   needs the host's Python 3.9+.
+> - One `platmon` `.deb` per architecture (amd64, arm64, armhf) with the static native server and no Python;
+>   the `platmon` command is `platmon-cli` (`Architecture: all`, the host's Python 3.9+), which it recommends.
 > - The `VERSION` file is the single version source; releases are built once in CI and
 >   published to GitHub Releases and the APT repository.
 > - Covers install, upgrade, migration from source or Docker installs, rollback and the release procedure.
@@ -10,10 +10,12 @@
 The primary distribution is a Debian package for Ubuntu and Debian-derived Linux hosts
 (including supported Jetson and Raspberry Pi systems), one per architecture: `amd64`, `arm64` and `armhf`.
 The service is a static native server built from `native/` (Rust, musl, the system allocator); the
-`platmon` command is one Python file that uses the host's Python 3.9+ standard library only. The package
-uses the host's systemd; it bundles neither Python nor OS/NVIDIA binaries. A package for an architecture
-does not mean that every OS/kernel on it has been validated. A device whose Python is older than 3.9
-needs a supported OS/interpreter before installation. Releases up to 1.3.0 are one `Architecture: all`
+package uses the host's systemd, has no Python dependency and bundles no OS/NVIDIA binaries. The
+`platmon` command is the second package `platmon-cli` (`Architecture: all`, `Depends: python3 (>= 3.9)`):
+one Python file that uses the host's standard library only. `platmon` recommends it, so apt installs it by
+default; `--no-install-recommends` leaves it out. A package for an architecture does not mean that every
+OS/kernel on it has been validated. A device whose Python is older than 3.9 needs a supported
+OS/interpreter for the command, not for the service. Releases up to 1.3.0 are one `Architecture: all`
 package with the Python server, which was removed after 1.6.0; the source installation and the container run
 the native server too, built from the checkout ([deployment](../guides/deployment.md)).
 `armhf` (32-bit ARM, ARMv6 with VFP and later, e.g. Raspberry Pi OS 32-bit) is built by
@@ -77,7 +79,7 @@ lintian --no-cfg --info --pedantic --fail-on error,warning "$platmon_dist"/*.deb
 ```
 
 The fresh output directory contains `platmon_<version>-1_amd64.deb`, `platmon_<version>-1_arm64.deb`,
-`platmon_<version>-1_armhf.deb`,
+`platmon_<version>-1_armhf.deb`, `platmon-cli_<version>-1_all.deb`,
 `platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the servers' SHA-256 and versions) and
 `SHA256SUMS`. The builder takes the servers from `native/target/` by default, or one per
 `--binary ARCH=PATH`; it refuses a file that is not an ELF for that architecture or lacks the
@@ -118,7 +120,7 @@ with `Signed-By` so that the key is trusted for this repository only, and `Archi
 host's architecture, so that a foreign architecture such as i386 is not requested from it.
 
 ```sh
-sudo apt update && sudo apt install --only-upgrade platmon   # update platmon only
+sudo apt update && sudo apt install --only-upgrade platmon platmon-cli   # update platmon only
 apt list -a platmon                                          # versions in the repository
 sudo apt install --allow-downgrades platmon=<version>-<revision>   # roll back
 ```
@@ -164,10 +166,16 @@ Use the release's own tag, including a `-<revision>` suffix when it has one.
 The published packages 1.0.0-1 to 1.3.0-1 have no attestation.
 
 The server goes to `/usr/lib/platmon/platmon-native`, its web files to `/usr/share/platmon/`,
-the client to `/usr/bin/platmon`, the vendor unit to `/usr/lib/systemd/system/platmon.service`,
-and config to `/etc/platmon/platmon.ini`.
-The CLI manual is available with `man platmon`. Compressed documentation and
-changelogs are in `/usr/share/doc/platmon/`; `copyright` references the system's
+the vendor unit to `/usr/lib/systemd/system/platmon.service`, and config to `/etc/platmon/platmon.ini`;
+`platmon-cli` puts the client in `/usr/bin/platmon` and its manual (`man platmon`).
+
+Up to 1.6.0 the command was in `platmon` itself. `platmon-cli` breaks and replaces the `platmon` releases
+before its own version, so an upgrade moves `/usr/bin/platmon` to it: `apt upgrade` and `apt install
+platmon` install the newly recommended `platmon-cli` with it. `apt-get upgrade` installs no new package and
+so keeps `platmon` back at the old version, command included, until `apt install platmon` (checked with
+1.3.0 and a local repository). Rolling `platmon` back to 1.6.0 or earlier makes apt
+remove `platmon-cli`, as the old package has the command itself. Compressed documentation and
+changelogs are in `/usr/share/doc/platmon/` (and `/usr/share/doc/platmon-cli/`); `copyright` references the system's
 Apache-2.0 license. Package metadata includes `md5sums` for non-conffile contents
 for tools such as `debsums`; release artifact verification uses `SHA256SUMS`.
 The service retains DynamicUser, ProtectSystem, ProtectHome and NoNewPrivileges; the server

@@ -41,7 +41,8 @@ flowchart LR
 
 ## Quick start
 
-On Ubuntu/Debian-derived Linux (amd64, arm64 or armhf) with Python 3.9+ and systemd, install from the signed
+On Ubuntu/Debian-derived Linux (amd64, arm64 or armhf) with systemd (and Python 3.9+ for the `platmon`
+command, package `platmon-cli`), install from the signed
 [APT repository](https://platmon.github.io/apt/) (see [getting started](docs/guides/getting-started.md)),
 download a verified package from [GitHub Releases](https://github.com/platmon/platmon/releases),
 or build one from this checkout (Linux with `dpkg-deb` and Docker for the server's build required):
@@ -53,7 +54,8 @@ platmon_arch=$(dpkg --print-architecture)
 platmon_dist="dist/${platmon_version}-1"
 python3 scripts/packaging/package.py --output "$platmon_dist"
 python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_${platmon_arch}.deb"
-sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}.deb"
+sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}.deb" \
+  "./${platmon_dist}/platmon-cli_${platmon_version}-1_all.deb"
 ```
 
 ```sh

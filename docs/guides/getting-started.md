@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - Install the `.deb` from the signed APT repository (check the key fingerprint first) on an Ubuntu or
->   Debian-derived host with systemd and Python 3.9+.
+>   Debian-derived host with systemd; the `platmon` command (`platmon-cli`, installed with it) needs Python 3.9+.
 > - Then run `platmon`, open `http://<device>:9797`, or `curl` `/api/status`.
 > - Settings live in `/etc/platmon/platmon.ini`; the API has no authentication.
 
@@ -14,8 +14,10 @@ published data. Collection is not triggered by requests.
 
 The primary distribution is a `.deb` package for Ubuntu and Debian-derived Linux hosts
 (including suitable Jetson and Raspberry Pi systems), built for **amd64**, **arm64** and **armhf** (32-bit ARM).
-It requires **systemd** and, for the `platmon` command, **Python 3.9+** on the host.
-The service is one static native binary; the command uses only the Python standard library.
+It requires **systemd**. The service is one static native binary without Python. The `platmon` command is
+the separate package `platmon-cli`, which `platmon` recommends, so apt installs it by default; it needs
+**Python 3.9+** on the host and uses only the Python standard library. A headless device can leave it out
+with `sudo apt install --no-install-recommends platmon` and read the API or the web page instead.
 A package for an architecture does not imply that every OS or kernel on it has been validated.
 
 Install from the signed APT repository at <https://platmon.github.io/apt>. It holds
@@ -61,7 +63,7 @@ containing all of the release files, verify checksums before installing the chos
 
 ```sh
 sha256sum -c SHA256SUMS
-sudo apt install ./platmon_<version>-<revision>_<arch>.deb
+sudo apt install ./platmon_<version>-<revision>_<arch>.deb ./platmon-cli_<version>-<revision>_all.deb
 systemctl status platmon --no-pager
 platmon --version
 platmon --once
@@ -82,12 +84,13 @@ platmon_arch=$(dpkg --print-architecture)
 platmon_dist="dist/${platmon_version}-1"
 python3 scripts/packaging/package.py --output "$platmon_dist"
 python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_${platmon_arch}.deb"
-sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}.deb"
+sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}.deb" \
+  "./${platmon_dist}/platmon-cli_${platmon_version}-1_all.deb"
 ```
 
-The package installs the `platmon` command in `/usr/bin`, the server in
-`/usr/lib/platmon/platmon-native`, the web files in `/usr/share/platmon`, and
-configuration in `/etc/platmon/platmon.ini`.
+The `platmon` package installs the server in `/usr/lib/platmon/platmon-native`, the web files in
+`/usr/share/platmon`, and configuration in `/etc/platmon/platmon.ini`; `platmon-cli` installs the
+`platmon` command in `/usr/bin`.
 APT preserves an edited config on upgrade. If an existing **source or Docker**
 installation is present, follow the
 [migration procedure](../reference/packaging.md#migrate-a-source-or-docker-installation)

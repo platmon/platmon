@@ -6,6 +6,11 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- The Debian package no longer depends on python3. The `platmon` command moves to the new package
+  `platmon-cli` (`Architecture: all`, needs Python 3.9+), which `platmon` recommends: `apt install platmon`
+  and `apt upgrade` install it (`apt-get upgrade` keeps `platmon` back at the old version until `apt install
+  platmon`), and `--no-install-recommends` leaves it out on a headless device. The maintainer scripts check the
+  configuration and the started service with `platmon-native config-check` and `health` instead of Python.
 - The source installation and the container run the native server, as the Debian package does: the
   Python server is no longer installed by any of them. `deploy/systemd/install.sh` installs this
   checkout's build (`native/build.sh`, or `native/build-armhf.sh` on 32-bit ARM, run first; both need
