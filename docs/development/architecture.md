@@ -59,7 +59,7 @@ See the [live API](../reference/api.md), [observations](../reference/observation
 | `src/config.rs` | `platmon.ini` parsing and checks, its defaults, messages and levels |
 | `src/collect/linux/`, `src/collect/windows/` | One collector per OS; `collect/mod.rs` holds the CPU counters and required-read spans both use, `collect/probe.rs` the shared probe |
 | `src/collect/linux/common.rs`, `jetson.rs`, `accel.rs`, `nvidia.rs` | Generic Linux readings, board-specific extensions, DRM and accel devices, nvidia-smi |
-| `src/collect/linux/passive.rs`, `observe.rs` | Network, disk I/O and pressure; the slow groups' readers (storage, Wi-Fi, battery) |
+| `src/collect/linux/passive.rs`, `observe/` | Network, disk I/O and pressure; the slow groups' readers (storage, Wi-Fi, battery, one file each, and the probe's connection) |
 | `src/collect/linux/sysfs.rs` | Filesystem access, device discovery and path identity resolution |
 | `src/metadata.rs`, `src/sha256.rs` | Group diagnostics, read spans, sensor source ids and pointers |
 | `src/runtime.rs` | Sampler: cadence, publication, freshness and status |
