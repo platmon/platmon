@@ -5,6 +5,8 @@
 >   built Docker image; all listen on port 9797.
 > - All three run the native server: the source install from `native/build.sh`'s build of the checkout,
 >   the container from its own build stage.
+> - `[http] bind` and `web` choose who can read it: everything (the default), the API without the page,
+>   or this host only ([Choosing what is served](#choosing-what-is-served)).
 > - Expose the unauthenticated API only to trusted networks. The repository ships a Dockerfile, not an
 >   image: publishing a built image distributes its GPL/LGPL base userland.
 
@@ -143,6 +145,24 @@ beyond its configured mounts. See
 actual audited platform comparison, sample extra mounts and limits.
 This host-network configuration was validated with **native Linux
 Docker Engine**, not assumed to work identically on Docker Desktop.
+
+## Choosing what is served
+
+One listener serves the API (`/api/*`), `/text` and, with `web = yes`, the web page at `/`. The page is
+static and reads the same API from the browser, so serving it needs the API on a reachable address. The
+`platmon` command and platmon-hub are clients of the API, not parts of the service. Two `[http]` keys
+choose what is served, on Linux and Windows alike:
+
+| Use | `bind` | `web` | Who can read it |
+| --- | --- | --- | --- |
+| Browser, Hub and CLI (the default) | `0.0.0.0` | `yes` | the host and its networks |
+| Hub and remote CLI, no page | `0.0.0.0` | `no` | the host and its networks; `/` answers 404 |
+| This host only | `127.0.0.1` | `no` (or `yes`) | programs on the host: `platmon` with no address, `curl localhost:9797` |
+
+With `bind = 127.0.0.1` the Hub cannot reach the device. To open the page from another machine anyway, use
+an SSH tunnel (`ssh -L 9797:127.0.0.1:9797 user@device`, then `http://localhost:9797` there) with `web = yes`.
+A loopback listener is still open to every local user and process, as `0.0.0.0` already is; there is no
+per-user access control.
 
 ## Network troubleshooting
 
