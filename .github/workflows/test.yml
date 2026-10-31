@@ -189,3 +189,70 @@ jobs:
             '
       - name: Check package lifecycle
         run: python3 scripts/packaging/check_package_install.py dist/first/*_armhf.deb dist/second/*_armhf.deb --image platmon-package-test:local
+
+  # The .rpm packages (scripts/packaging/package_rpm.py), from the same server builds, with Ubuntu's rpmbuild:
+  # their tests, two releases for the upgrade and rpmlint in a Fedora container.
+  rpm:
+    needs: [test, native]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-server
+          path: native/target
+      - name: Install rpmbuild
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
+      - run: python -m pip install -r tests/requirements.txt
+      - run: pytest -v tests/packaging/test_rpm.py
+      - run: python3 scripts/packaging/package_rpm.py --output dist/rpm-first
+      - run: python3 scripts/packaging/package_rpm.py --release 2 --output dist/rpm-second
+      - name: Verify checksums
+        working-directory: dist/rpm-first
+        run: sha256sum -c SHA256SUMS
+      - name: Check package policy (rpmlint)
+        timeout-minutes: 20
+        run: |
+          docker run --rm --mount "type=bind,src=$PWD,dst=/checkout,readonly" fedora:44 sh -ec '
+            dnf install -y -q rpmlint
+            LC_ALL=C.UTF-8 rpmlint -c /checkout/packaging/rpm/rpmlint.toml /checkout/dist/rpm-first /checkout/dist/rpm-second
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platmon-rpm
+          path: dist/rpm-first/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platmon-rpm-upgrade-fixture
+          path: dist/rpm-second/*.rpm
+          if-no-files-found: error
+
+  # Each architecture's .rpm on a runner of that architecture, under a booted systemd in Fedora and in
+  # Enterprise Linux 9 (the oldest Python the CLI takes, 3.9).
+  rpm-userspace:
+    needs: rpm
+    strategy:
+      fail-fast: false
+      matrix:
+        base: ["fedora:44", "almalinux:9"]
+        arch: [x86_64, aarch64]
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-rpm
+          path: dist/rpm-first
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-rpm-upgrade-fixture
+          path: dist/rpm-second
+      - name: Prepare the test image (python3, systemd)
+        timeout-minutes: 20
+        run: python3 scripts/packaging/prepare_test_image.py ${{ matrix.base }} platmon-rpm-test:local
+      - name: Check the packages under systemd (install, upgrade, invalid INI, failed start, downgrade, erase)
+        run: python3 scripts/packaging/check_rpm.py dist/rpm-first/platmon-*.${{ matrix.arch }}.rpm dist/rpm-second/platmon-*.${{ matrix.arch }}.rpm --image platmon-rpm-test:local

@@ -3,6 +3,8 @@
 > **TL;DR**
 > - One `platmon` `.deb` per architecture (amd64, arm64, armhf) with the static native server and no Python;
 >   the `platmon` command is `platmon-cli` (`Architecture: all`, the host's Python 3.9+), which it recommends.
+> - `.rpm` packages of the same files (x86_64, aarch64; platmon-cli noarch) build too, for Fedora and
+>   Enterprise Linux 9+ ([RPM packages](#rpm-packages)); they are checked in CI, not released yet.
 > - The `VERSION` file is the single version source; releases are built once in CI and
 >   published to GitHub Releases and the APT repository.
 > - Covers install, upgrade, migration from source or Docker installs, rollback and the release procedure.
@@ -212,6 +214,51 @@ sudo apt purge platmon     # also removes the packaged conffile
 
 The package does not remove unrelated files in `/etc/platmon`. Use APT for packaged
 installations; source install/uninstall scripts refuse an installed dpkg package.
+
+## RPM packages
+
+`scripts/packaging/package_rpm.py` builds `.rpm` packages of the same files as the `.deb` ones, from the
+same servers (`native/build.sh`): `platmon-<version>-1.x86_64.rpm`, `platmon-<version>-1.aarch64.rpm`
+(the server, its unit, `/etc/platmon/platmon.ini` as `%config(noreplace)`, the web page; `Requires:
+systemd`, `Recommends: platmon-cli`) and `platmon-cli-<version>-1.noarch.rpm` (`Requires: python3 >= 3.9`),
+with `SHA256SUMS`. There is no 32-bit ARM package: the armhf server is ARMv6, and the RPM distributions
+that still have 32-bit ARM have armv7hl. Nothing is compiled: `packaging/rpm/*.spec` copy the staged files.
+The builder needs `rpmbuild` (Fedora: `sudo dnf install rpm-build`; Debian and Ubuntu: `sudo apt install
+rpm`); the same `SOURCE_DATE_EPOCH` and inputs give the same files with the same rpm version. The
+packages are not signed: `dnf install ./FILE.rpm` installs them as local files.
+
+```sh
+native/build.sh
+python3 scripts/packaging/package_rpm.py --output dist/rpm     # --release 2 for a packaging-only rebuild
+(cd dist/rpm && sha256sum -c SHA256SUMS)
+rpmlint -c packaging/rpm/rpmlint.toml dist/rpm                 # on Fedora: sudo dnf install rpmlint
+sudo dnf install ./dist/rpm/platmon-*.$(uname -m).rpm ./dist/rpm/platmon-cli-*.noarch.rpm
+```
+
+The scriptlets do what the `.deb`'s maintainer scripts do, within what rpm allows:
+
+- The first install refuses a local `/etc/systemd/system/platmon.service` or a running Docker instance
+  (as the `.deb` does; [migrate](#migrate-a-source-or-docker-installation) first), then enables the
+  service. An upgrade keeps the administrator's enabled or disabled choice.
+- After the transaction (`%posttrans`), `platmon-server config-check` validates the kept INI; an invalid
+  one is reported and the running server is left alone. Otherwise an enabled or running service is
+  restarted and must answer within 20 s, as after a `.deb` install; a disabled service is not started.
+- rpm cannot leave a package unconfigured as dpkg does: a failed check is reported (`%posttrans scriptlet
+  failed`; `rpm` exits 1 on Fedora, 0 on Enterprise Linux 9) and the new package stays installed. Fix the
+  INI and run `sudo dnf reinstall ./FILE.rpm`, or go back with the retained previous package: `sudo dnf
+  downgrade ./OLD.rpm`.
+- `dnf remove platmon` stops and disables the service and keeps an edited INI as
+  `/etc/platmon/platmon.ini.rpmsave`; the source installer refuses an rpm-installed platmon, as it does a
+  dpkg one.
+
+CI builds both releases (`-1` and `-2`) with Ubuntu's `rpmbuild` and runs `rpmlint` in a Fedora 44
+container (`packaging/rpm/rpmlint.toml` names the deliberately static server and the word `cli`). Each
+architecture's packages run on a runner of that architecture under a booted systemd in Fedora 44 and
+AlmaLinux 9 containers (`scripts/packaging/check_rpm.py`): a refused local unit, the first install
+started without platmon-cli and then with it, an upgrade that keeps an edited INI, an invalid INI, a
+disabled service, a failed start, a downgrade and the erase. SELinux is not enforcing in a container:
+the service under an enforcing policy on a real host is not verified, and neither is a real board.
+The release workflow does not publish `.rpm` files yet, and there is no DNF repository.
 
 ## Migrate a source or Docker installation
 
