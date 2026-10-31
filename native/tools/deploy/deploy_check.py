@@ -9,6 +9,11 @@ script; CPU, VmRSS and threads from /proc, which anyone may read. One JSON line 
   python3 deploy_check.py soak --out OUT.jsonl [--hours 24]  # the long run, platmon-server-candidate
   python3 deploy_check.py report OUT.jsonl [--settled-mib N]  # the judgement, set before the runs
 
+--user (before the command) where install_user.sh ran in place of install.sh: the same units in the login
+user's systemd (systemctl --user, no sudo), the binary and the INI under the home directory, the readings of
+measure taken from /proc and the unit's cgroup, which the login user may read for its own processes. The units
+run as the login user in its own user namespace, not as a DynamicUser; the checks and the soak are the same.
+
 checks, in order; a check passes with no problem in its line:
   ready         the candidate units inactive, the port free, platmon.service active and answering
   start         the native unit starts on the INI and becomes ready as its own DynamicUser; the INI unchanged
@@ -58,8 +63,9 @@ import worker  # noqa: E402
 PORT = 19797
 NATIVE, FAKE = "platmon-server-candidate.service", "platmon-server-candidate-fakesmi.service"
 UNITS = (NATIVE, FAKE)
-INI = "/etc/platmon-candidate/platmon.ini"
+LIB, INI = "/usr/lib/platmon-candidate", "/etc/platmon-candidate/platmon.ini"
 SYSTEMCTL = "/usr/bin/systemctl"
+USER = False  # --user: the units of install_user.sh
 SOAK = {"hour": 3600, "poll": 2400, "disconnect": 480, "expire": 720, "settle": 120, "restart_at": 12,
         "concurrent_rounds": 1, "concurrent_pollers": 4, "reconnect_limit": 300}
 # Accelerated: the same reconnects and expiries with almost no polling between them, and 3 concurrent rounds
@@ -75,25 +81,59 @@ def sudo(*args):
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
+def use_user_units():
+    global USER, LIB, INI
+    USER, LIB = True, os.path.expanduser("~/.local/lib/platmon-candidate")
+    INI = os.path.expanduser("~/.config/platmon-candidate/platmon.ini")
+
+
+def unitctl(*args):
+    """systemctl on the candidate units: through the sudo rules, or the login user's own (--user)."""
+    if not USER:
+        return sudo(SYSTEMCTL, *args)
+    r = subprocess.run([SYSTEMCTL, "--user", *args], capture_output=True, text=True, timeout=120)
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
 def ctl(verb, unit):
     """start, stop or restart, as the sudo rule names it; (exit code, output, seconds)."""
     t = time.monotonic()
-    code, out = sudo(SYSTEMCTL, verb, unit)
+    code, out = unitctl(verb, unit)
     return code, out, round(time.monotonic() - t, 3)
 
 
 def show(unit, *props):
-    out = subprocess.run([SYSTEMCTL, "show", "-p", ",".join(props), unit], capture_output=True, text=True).stdout
+    out = subprocess.run([SYSTEMCTL, *(["--user"] if USER else []), "show", "-p", ",".join(props), unit],
+                         capture_output=True, text=True).stdout
     return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
 
 
 def journal(unit, n=15):
-    return subprocess.run(["journalctl", "-u", unit, "-n", str(n), "--no-pager", "-o", "short-monotonic"],
-                          capture_output=True, text=True).stdout.splitlines()
+    return subprocess.run(["journalctl", *(["--user"] if USER else []), "-u", unit, "-n", str(n), "--no-pager",
+                           "-o", "short-monotonic"], capture_output=True, text=True).stdout.splitlines()
+
+
+def measure_user():
+    """measure's readings for the units of install_user.sh: their processes are the login user's own."""
+    units = {}
+    for u in UNITS:
+        pid = int(show(u, "MainPID")["MainPID"])
+        if pid <= 0:
+            continue
+        m = units[u] = {"pid": pid}
+        for name, keys in (("smaps_rollup", ("Rss:", "Pss:")), ("status", ("VmRSS:", "Threads:"))):
+            with open(f"/proc/{pid}/{name}") as f:
+                m.update((t[0][:-1].lower(), int(t[1])) for t in map(str.split, f) if t and t[0] in keys)
+        links = [os.readlink(f"/proc/{pid}/fd/{fd}") for fd in os.listdir(f"/proc/{pid}/fd")]
+        m["fds"], m["sockets"] = len(links), sum(x.startswith("socket:") for x in links)
+        m["processes"] = len(procs(u))
+    return units
 
 
 def measure():
     """{unit: {pid, rss, pss, vmrss, threads, fds, sockets, processes}} for the running candidate units."""
+    if USER:
+        return measure_user()
     code, out = sudo("/usr/lib/platmon-candidate/measure")
     if code:
         raise OSError(f"measure: {out}")
@@ -138,15 +178,19 @@ class VmRss(ab.Rss):
 
 
 def procs(unit):
+    cg = show(unit, "ControlGroup").get("ControlGroup") if USER else f"/system.slice/{unit}"
+    if not cg:  # an inactive unit has none
+        return []
     try:
-        with open(f"/sys/fs/cgroup/system.slice/{unit}/cgroup.procs") as f:
+        with open(f"/sys/fs/cgroup{cg}/cgroup.procs") as f:
             return [int(x) for x in f.read().split()]
     except OSError:
         return []
 
 
 def owned(uid):
-    """Processes running as uid, or from the candidate's directory: what a stopped unit must not leave."""
+    """Processes running as uid (not with --user: that is the login user's), or from the candidate's directory:
+    what a stopped unit must not leave."""
     out = []
     for pid in filter(str.isdigit, os.listdir("/proc")):
         try:
@@ -156,7 +200,7 @@ def owned(uid):
                 cmd = f.read().replace(b"\0", b" ").decode(errors="replace").strip()
         except (OSError, StopIteration):
             continue
-        if u == uid or "/usr/lib/platmon-candidate/" in cmd:
+        if (u == uid and not USER) or f"{LIB}/" in cmd:
             out.append((int(pid), u, cmd[:120]))
     return out
 
@@ -289,7 +333,7 @@ def checks(args):
     def crash():
         old = res["native"]
         pid0, n0 = int(show(NATIVE, "MainPID")["MainPID"]), int(show(NATIVE, "NRestarts")["NRestarts"])
-        code, outp = sudo(SYSTEMCTL, "kill", "--signal=SIGKILL", NATIVE)
+        code, outp = unitctl("kill", "--signal=SIGKILL", NATIVE)
         secs, s = ready(timeout=30, other_than=old["instance_id"])
         res["native"] = s
         st = show(NATIVE, "MainPID", "NRestarts", "ActiveState")
@@ -428,7 +472,7 @@ def checks(args):
         for u in UNITS:
             if show(u, "ActiveState")["ActiveState"] != "inactive":
                 ctl("stop", u)
-        sudo(SYSTEMCTL, "reset-failed", *UNITS)
+        unitctl("reset-failed", *UNITS)
         p = [f"{u} {show(u, 'ActiveState')['ActiveState']}" for u in UNITS
              if show(u, "ActiveState")["ActiveState"] != "inactive"]
         prod = production()
@@ -599,7 +643,8 @@ def setup(kind):
         with open(path, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
     return {"kind": kind, "host": socket.gethostname(), "machine": os.uname().machine, "python": sys.version.split()[0],
-            "user": os.getuid(), "binary_sha256": sha("/usr/lib/platmon-candidate/platmon-server"),
+            "user": os.getuid(), "units_of": "install_user.sh" if USER else "install.sh",
+            "binary_sha256": sha(f"{LIB}/platmon-server"),
             "ini_sha256": ini_sha(), "units": {u: show(u, "FragmentPath", "User", "DynamicUser")
                                                for u in UNITS},
             "tools_sha256": {os.path.basename(f): sha(f) for f in (__file__, ab.__file__, walk.__file__, worker.__file__)},
@@ -667,6 +712,7 @@ def report(args):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--user", action="store_true", help="the units of install_user.sh, in the login user's systemd")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("checks")
     c.add_argument("--out", required=True)
@@ -682,6 +728,8 @@ def main():
     r.add_argument("--settled-mib", type=float)
     r.add_argument("--peak-mib", type=float)
     args = ap.parse_args()
+    if args.user:
+        use_user_units()
     if args.cmd == "checks":
         checks(args)
     elif args.cmd == "soak":
