@@ -253,8 +253,8 @@ The scriptlets do what the `.deb`'s maintainer scripts do, within what rpm allow
 
 CI builds both releases (`-1` and `-2`) with Ubuntu's `rpmbuild` and runs `rpmlint` in a Fedora 44
 container (`packaging/rpm/rpmlint.toml` names the deliberately static server and the word `cli`). Each
-architecture's packages run on a runner of that architecture under a booted systemd in Fedora 44 and
-AlmaLinux 9 containers (`scripts/packaging/check_rpm.py`): a refused local unit, the first install
+architecture's packages run on a runner of that architecture under a booted systemd in Fedora 44,
+AlmaLinux 9 and CentOS Stream 10 containers (`scripts/packaging/check_rpm.py`): a refused local unit, the first install
 started without platmon-cli and then with it, an upgrade that keeps an edited INI, an invalid INI, a
 disabled service, a failed start, a downgrade and the erase. SELinux is not enforcing in a container:
 the service under an enforcing policy on a real host is not verified, and neither is a real board.

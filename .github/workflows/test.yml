@@ -231,14 +231,14 @@ jobs:
           path: dist/rpm-second/*.rpm
           if-no-files-found: error
 
-  # Each architecture's .rpm on a runner of that architecture, under a booted systemd in Fedora and in
-  # Enterprise Linux 9 (the oldest Python the CLI takes, 3.9).
+  # Each architecture's .rpm on a runner of that architecture, under a booted systemd in Fedora, in
+  # Enterprise Linux 9 (the oldest Python the CLI takes, 3.9) and in CentOS Stream 10 (Enterprise Linux 10).
   rpm-userspace:
     needs: rpm
     strategy:
       fail-fast: false
       matrix:
-        base: ["fedora:44", "almalinux:9"]
+        base: ["fedora:44", "almalinux:9", "quay.io/centos/centos:stream10"]
         arch: [x86_64, aarch64]
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
