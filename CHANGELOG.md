@@ -10,8 +10,9 @@ API schema versions are independent of release versions.
   (x86_64, aarch64) and `platmon-cli` (noarch, needs Python 3.9+) from the same server builds and files as
   the `.deb` packages. The first install enables and starts the service, an upgrade checks the kept INI
   before the restart and the service's answer after it, and `dnf remove` keeps an edited INI as `.rpmsave`.
-  CI builds them, runs rpmlint and checks the packages under systemd in Fedora 44 and AlmaLinux 9; they
-  are not released yet. The source installer refuses an rpm-installed platmon, as it does a dpkg one.
+  CI builds them, runs rpmlint and checks the packages under systemd in Fedora 44, AlmaLinux 9 and CentOS
+  Stream 10; they are not released yet. The source installer refuses an rpm-installed platmon, as it does a
+  dpkg one.
 - The server binary is `platmon-server` (it was `platmon-native`, named apart from the Python server, which
   is gone): `/usr/lib/platmon/platmon-server` in the package, `/opt/platmon/platmon-server` in the source
   installation and the container, and `native/target/<target>/release/platmon-server` from the build. A
