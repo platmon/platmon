@@ -188,6 +188,8 @@ python3 native/tools/perf/ab_report.py ab.jsonl
 $B replay-cost core.jsonl 20
 sudo bash native/tools/deploy/install.sh   # on a host, once, from a staged copy with the binary: the candidate units
 python3 native/tools/deploy/deploy_check.py checks --out checks.jsonl   # about 15 min; soak --hours N, report
+bash native/tools/deploy/install_user.sh   # without root, in place of install.sh: the same units in the user's systemd
+python3 native/tools/deploy/deploy_check.py --user checks --out checks.jsonl   # and --user soak, on those units
 python3 native/tools/deploy/hub_check.py --hub HUB_EXECUTABLE --hosts pc,orin=USER@HOST --out DIR   # 13 min
 ```
 
@@ -201,6 +203,12 @@ The candidate units (`native/tools/deploy/`) run a build beside `platmon.service
 Since 1.4.0 the checks are the native server's alone: `start` on the INI, then restart, SIGKILL, the held
 port and the stops. The Python unit and its swap and rollback checks, used for candidate 1 below, are gone
 with the package's Python server; `uninstall.sh` still removes that unit where an earlier install left it.
+Where the owner cannot run `install.sh` (its sudo needs the password on a terminal), `install_user.sh` puts
+the same two units in the login user's systemd, the binary and the INI under the home directory, and
+`deploy_check.py --user` drives them without sudo. They run as the login user in its own user namespace
+(`PrivateUsers=yes`) instead of a DynamicUser, with `ProtectHome=read-only` instead of `yes`; the rest of
+the hardening, the INI, the port and every check are the same. For a soak longer than the login, turn on
+linger (`loginctl enable-linger`). `uninstall_user.sh` removes them.
 
 - `equivalence/fixture.sh` / `fixture.py`: **the equivalence test.** Fake `/sys` and `/proc` trees are
   mounted over the real ones in a throwaway container (a local Debian 13 image with python3, built on first
