@@ -124,7 +124,12 @@ def measure_user():
         for name, keys in (("smaps_rollup", ("Rss:", "Pss:")), ("status", ("VmRSS:", "Threads:"))):
             with open(f"/proc/{pid}/{name}") as f:
                 m.update((t[0][:-1].lower(), int(t[1])) for t in map(str.split, f) if t and t[0] in keys)
-        links = [os.readlink(f"/proc/{pid}/fd/{fd}") for fd in os.listdir(f"/proc/{pid}/fd")]
+        links = []
+        for fd in os.listdir(f"/proc/{pid}/fd"):
+            try:
+                links.append(os.readlink(f"/proc/{pid}/fd/{fd}"))
+            except FileNotFoundError:  # closed since the listing (a connection that just ended): not counted
+                pass
         m["fds"], m["sockets"] = len(links), sum(x.startswith("socket:") for x in links)
         m["processes"] = len(procs(u))
     return units
