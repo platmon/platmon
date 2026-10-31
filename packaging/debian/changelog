@@ -11,5 +11,7 @@ platmon (@VERSION@) unstable; urgency=medium
   * Move the platmon command to platmon-cli, which platmon recommends: the
     server package no longer depends on python3, and its maintainer scripts
     use the server's config-check and health instead of Python.
+  * Install the server as /usr/lib/platmon/platmon-server, with a
+    platmon-native link to it (its name up to 1.6.0).
 
- -- Jinwoo Sung <jwsung91@users.noreply.github.com>  Thu, 22 Oct 2026 09:00:00 +0900
+ -- Jinwoo Sung <jwsung91@users.noreply.github.com>  Sat, 31 Oct 2026 09:00:00 +0900

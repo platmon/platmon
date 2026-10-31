@@ -4,46 +4,59 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.7.0 — 2026-10-31
 
-- `.rpm` packages for Fedora and Enterprise Linux 9+: `scripts/packaging/package_rpm.py` builds `platmon`
-  (x86_64, aarch64) and `platmon-cli` (noarch, needs Python 3.9+) from the same server builds and files as
-  the `.deb` packages. The first install enables and starts the service, an upgrade checks the kept INI
-  before the restart and the service's answer after it, and `dnf remove` keeps an edited INI as `.rpmsave`.
-  CI builds them, runs rpmlint and checks the packages under systemd in Fedora 44, AlmaLinux 9 and CentOS
-  Stream 10; they are not released yet. The source installer refuses an rpm-installed platmon, as it does a
-  dpkg one.
+- **Breaking:** the Python server (`platmon.py`, `collector/`, `runtime/`), deprecated in 1.5.0, is
+  removed, with `benchmarks/` and its tests: `python3 platmon.py` no longer runs a service. Every
+  installation already runs `platmon-server`; the HTTP API, `platmon.ini` keys and command options do not
+  change, and the `platmon` command stays the Python client. Its tests were ported to Rust or are shown by
+  the native checks against its recorded answers (docs/development/python-test-port.md).
+- The Debian package no longer depends on python3. The `platmon` command moves to the new package
+  `platmon-cli` (`Architecture: all`, needs Python 3.9+), which `platmon` recommends: `apt install platmon`
+  and `apt upgrade` install it (`apt-get upgrade` keeps `platmon` back at the old version until `apt install
+  platmon`), and `--no-install-recommends` leaves it out on a headless device. The maintainer scripts check the
+  configuration and the started service with `platmon-server config-check` and `health` instead of Python.
 - The server binary is `platmon-server` (it was `platmon-native`, named apart from the Python server, which
   is gone): `/usr/lib/platmon/platmon-server` in the package, `/opt/platmon/platmon-server` in the source
   installation and the container, and `native/target/<target>/release/platmon-server` from the build. A
   `platmon-native` link beside it keeps scripts that call the old path working. Its log lines, `--version`
   and the HTTP `Server` header say `platmon-server`; the package stays `platmon` and its options do not
   change.
-- The Debian package no longer depends on python3. The `platmon` command moves to the new package
-  `platmon-cli` (`Architecture: all`, needs Python 3.9+), which `platmon` recommends: `apt install platmon`
-  and `apt upgrade` install it (`apt-get upgrade` keeps `platmon` back at the old version until `apt install
-  platmon`), and `--no-install-recommends` leaves it out on a headless device. The maintainer scripts check the
-  configuration and the started service with `platmon-server config-check` and `health` instead of Python.
 - The source installation and the container run the native server, as the Debian package does: the
   Python server is no longer installed by any of them. `deploy/systemd/install.sh` installs this
   checkout's build (`native/build.sh`, or `native/build-armhf.sh` on 32-bit ARM, run first; both need
   Docker) and the web page, with the package's unit. The Dockerfile builds the server in a
   `rust:1.88-slim` stage and runs it on `debian:13-slim` (no Python in the image). `platmon-server health
   [CONFIG]` is the image's health check: it asks `/api/stats` where the configuration listens.
-- **Breaking:** the Python server (`platmon.py`, `collector/`, `runtime/`), deprecated in 1.5.0, is
-  removed, with `benchmarks/` and its tests: `python3 platmon.py` no longer runs a service. Every
-  installation already runs `platmon-server`; the HTTP API, `platmon.ini` keys and command options do not
-  change, and the `platmon` command stays the Python client. Its tests were ported to Rust or are shown by
-  the native checks against its recorded answers (docs/development/python-test-port.md).
-- Internal: the application version is the `VERSION` file. `native/tools/` is split into `equivalence/`
-  (the recorded answers and the checks that compare with them, without recording again), `perf/` and
-  `deploy/`; the measurement tools compare native builds.
+- `platmon-server --version` prints the release (the `VERSION` file, read at build time; a server started
+  by hand no longer reports 0.0.0), and `--help` lists the user commands (`serve`, `health`,
+  `config-check`, `collect`, `service`). `config-check` exits 1 for a file it refuses (the output does not
+  change). At start the server logs whether it serves the web page, and from which directory.
+- `/text` answers 500 (`text/plain`, pointing at `/api/stats`) for a snapshot its screen cannot show,
+  instead of closing the connection without an answer; its screen is checked against the `platmon`
+  command's. Every HTTP answer has a status line: a request without a version gets 400 and a version
+  other than 1.x gets 505 (HTTP/0.9 is no longer answered with a bare body).
+- `.rpm` packages for Fedora and Enterprise Linux 9+: `scripts/packaging/package_rpm.py` builds `platmon`
+  (x86_64, aarch64) and `platmon-cli` (noarch, needs Python 3.9+) from the same server builds and files as
+  the `.deb` packages. The first install enables and starts the service, an upgrade checks the kept INI
+  before the restart and the service's answer after it, and `dnf remove` keeps an edited INI as `.rpmsave`.
+  CI builds them, runs rpmlint and checks the packages under systemd in Fedora 44, AlmaLinux 9 and CentOS
+  Stream 10; they are not among the release files yet (build them from the source archive or a checkout).
+  The source installer refuses an rpm-installed platmon, as it does a dpkg one.
 - The `platmon` command no longer keeps its own copy of the board temperature levels for servers older than
   1.0.0, which sent none: it uses the level the server sends, and 80/90 °C when `/api/status` cannot be
   read, as the web page does.
 - `platmon` writing to a pipe or a log no longer puts screen-clearing escapes before each snapshot: the
   snapshots follow one another with a blank line between them. A console that is not an interactive Unix
   terminal (Windows) still redraws in place.
+- Internal: the application version is the `VERSION` file. `native/tools/` is split into `equivalence/`,
+  `perf/` and `deploy/`; the measurement tools compare native builds. The recorded answers the equivalence
+  checks compare with are regression data that `--bless` rewrites after an intended change: the server
+  keeps the versioning contract (HTTP API, `platmon.ini`, command options), not the Python service's
+  answers (docs/development/adr/0002-api-contract-not-python-answers.md).
+- Internal: the Windows build runs as a Windows service and reads the CPU clocks (every processor group,
+  hybrid CPUs), temperatures, the GPU, storage, the battery and Wi-Fi, with network and disk history
+  (#112 to #127). It is still not released (native/README.md, "Windows").
 
 ## 1.6.0 — 2026-10-25
 

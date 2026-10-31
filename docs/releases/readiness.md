@@ -1,10 +1,51 @@
 # Release readiness
 
 > **TL;DR**
-> - Release gates and evidence per version, newest first (1.6.0 at the top).
+> - Release gates and evidence per version, newest first (1.7.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
-> - Not verified for 1.6.0: armhf on a real device under systemd, a 24 h soak, an apt upgrade from 1.5.0 on
->   a real device (the Orin Nano's from 1.4.0 passed after the release).
+> - Not verified for 1.7.0: its own soak and deployed-unit checks (the 24 h soak ran on `main` at `0ba5e2c`,
+>   before the later changes), `hub_check.py`, armhf on a real device under systemd, an apt upgrade to it
+>   on a real device.
+
+## 1.7.0 release gate (2026-10-31)
+
+Changes since 1.6.0: the Python server removed, the source installation and the container on the native
+server (#129 to #132, #136); the `platmon` command in its own package `platmon-cli`, so `platmon` no longer
+depends on python3 (#142, #143; the APT repository accepts the new layout with platmon/platmon.github.io#7,
+merged); the server binary named `platmon-server` with a `platmon-native` link (#144); the server's
+`--version`, `--help`, `config-check` exit code and web page log (#140); `/text` 500 and a status line on
+every HTTP answer (#141); the recorded answers as regression data (#139, ADR 0002); the CLI's cleanup
+(#134); `.rpm` packages, built and checked in CI and not among the release files (#147, #148); the Windows
+build's service, clocks, GPU, temperatures, slow groups and history (#112 to #127; not released).
+
+A minor release by the owner's choice (docs/development/remaining-work.md, "Python server removal"): the
+HTTP API's paths and fields, `platmon.ini` keys and defaults, command options and schema versions are
+unchanged. Changed at their edges, as ADR 0002 allows: `config-check` exits 1 for a refused file, `/text`
+answers 500 where it closed the connection, a request without a version gets 400 and HTTP/0.9 is not
+answered. The server's bytes change (local `native/build.sh` / `build-armhf.sh` of the release tree):
+x86_64 `5a4aadf80bbd90ae`, aarch64 `e508086baf6d69e9`, armhf `ef0cd153b112911b`.
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| native equivalence on the release tree (x86_64): fake trees, configurations, runtime, live HTTP | `fixture.sh` 11/11, `config_fixture.py` 68/68, `runtime_fixture.py` 7/7 (57/57 answers; `/text` and the CLI's screen the same), `live_http.py` no difference |
+| `pytest`, Rust unit tests | 242 passed, 2 skipped (the `.rpm` builds, without `rpmbuild` on the host); 262/262 |
+| `package.py` 1.7.0-1 and -2 (amd64, arm64, armhf, platmon-cli), `SHA256SUMS`, `check_package.py` (amd64, the PC), Lintian 2.117 (Ubuntu 24.04, `--pedantic --fail-on error,warning`) | built, `sha256sum -c` OK, smoke passed, clean |
+| on the Jetson Orin Nano (Python 3.10), in a temporary directory beside the production 1.6.0 service | `check_package.py` on `platmon_1.7.0-1_arm64.deb` and platmon-cli: smoke passed; the aarch64 server's `live_http.py`: no difference; `collect` reads the board and the three passive groups |
+| CI on `main` (`99d201e`): the dpkg lifecycle, and the service under systemd upgraded from 1.3.0 (amd64, arm64 on Ubuntu 22.04, 24.04, 26.04); armhf under QEMU (Debian 13, Ubuntu 24.04); the `.rpm` lifecycle (Fedora 44, AlmaLinux 9, CentOS Stream 10) | passed |
+| `deploy_check.py soak --hours 24` on the Orin, `main` at `0ba5e2c` (the Python server removed) as the candidate unit, 2026-10-30/31 | PASS: 105,960 Hub-like requests, no error, loss or walk problem, no automatic restart; CPU 0.77–0.90 % of a core per hour; settled PSS 10.6 → 11.4 MiB (budget 14), concurrency peaks up to 12.3 MiB; 5 threads, 4 descriptors |
+
+Not verified, and therefore open:
+
+- **The 24 h soak predates most of this release:** #134 to #148 (the binary's commands, the HTTP edges and
+  `/text`, the package split, the rename) ran after it, and the release binaries did not run as the
+  candidate unit (`deploy_check.py checks` needs the owner's sudo to install them). The Orin check above
+  ran them as a user process only.
+- **No `hub_check.py`** since 1.4.0.
+- **armhf on a real device and its systemd service**, as at 1.6.0.
+- **No real device upgrade** from 1.6.0 to 1.7.0 under apt, where `apt upgrade` should also install
+  platmon-cli (checked in containers: `apt-get upgrade` keeps `platmon` back until `apt install platmon`).
 
 ## 1.6.0 release gate (2026-10-25)
 

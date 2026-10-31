@@ -1,12 +1,12 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-10-30; the evidence for each release is in
+> - What is still open, checked against the repository on 2026-10-31; the evidence for each release is in
 >   [release readiness](../releases/readiness.md).
 > - Windows: unreleased until the real-PC checks below pass. Linux: armhf on a real device, `hub_check.py`
 >   since 1.4.0 (a 24 h soak of `main` passed on 2026-10-31), an apt upgrade from 1.5.0 on a real device, a
 >   remote probe target.
-> - Python server: deprecated in 1.5.0, removed for the next minor release (below); not released yet.
+> - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
 > - Also recorded, not started: battery follow-ups, a desktop tray frontend, and a separate network
 >   process (deferred; no Unix socket).
 
@@ -65,7 +65,7 @@ Open since the gates in [release readiness](../releases/readiness.md):
   14; 1.4.0's 24 h run rose 10.5 → 11.3), concurrency peaks up to 12.3 MiB; 5 threads, 4 descriptors
   throughout. Raw: the Orin's `~/platmon-soak-0ba5e2c/` (`checks-orin.jsonl`, `soak-orin.jsonl`). Later
   changes on `main` (the HTTP edges and `/text` 500, the binary's commands, the package split, the
-  rename) ran after it; the next release's gate says whether this run covers them. `hub_check.py` was
+  rename) ran after it and are in 1.7.0 without a soak of their own (its gate). `hub_check.py` was
   not run.
 - **apt upgrade on a real device:** the Orin Nano upgraded from 1.4.0 to 1.6.0 under apt and rebooted
   (2026-10-28, [release readiness](../releases/readiness.md#160-release-gate-2026-10-25)); the upgrade
@@ -79,7 +79,7 @@ Open since the gates in [release readiness](../releases/readiness.md):
 
 The Python server (`platmon.py`, `collector/`, `runtime/`) was deprecated in 1.5.0. The owner decided on
 2026-10-24 to remove it in a later **minor** release: the versioning contract covers the HTTP API,
-`platmon.ini` keys and command options, which do not change. Done on `main`, not released yet:
+`platmon.ini` keys and command options, which do not change. Released in 1.7.0:
 
 1. The source installation and the container run the native server: `deploy/systemd/install.sh` installs
    `native/build.sh`'s build, the Dockerfile builds the server in a build stage and runs it on
@@ -93,8 +93,7 @@ The Python server (`platmon.py`, `collector/`, `runtime/`) was deprecated in 1.5
    `equivalence/`, `perf/` and `deploy/`; the application version is the `VERSION` file. Renaming
    `native/` was not part of it (it needs the owner's approval).
 
-The release that carries the removal (a minor, by the owner) still has to record it in
-[release readiness](../releases/readiness.md).
+1.7.0 carries the removal; its gate is in [release readiness](../releases/readiness.md#170-release-gate-2026-10-31).
 
 ## Deferred after the battery group (2026-10-11)
 
