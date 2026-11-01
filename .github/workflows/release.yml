@@ -65,10 +65,17 @@ jobs:
         with:
           name: platmon-server
           path: native/target
+      # The Windows server the checks built and smoke-tested (native-windows), for the experimental zip.
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-server-windows
+          path: native/target/release
       - name: Build fixed-version release files
         env:
           REVISION: ${{ steps.version.outputs.revision }}
-        run: python3 scripts/packaging/package.py --revision "$REVISION"
+        run: |
+          python3 scripts/packaging/package.py --revision "$REVISION"
+          python3 scripts/packaging/package_windows.py
       - name: Install package policy checker
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lintian
       - name: Check package policy
@@ -96,6 +103,7 @@ jobs:
           subject-path: |
             dist/*.deb
             dist/*.tar.gz
+            dist/*.zip
       - uses: actions/upload-artifact@v4
         with:
           name: release
@@ -128,5 +136,5 @@ jobs:
           end = text.find("\n## ", start + 1)
           print(text[start:end if end != -1 else None].strip())
           PY
-          gh release create "$GITHUB_REF_NAME" release/*.deb release/*.tar.gz release/BUILD.json release/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" release/*.deb release/*.tar.gz release/*.zip release/BUILD.json release/SHA256SUMS \
             --verify-tag --draft --title "platmon $GITHUB_REF_NAME" --notes-file notes.md

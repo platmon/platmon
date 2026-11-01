@@ -671,9 +671,15 @@ Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d
 
 ### Windows (not released)
 
-Not released and not in the support scope. It stays unreleased until the real-PC checks pass, then
-becomes an experimental zip (the owner's decision, 2026-10-25; the checks and their status:
-[remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26)). `src/platform/`
+Not released and not in the support scope. The real-PC checks passed on 2026-11-01 but for two the owner
+accepted as known gaps, so the next release adds an experimental zip (the owner's decisions; the checks
+and their status: [remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26)).
+`scripts/packaging/package_windows.py` builds it from CI's binary into `package.py`'s output and adds it to
+`SHA256SUMS`: `platmon-VERSION-windows-x86_64-experimental.zip` with `platmon-server.exe`, the web page,
+`platmon.ini` with `bind = 127.0.0.1`, `LICENSE`, `LICENSE-MIT` (the Rust standard library and the crates)
+and a `README.txt` (the Visual C++ Redistributable it needs and does not include, running it, the
+service, what was and was not checked). No installer and no Microsoft binaries: the binary links the
+Visual C++ runtime dynamically. `src/platform/`
 holds what the service needs from the OS outside the collectors: the elapsed clocks, random bytes for the
 instance id, the listening socket and the exit on a stop request, one module per OS with the same
 functions. `platform/linux.rs` is the code `main.rs`, `metadata.rs`, `runtime.rs` and `http.rs` had,
@@ -753,6 +759,9 @@ On `x86_64-pc-windows-msvc`:
   SIGTERM does on Linux (`SetConsoleCtrlHandler`).
 - `service [CONFIG] [serve's options]`: `serve` as a Windows service in its own process, for the service
   control manager (`sc.exe create platmon binPath= "C:\path\platmon-server.exe service C:\path\platmon.ini"`).
+  It runs as LocalSystem: keep the binary and the INI where only administrators can write (`C:\Program
+  Files\platmon`, as the zip's README says), or a program running as a user could replace them and run as
+  LocalSystem at the next start.
   It reports running once connected, and on a stop or shutdown request reports stopped and exits with
   status 0; a user's logoff does not stop it. Outside the service control manager it exits with status 2.
   Not provided: an installer, a default configuration path, recovery actions and a log: the server's
@@ -765,6 +774,6 @@ On `x86_64-pc-windows-msvc`:
   Set `bind = 127.0.0.1`, or allow the port only from trusted addresses
   ([deployment](../docs/guides/deployment.md)).
 - Not shown in CI (a VM): a GPU or drive temperature, the CPU clock against Task Manager. Checked on a real
-  PC since, and still open (more than 64 CPUs, a sleep and resume, the service as administrator):
+  PC since; not checked, as known gaps (more than 64 CPUs, a discrete GPU's temperature):
   [remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26). Windows on ARM is not
   built.
