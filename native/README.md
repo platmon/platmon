@@ -562,6 +562,26 @@ Raw: `~/.local/state/platmon-measure/native-20261021-deploy/` (SHA-256, first 16
 `soak-orin.jsonl` `c6a182c0cf493c18`, `soak-pi.jsonl` `598339ce2e0116f4`, the `.log` files beside them;
 the `--quick` try `quick-pi.jsonl` `eda2b1b1567d7fc4`). The board copies were removed.
 
+**The settled PSS rule (2026-11-01).** It replaces the rule above that each settled PSS stays within hour
+0's + 10 %, for runs from this date on; earlier results keep the rule they were judged by. Hour 0 had the
+fewest backlog rounds and is close to the lowest reading, so the accelerated soaks (`--accel`) of candidate 1
+and of 1.7.0 failed it with no leak (docs/releases/readiness.md, "Long memory trend"). The rule, for each
+segment (the hours of one start: a restart begins a new one):
+- the baseline is the median of its 2nd to 4th readings; every reading after the first stays within the
+  baseline + 10 % (at least + 1 MiB);
+- its growth, the least-squares slope of the readings after the first, divided by the rounds of
+  concurrent pollers a cycle (1 in the 24 h soak, 3 with `--accel`), is at most 64 KiB per round;
+- threads, descriptors, sockets and processes equal the segment's first reading;
+- with fewer than 4 readings (a 1 h run, the segment after a late restart), only the budgets and the counts
+  apply.
+
+The budgets (`--settled-mib`, `--peak-mib`) and every other rule are unchanged. On the runs before it the
+growth was 14 to 51 KiB per round (candidate 1 on the Orin and the Pi, 24 h and accelerated; `main` at
+`0ba5e2c`; 1.7.0's accelerated and partial 24 h runs) and each passes it but for a missing end line. It
+fails the 24 h Orin run of candidate 1 with 30 KiB an hour added to its readings (66 KiB per round after the
+restart) and with 74 KiB an hour (94 and 110). A band of the mean plus or minus a few standard deviations
+was not taken: a steady rise widens the band with it, so it never flags a leak.
+
 ### The released Hub (P1-1)
 
 2026-10-22, `native/tools/hub_check.py`, one run per server on the same events: platmon-hub 1.1.1 (the
