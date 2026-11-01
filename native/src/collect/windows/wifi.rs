@@ -4,7 +4,8 @@
 use crate::json::Value;
 use crate::metadata::Group;
 use windows_sys::core::GUID;
-use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_NOT_FOUND, ERROR_SERVICE_NOT_ACTIVE, HANDLE};
+use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_INVALID_STATE, ERROR_NOT_FOUND, ERROR_SERVICE_NOT_ACTIVE,
+                                     HANDLE};
 use windows_sys::Win32::NetworkManagement::IpHelper::{ConvertInterfaceGuidToLuid, ConvertInterfaceLuidToAlias,
                                                       ConvertInterfaceLuidToIndex};
 use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
@@ -52,6 +53,18 @@ fn rssi(client: HANDLE, guid: &GUID) -> Result<i32, u32> {
     value.ok_or(ERROR_NOT_FOUND)
 }
 
+/// A connected interface's state and signal from its RSSI query, and the issue to note, if any. While the
+/// link goes down, Windows still lists it connected for some seconds (measured: from "security stopped"
+/// to "disconnected", 10 s) but refuses the RSSI with ERROR_INVALID_STATE: the link is changing, unknown.
+fn connected_link(rssi: Result<i32, u32>) -> (&'static str, Value, Option<(&'static str, Option<String>)>) {
+    match rssi {
+        Ok(dbm) if dbm < 0 => ("connected", Value::Int(dbm as i64), None),
+        Ok(_) => ("connected", Value::Null, Some(("invalid_data", None))),
+        Err(ERROR_INVALID_STATE) => ("unknown", Value::Null, None),
+        Err(rc) => ("connected", Value::Null, Some((reason(rc), Some(format!("RSSI: {}", std::io::Error::from_raw_os_error(rc as i32)))))),
+    }
+}
+
 /// The wifi group's data: {scope, provider, interfaces}, as on Linux.
 pub fn wifi(g: &mut Group) -> Value {
     let out = |interfaces: Vec<Value>| obj(vec![("scope", obj(vec![("kind", "host".into()), ("id", Value::Null)])),
@@ -73,20 +86,20 @@ pub fn wifi(g: &mut Group) -> Value {
         let items: &[WLAN_INTERFACE_INFO] = unsafe { std::slice::from_raw_parts(std::ptr::addr_of!((*list).InterfaceInfo).cast(), count) };
         for item in items {
             let Some((name, ifindex)) = identity(&item.InterfaceGuid) else { continue }; // gone since the listing
-            let state = match item.isState {
+            let mut state = match item.isState {
                 s if s == wlan_interface_state_connected => "connected",
                 s if s == wlan_interface_state_disconnected || s == wlan_interface_state_not_ready => "disconnected",
                 _ => "unknown", // associating, authenticating, discovering: changing
             };
-            let connected = match state { "connected" => Value::Bool(true), "disconnected" => Value::Bool(false), _ => Value::Null };
             let mut signal = Value::Null;
             if state == "connected" {
-                match rssi(client, &item.InterfaceGuid) {
-                    Ok(dbm) if dbm < 0 => signal = Value::Int(dbm as i64),
-                    Ok(_) => g.note(&name, "invalid_data", None),
-                    Err(rc) => g.note(&name, reason(rc), Some(format!("RSSI: {}", std::io::Error::from_raw_os_error(rc as i32)))),
+                let issue;
+                (state, signal, issue) = connected_link(rssi(client, &item.InterfaceGuid));
+                if let Some((why, detail)) = issue {
+                    g.note(&name, why, detail);
                 }
             }
+            let connected = match state { "connected" => Value::Bool(true), "disconnected" => Value::Bool(false), _ => Value::Null };
             g.got(());
             interfaces.push(obj(vec![("name", name.as_str().into()), ("connected", connected), ("connection_state", state.into()),
                                      ("signal_dbm", signal), ("signal_raw", Value::Null), ("link_quality", Value::Null),
@@ -123,5 +136,15 @@ mod tests {
         }
         // a host without Wi-Fi: nothing found or no WLAN service, never an error
         assert!(!interfaces.is_empty() || g.reasons.iter().all(|r| ["not_detected", "not_exposed"].contains(r)), "{:?} {:?}", g.reasons, g.details);
+    }
+
+    #[test]
+    fn a_connected_link_refusing_the_rssi_as_invalid_state_is_changing_without_issue() {
+        assert_eq!(connected_link(Ok(-61)), ("connected", Value::Int(-61), None));
+        assert_eq!(connected_link(Ok(0)), ("connected", Value::Null, Some(("invalid_data", None))));
+        assert_eq!(connected_link(Err(ERROR_INVALID_STATE)), ("unknown", Value::Null, None));
+        let (state, signal, issue) = connected_link(Err(ERROR_ACCESS_DENIED));
+        assert_eq!((state, signal, issue.map(|(why, _)| why)), ("connected", Value::Null, Some("permission_denied")));
+        assert_eq!(connected_link(Err(ERROR_NOT_FOUND)).2.map(|(why, _)| why), Some("disappeared"));
     }
 }
