@@ -16,7 +16,9 @@
   listing the system volume, the Wi-Fi group (unavailable without a WLAN service) and the battery group
   with the AC line, then stopped by its own handle;
 - service: outside the service control manager it exits 2; as a service (sc.exe create, start) it serves
-  /api/status ready, and sc.exe stop leaves it stopped with exit code 0 and the port free."""
+  /api/status ready, and sc.exe stop leaves it stopped with exit code 0 and the port free.
+The INI files serve and the service read (platmon-smoke.ini, platmon-service.ini, in the current directory)
+are removed after each part, whatever its result."""
 import json
 import os
 import re
@@ -182,6 +184,7 @@ def main(binary):
     finally:
         server.kill()
         output = server.communicate(timeout=TIMEOUT)[0]
+        os.remove("platmon-smoke.ini")
     print("      " + output.strip().replace("\n", "\n      "))
 
     r = run(binary, ["service"])
@@ -219,6 +222,7 @@ def main(binary):
     finally:
         sc("stop", name)
         sc("delete", name)
+        os.remove(ini)
     if failures:
         sys.exit(f"{len(failures)} failed: {', '.join(failures)}")
     print("all passed")
