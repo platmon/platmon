@@ -68,7 +68,9 @@ or nearby network is read.
 - `name` is the interface's alias, as `network` names it (`Wi-Fi`); `ifindex` its index.
 - `connection_state` / `connected`: `connected` / `true` while Windows reports the interface connected,
   `disconnected` / `false` when disconnected or not ready, and `unknown` / `null` while it is associating,
-  authenticating or discovering.
+  authenticating or discovering, or while it is still listed connected but refuses the RSSI as not in a
+  valid state (`ERROR_INVALID_STATE`): the link going down, which Windows reports as disconnected some
+  seconds later (10 s on the laptop below), without an issue.
 - `signal_dbm` is the RSSI Windows last measured (`wlan_intf_opcode_rssi`), only while connected.
   `signal_raw`, `link_quality` and `noise_dbm` are `null`: Windows has no noise level, and its "signal
   quality" is a percentage derived from the RSSI, not the kernel's link value.
