@@ -69,9 +69,15 @@ jobs:
         run: cargo build --release --locked --no-default-features
       - name: Smoke test
         run: python tools/windows_smoke.py target/release/platmon-server.exe
+      # The experimental zip packages this binary (scripts/packaging/package_windows.py).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platmon-server-windows
+          path: native/target/release/platmon-server.exe
+          if-no-files-found: error
 
   package:
-    needs: [test, native]
+    needs: [test, native, native-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,9 +88,14 @@ jobs:
         with:
           name: platmon-server
           path: native/target
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-server-windows
+          path: native/target/release
       - name: Install package policy checker
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lintian
       - run: python3 scripts/packaging/package.py --output dist/first
+      - run: python3 scripts/packaging/package_windows.py --output dist/first
       - run: python3 scripts/packaging/package.py --revision 2 --output dist/second
       - name: Check package policy
         run: lintian --no-cfg --info --pedantic --fail-on error,warning dist/first/*.deb dist/second/*.deb

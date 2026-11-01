@@ -3,7 +3,8 @@
 > **TL;DR**
 > - What is still open, checked against the repository on 2026-10-31; the evidence for each release is in
 >   [release readiness](../releases/readiness.md).
-> - Windows: unreleased until the real-PC checks below pass. Linux: armhf on a real device, `hub_check.py`
+> - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, which the owner
+>   accepted as known gaps; the next release adds the experimental zip. Linux: armhf on a real device, `hub_check.py`
 >   since 1.4.0 (a 24 h soak of `main` passed on 2026-10-31), an apt upgrade from 1.5.0 on a real device, a
 >   remote probe target.
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
@@ -27,6 +28,11 @@ battery, probe) and their history, and runs as a Windows service. Pressure has n
 experimental zip of the binary (no installer, no package manager), named as experimental in its release
 notes. The Linux packages and their release gate are unchanged by it.
 
+**Since (owner, 2026-11-01):** the two checks this laptop cannot do (more than 64 CPUs, a discrete GPU's
+temperature) stay unchecked and are named in the zip's README instead of holding the release. The zip:
+`scripts/packaging/package_windows.py`, built by CI's `package` job and released from the next tag after
+1.7.0 (native/README.md, "Windows"). Its CHANGELOG entry must call it experimental.
+
 Real-PC checks (a laptop: Core Ultra 7 155H, Intel Arc iGPU, WD SN810 NVMe, Windows 11 26H2, Korean display
 language, non-admin unless stated). CI runs on a VM, which has none of these devices:
 
@@ -35,20 +41,21 @@ language, non-admin unless stated). CI runs on a VM, which has none of these dev
 | build, unit tests, `tools/windows_smoke.py` (non-admin parts) | passed | every PR from #115 to #124 |
 | CPU clock against Task Manager's formula | passed after #115 | the registry base was wrong on hybrid CPUs (P-cores up to 5.85 GHz); now `% Processor Performance × Processor Frequency` |
 | GPU usage and clocks | passed (#116) | usage near the busiest-engine counter; clocks 650–750 MHz / 2.25 GHz when the driver reports them |
-| drive temperature | read (63–64 °C); **not compared** | the comparison (`Get-StorageReliabilityCounter`) needs an administrator shell |
-| GPU temperature | **not checked** | an integrated GPU reports none (as in Task Manager); needs a discrete GPU |
+| drive temperature | passed (2026-11-01) | administrator shell: `Get-StorageReliabilityCounter` 64 and 63 °C before and after, platmon 64.0 °C between (SN810); the card reader reports 0 and platmon leaves it out |
+| GPU temperature | **not checked: known gap** | an integrated GPU reports none (as in Task Manager); needs a discrete GPU |
 | disk counters without admin | passed | |
 | storage, battery, Wi-Fi against Windows's own tools | passed (#120, #121, #123) | `Get-Volume` / `Get-Partition`, WMI battery classes, `netsh wlan` |
 | history on a laptop | passed after #124 | 48 series, nothing dropped |
-| service: `sc.exe create`, `start`, `stop`, `delete`; `/api/status` ready, exit code 0 | **not checked** | needs an administrator shell (`windows_smoke.py` does it) |
-| sleep and resume while serving | **not checked** | needs someone at the PC: data age and `clock` after resume, no repeated gap errors |
-| more than 64 CPUs (several processor groups) | **not checked** | unit-tested numbering only; needs such a host, or `bcdedit /set groupsize` and a reboot |
+| service: `sc.exe create`, `start`, `stop`, `delete`; `/api/status` ready, exit code 0 | passed (2026-11-01) | `windows_smoke.py` in an administrator shell on `main` at `9dbe9b2`: all passed |
+| sleep and resume while serving | passed (2026-11-01, Modern Standby) | asleep 8 min 36 s: `uptime` +515.8 s for +516.7 s of wall time; the first answer `stale` (data age 515.7 s, `/api/stats` 503), ready 1 s later with one `gap` reading (every CPU, interface and disk), then none in 108 polls; same instance, no failure. The laptop has no S3 or hibernation |
+| more than 64 CPUs (several processor groups) | **not checked: known gap** | unit-tested numbering only; needs such a host, or `bcdedit /set groupsize` and a reboot |
 
 Record for each check: Windows version, CPU, GPU and driver, drive model, and the values on both sides.
 `cpu_frequency` and `temperature` should never be `error` on a healthy PC.
 
 Known gaps: Intel's GPU driver reports no clocks while the GPU sleeps (`no_data`); one of 14 local smoke
-runs failed the Wi-Fi observation check before its PR and could not be reproduced; GitHub's runners have
+runs failed the Wi-Fi observation check before its PR: most likely a link going down, which Windows lists
+connected for some seconds while refusing its RSSI (#154 reports that as `unknown`); GitHub's runners have
 a virtual disk that answers the temperature query with a device error (#119 reports it as not exposed).
 
 ## Linux releases
