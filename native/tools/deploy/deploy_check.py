@@ -49,6 +49,7 @@ import http.client
 import json
 import os
 import socket
+import statistics
 import subprocess
 import sys
 import threading
@@ -74,6 +75,9 @@ ACCEL = {"hour": 1080, "poll": 60, "disconnect": 480, "expire": 720, "settle": 1
          "concurrent_rounds": 3, "concurrent_pollers": 4, "reconnect_limit": 300}
 QUICK = {"hour": 420, "poll": 120, "disconnect": 60, "expire": 60, "settle": 30, "restart_at": 1,
          "concurrent_rounds": 1, "concurrent_pollers": 4, "reconnect_limit": 60}
+# The most a segment's settled PSS may grow per round of concurrent pollers, in KiB: the runs before the rule
+# grew 14 to 51 (musl keeping freed pages after backlog rounds; the README, "The settled PSS rule").
+SLOPE_KIB = 64
 
 
 def sudo(*args):
@@ -656,12 +660,36 @@ def setup(kind):
             "production": production()}
 
 
+def slope(ys):
+    """Least-squares growth per reading."""
+    mx, my = (len(ys) - 1) / 2, statistics.mean(ys)
+    return sum((x - mx) * (y - my) for x, y in enumerate(ys)) / sum((x - mx) ** 2 for x in range(len(ys)))
+
+
+def segments(hours):
+    """The hours of each start of the unit: a restart follows its hour's reading, so the next hour begins anew."""
+    out = [[]]
+    for r in hours:
+        out[-1].append(r)
+        if "restart" in r:
+            out.append([])
+    return [sg for sg in out if sg]
+
+
 def report(args):
-    """Every hour judged on its own; see the README, "The deployed form, set before it was run"."""
+    """Every hour judged on its own, and the settled PSS of each segment (the hours of one start) as a whole;
+    see the README, "The deployed form, set before it was run" and "The settled PSS rule (2026-11-01)"."""
     rows = [json.loads(x) for x in open(args.path)]
     hours = [r for r in rows if "hour" in r and "settled" in r]
     end = next((r for r in rows if r.get("end")), None)
-    bad, ref = [], None
+    rounds = rows[0]["phases"]["concurrent_rounds"]
+    bad, segs, seg = [], [], {}
+    for sg in segments(hours):
+        pss = [r["settled"]["pss"] for r in sg]
+        # the first reading has had the fewest backlog rounds; with 4 readings, the median of the next 3
+        segs.append((sg, pss, statistics.median(pss[1:4]) if len(pss) >= 4 else None))
+        for r in sg:
+            seg[r["hour"]] = (sg[0], segs[-1][2])
     for r in rows:
         if "between_hours" in r:
             bad += [f"after hour {r['hour']}: {x}" for x in worker.problems("hub", r["between_hours"])]
@@ -687,15 +715,16 @@ def report(args):
         if "restart" in r:
             p += [] if r["restart"]["old_cursor"] == 409 else [f"restart: old cursor {r['restart']['old_cursor']}"]
         s = r["settled"]
-        if ref is None:
-            ref = s
-        else:
+        first, base = seg[h]
+        if r is not first:
+            ref = first["settled"]
             for k in ("threads", "fds", "sockets", "processes"):
                 if s.get(k) != ref.get(k):
-                    p.append(f"settled {k} {s.get(k)}, hour 0 {ref.get(k)}")
-            limit = max(ref["pss"] * 1.10, ref["pss"] + 1024)
-            if s["pss"] > limit:
-                p.append(f"settled PSS {s['pss']} KiB, hour 0 {ref['pss']} (limit {round(limit)})")
+                    p.append(f"settled {k} {s.get(k)}, hour {first['hour']} {ref.get(k)}")
+            if base is not None:
+                limit = max(base * 1.10, base + 1024)
+                if s["pss"] > limit:
+                    p.append(f"settled PSS {s['pss']} KiB, the segment's baseline {base} (limit {round(limit)})")
         if args.settled_mib and s["pss"] > args.settled_mib * 1024:
             p.append(f"settled PSS {s['pss']} KiB over the budget {args.settled_mib} MiB")
         if args.peak_mib and cc["peak_pss_kib"] > args.peak_mib * 1024:
@@ -704,6 +733,15 @@ def report(args):
               f"conc peak pss {cc['peak_pss_kib']} records {col['records']} max step {col['max_step_s']} "
               f"tool rss {r['tool']['VmRSS']} {'ok' if not p else p}")
         bad += p
+    for sg, pss, base in segs:
+        span = f"hours {sg[0]['hour']} to {sg[-1]['hour']}"
+        if base is None:
+            print(f"{span}: {len(pss)} readings, too few for the baseline and the growth")
+            continue
+        g = slope(pss[1:]) / rounds
+        q = [] if g <= SLOPE_KIB else [f"{span}: settled PSS grew {g:.0f} KiB per round (limit {SLOPE_KIB})"]
+        print(f"{span}: baseline {base} KiB, growth {g:.0f} KiB per round {q or 'ok'}")
+        bad += q
     if not end:
         bad.append("no end line: the run did not finish")
     else:
