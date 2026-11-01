@@ -46,6 +46,8 @@ def test_zip_contents_and_checksum(tmp_path, exe):
         assert "\r\nbind = 127.0.0.1\r\n" in ini and "0.0.0.0" not in ini.split("[http]", 1)[1].split("[", 1)[0]
         readme = z.read(top + "README.txt").decode("utf-8")
         assert f"platmon {release} for Windows" in readme and "EXPERIMENTAL" in readme and "vc_redist" in readme
+        # the service runs as LocalSystem: its files only where administrators alone can write
+        assert "\\Program Files\\platmon\\platmon-server.exe" in readme and "Windows 10 was not checked" in readme
         assert all(i.date_time[0] >= 1980 and i.create_system == 0 for i in z.infolist())
     lines = (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2 and lines[1] == f"{hashlib.sha256(target.read_bytes()).hexdigest()}  {target.name}"

@@ -759,6 +759,9 @@ On `x86_64-pc-windows-msvc`:
   SIGTERM does on Linux (`SetConsoleCtrlHandler`).
 - `service [CONFIG] [serve's options]`: `serve` as a Windows service in its own process, for the service
   control manager (`sc.exe create platmon binPath= "C:\path\platmon-server.exe service C:\path\platmon.ini"`).
+  It runs as LocalSystem: keep the binary and the INI where only administrators can write (`C:\Program
+  Files\platmon`, as the zip's README says), or a program running as a user could replace them and run as
+  LocalSystem at the next start.
   It reports running once connected, and on a stop or shutdown request reports stopped and exits with
   status 0; a user's logoff does not stop it. Outside the service control manager it exits with status 2.
   Not provided: an installer, a default configuration path, recovery actions and a log: the server's

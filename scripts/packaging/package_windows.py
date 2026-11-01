@@ -26,8 +26,8 @@ README = """platmon {release} for Windows (x86_64), EXPERIMENTAL
 Not supported: built and checked in CI and on one laptop only. Linux is the supported
 platform (https://github.com/platmon/platmon).
 
-Needs: Windows 10 or 11 (x86_64) and the Microsoft Visual C++ 2015-2022
-Redistributable (x64), which this zip does not include:
+Needs: Windows 11 (x86_64; Windows 10 was not checked) and the Microsoft
+Visual C++ 2015-2022 Redistributable (x64), which this zip does not include:
 https://aka.ms/vs/17/release/vc_redist.x64.exe
 Without it the server does not start (vcruntime140.dll was not found).
 
@@ -40,8 +40,12 @@ platmon.ini listens on 127.0.0.1 only. The API has no authentication: before
 setting bind = 0.0.0.0, allow port 9797 only from trusted addresses in Windows
 Defender Firewall. A service is not asked about by the firewall.
 
-As a Windows service (administrator shell; use full paths):
-  sc.exe create platmon binPath= "C:\\path\\platmon-server.exe service C:\\path\\platmon.ini --web C:\\path\\web" start= auto
+As a Windows service: it runs as LocalSystem, so first copy this folder where
+only administrators can change it, C:\\Program Files\\platmon, never a folder
+your user can write (Downloads, Desktop): a program running as you could
+replace platmon-server.exe or platmon.ini there and run as LocalSystem at the
+next start. Then, in a Command Prompt (cmd) run as administrator:
+  sc.exe create platmon start= auto binPath= "\\"C:\\Program Files\\platmon\\platmon-server.exe\\" service \\"C:\\Program Files\\platmon\\platmon.ini\\" --web \\"C:\\Program Files\\platmon\\web\\""
   sc.exe start platmon
   sc.exe stop platmon
   sc.exe delete platmon
