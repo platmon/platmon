@@ -1,20 +1,33 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-10-31; the evidence for each release is in
->   [release readiness](../releases/readiness.md).
-> - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, which the owner
->   accepted as known gaps; the next release adds the experimental zip. Linux: armhf on a real device, `hub_check.py`
->   since 1.4.0 (1.7.0's binary passed a 24 h soak as a user unit on 2026-11-02), an apt upgrade from 1.5.0 on a real device, a
->   remote probe target.
+> - What is still open, checked against the repository on 2026-11-03 (1.7.0 released); the evidence for
+>   each release is in [release readiness](../releases/readiness.md).
+> - Next release (owner, 2026-11-03): the experimental Windows zip together with `.rpm` release files,
+>   battery follow-ups and a root-unit soak with `hub_check.py` on the Orin, not the zip alone (below).
+> - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, accepted as known
+>   gaps. Linux: armhf on a real device, `hub_check.py` since 1.4.0, the root unit's soak (1.7.0 soaked
+>   as a user unit), a whole-system `apt upgrade` on a real device, a remote probe target.
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
-> - Also recorded, not started: battery follow-ups, a desktop tray frontend, and a separate network
->   process (deferred; no Unix socket).
+> - Also recorded, not started: a desktop tray frontend and a separate network process (deferred; no
+>   Unix socket).
 
 Merging, production rollout and releases always wait for the owner's approval. The staged plan of
 2026-10-09 to 2026-10-11 (Disk I/O → UI → storage → PSI → Wi-Fi → probe → history → release readiness)
 was merged and released from 1.0.0 on; its validation items that still apply are listed below, and its
 checkpoints are in this file as of `b96aba8`.
+
+## Next release (2026-11-03)
+
+After 1.7.0 the owner chose not to release the Windows zip on its own but with the rest of this work, in
+this order; the version is chosen when it is tagged:
+
+1. This file brought up to date with 1.7.0.
+2. `.rpm` packages among the release files (GitHub Release only: no DNF repository, no signing).
+3. Battery follow-ups ([below](#deferred-after-the-battery-group-2026-10-11)), after a design decision.
+4. On the Orin, the release candidate as the root candidate unit: `deploy_check.py checks`, a soak and
+   `hub_check.py` (installing and removing the unit needs the owner's sudo).
+5. The release, with its gate in [release readiness](../releases/readiness.md).
 
 ## Windows build (2026-10-26)
 
@@ -83,8 +96,10 @@ Open since the gates in [release readiness](../releases/readiness.md):
   containers or not at all.
 - **Probe against a remote target:** checked on loopback and with fakes only; no remote target has been
   approved ([probe.md](../reference/probe.md#verification)).
-- **Orin candidate unit:** remove it (`sudo native/tools/deploy/uninstall.sh` on the Orin).
-- The local worktrees `platmon-w2` and `platmon-svc` on the machine that made them.
+- **Orin candidate units:** the 1.7.0 soak's user units (`bash native/tools/deploy/uninstall_user.sh` as
+  the login user) and the old root units `platmon-native-candidate*` (`sudo native/tools/deploy/uninstall.sh`),
+  unless step 4 above reuses them.
+- The local worktrees `platmon-w2` and `platmon-svc` on the machine that made them (not the Linux PC).
 
 ## Python server removal
 
