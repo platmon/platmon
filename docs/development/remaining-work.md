@@ -5,7 +5,7 @@
 >   [release readiness](../releases/readiness.md).
 > - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, which the owner
 >   accepted as known gaps; the next release adds the experimental zip. Linux: armhf on a real device, `hub_check.py`
->   since 1.4.0 (a 24 h soak of `main` passed on 2026-10-31), an apt upgrade from 1.5.0 on a real device, a
+>   since 1.4.0 (1.7.0's binary passed a 24 h soak as a user unit on 2026-11-02), an apt upgrade from 1.5.0 on a real device, a
 >   remote probe target.
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
 > - Also recorded, not started: battery follow-ups, a desktop tray frontend, and a separate network
@@ -72,8 +72,9 @@ Open since the gates in [release readiness](../releases/readiness.md):
   14; 1.4.0's 24 h run rose 10.5 → 11.3), concurrency peaks up to 12.3 MiB; 5 threads, 4 descriptors
   throughout. Raw: the Orin's `~/platmon-soak-0ba5e2c/` (`checks-orin.jsonl`, `soak-orin.jsonl`). Later
   changes on `main` (the HTTP edges and `/text` 500, the binary's commands, the package split, the
-  rename) ran after it and are in 1.7.0 without a soak of their own (its gate). `hub_check.py` was
-  not run.
+  rename) ran after it; 1.7.0's aarch64 binary then passed `--user checks` (9/9) and
+  `--user soak --hours 24` on 2026-11-01/02 as a user unit, not the root unit (its gate). `hub_check.py`
+  was not run.
 - **apt upgrade on a real device:** the Orin Nano upgraded from 1.4.0 to 1.6.0 under apt and rebooted
   (2026-10-28, [release readiness](../releases/readiness.md#160-release-gate-2026-10-25)); the upgrade
   from 1.5.0 and the Hub reconnecting after it were checked only in CI's containers or not at all.
