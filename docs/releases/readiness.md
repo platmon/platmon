@@ -3,9 +3,9 @@
 > **TL;DR**
 > - Release gates and evidence per version, newest first (1.7.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
-> - Not verified for 1.7.0: its own soak and deployed-unit checks (the 24 h soak ran on `main` at `0ba5e2c`,
->   before the later changes), `hub_check.py`, armhf on a real device under systemd, an apt upgrade to it
->   on a real device.
+> - 1.7.0's aarch64 binary passed its checks and a 24 h soak on the Orin as a user unit (2026-10-31, 11-01/02).
+>   Not verified for 1.7.0: the root unit and its sandbox, `hub_check.py`, armhf on a real device under
+>   systemd, an apt upgrade to it on a real device.
 
 ## 1.7.0 release gate (2026-10-31)
 
@@ -35,13 +35,17 @@ Verified for this release:
 | on the Jetson Orin Nano (Python 3.10), in a temporary directory beside the production 1.6.0 service | `check_package.py` on `platmon_1.7.0-1_arm64.deb` and platmon-cli: smoke passed; the aarch64 server's `live_http.py`: no difference; `collect` reads the board and the three passive groups |
 | CI on `main` (`99d201e`): the dpkg lifecycle, and the service under systemd upgraded from 1.3.0 (amd64, arm64 on Ubuntu 22.04, 24.04, 26.04); armhf under QEMU (Debian 13, Ubuntu 24.04); the `.rpm` lifecycle (Fedora 44, AlmaLinux 9, CentOS Stream 10) | passed |
 | `deploy_check.py soak --hours 24` on the Orin, `main` at `0ba5e2c` (the Python server removed) as the candidate unit, 2026-10-30/31 | PASS: 105,960 Hub-like requests, no error, loss or walk problem, no automatic restart; CPU 0.77–0.90 % of a core per hour; settled PSS 10.6 → 11.4 MiB (budget 14), concurrency peaks up to 12.3 MiB; 5 threads, 4 descriptors |
+| `deploy_check.py --user checks` on the Orin, the release's aarch64 server (`e508086baf6d69e9`) as a user unit of the login user (`install_user.sh`, #150), 2026-10-31 | 9/9 passed |
+| `deploy_check.py --user soak --hours 24` on the Orin, the same user unit, 2026-11-01 20:18 to 11-02 20:12 KST, judged by `report` on `main` (#153) | PASS: 105,960 Hub-like requests, no error, loss or walk problem; 84,281 collections, longest step 1.012 s, no gap; no automatic restart (the planned one after hour 11 only); CPU 0.76–0.96 % of a core per hour; settled PSS 10.6–11.4 MiB, segment baselines 10.9 and 10.8 MiB (budget 14), growth 35 and 56 KiB per round (limit 64); concurrency peaks up to 13.0 MiB; 5 threads, 4 descriptors |
 
 Not verified, and therefore open:
 
-- **The 24 h soak predates most of this release:** #134 to #148 (the binary's commands, the HTTP edges and
-  `/text`, the package split, the rename) ran after it, and the release binaries did not run as the
-  candidate unit (`deploy_check.py checks` needs the owner's sudo to install them). The Orin check above
-  ran them as a user process only.
+- **The root unit and its sandbox:** the release binary's checks and soak ran as a user unit (the owner had
+  no sudo on a terminal), so the packaged unit's `DynamicUser` and sandbox ran only in CI's containers.
+  Earlier tries on the Orin are kept as raw data, not as evidence: a 24 h run cut after hour 5 by a power
+  loss (hours 0–5 passed), an accelerated run stopped by a tool bug (#152) and one stopped at 13 cycles
+  for the PSS rule change (#153). Raw: the Orin's `~/platmon-soak-1.7.0/tools/deploy/`
+  (`checks-orin.jsonl`, `soak-24h-orin.jsonl`).
 - **No `hub_check.py`** since 1.4.0.
 - **armhf on a real device and its systemd service**, as at 1.6.0.
 - **No real device upgrade** from 1.6.0 to 1.7.0 under apt, where `apt upgrade` should also install
