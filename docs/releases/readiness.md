@@ -4,8 +4,9 @@
 > - Release gates and evidence per version, newest first (1.7.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.7.0's aarch64 binary passed its checks and a 24 h soak on the Orin as a user unit (2026-10-31, 11-01/02).
->   Not verified for 1.7.0: the root unit and its sandbox, `hub_check.py`, armhf on a real device under
->   systemd, an apt upgrade to it on a real device.
+>   After publishing, the Orin went from 1.6.0 to 1.7.0 with `apt install platmon` (2026-11-03).
+>   Not verified for 1.7.0: the root unit's soak and its sandbox, `hub_check.py`, armhf on a real device
+>   under systemd, `apt upgrade` to it on a real device.
 
 ## 1.7.0 release gate (2026-10-31)
 
@@ -37,6 +38,7 @@ Verified for this release:
 | `deploy_check.py soak --hours 24` on the Orin, `main` at `0ba5e2c` (the Python server removed) as the candidate unit, 2026-10-30/31 | PASS: 105,960 Hub-like requests, no error, loss or walk problem, no automatic restart; CPU 0.77–0.90 % of a core per hour; settled PSS 10.6 → 11.4 MiB (budget 14), concurrency peaks up to 12.3 MiB; 5 threads, 4 descriptors |
 | `deploy_check.py --user checks` on the Orin, the release's aarch64 server (`e508086baf6d69e9`) as a user unit of the login user (`install_user.sh`, #150), 2026-10-31 | 9/9 passed |
 | `deploy_check.py --user soak --hours 24` on the Orin, the same user unit, 2026-11-01 20:18 to 11-02 20:12 KST, judged by `report` on `main` (#153) | PASS: 105,960 Hub-like requests, no error, loss or walk problem; 84,281 collections, longest step 1.012 s, no gap; no automatic restart (the planned one after hour 11 only); CPU 0.76–0.96 % of a core per hour; settled PSS 10.6–11.4 MiB, segment baselines 10.9 and 10.8 MiB (budget 14), growth 35 and 56 KiB per round (limit 64); concurrency peaks up to 13.0 MiB; 5 threads, 4 descriptors |
+| after publishing, 2026-11-03: the APT repository (platmon/platmon.github.io workflow `apt`, run 41468212616), and the Orin's production service upgraded from 1.6.0-1 with `sudo apt update && sudo apt install platmon` | the `stable` indexes list `platmon` 1.7.0-1 (amd64, arm64, armhf) and `platmon-cli` 1.7.0-1; on the Orin apt installed `platmon-cli` as a recommendation (`automatic`), the server is `e508086baf6d69e9` (the soaked binary) with the `platmon-native` link, the unit restarted once (`NRestarts` 0) and logs `version 1.7.0`; `/api/status` (ready), `/api/samples`, `/api/stats` and `/` answer 200; `platmon --once` reads the board |
 
 Not verified, and therefore open:
 
@@ -48,8 +50,9 @@ Not verified, and therefore open:
   (`checks-orin.jsonl`, `soak-24h-orin.jsonl`).
 - **No `hub_check.py`** since 1.4.0.
 - **armhf on a real device and its systemd service**, as at 1.6.0.
-- **No real device upgrade** from 1.6.0 to 1.7.0 under apt, where `apt upgrade` should also install
-  platmon-cli (checked in containers: `apt-get upgrade` keeps `platmon` back until `apt install platmon`).
+- **`apt upgrade` on a real device:** the Orin upgraded with `apt install platmon` (above), so the whole-system
+  `apt upgrade` that should also install platmon-cli ran only in containers (`apt-get upgrade` keeps
+  `platmon` back until `apt install platmon`). The Hub reconnecting after the upgrade was not checked.
 
 ## 1.6.0 release gate (2026-10-25)
 

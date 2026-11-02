@@ -76,8 +76,11 @@ Open since the gates in [release readiness](../releases/readiness.md):
   `--user soak --hours 24` on 2026-11-01/02 as a user unit, not the root unit (its gate). `hub_check.py`
   was not run.
 - **apt upgrade on a real device:** the Orin Nano upgraded from 1.4.0 to 1.6.0 under apt and rebooted
-  (2026-10-28, [release readiness](../releases/readiness.md#160-release-gate-2026-10-25)); the upgrade
-  from 1.5.0 and the Hub reconnecting after it were checked only in CI's containers or not at all.
+  (2026-10-28, [release readiness](../releases/readiness.md#160-release-gate-2026-10-25)), and from 1.6.0
+  to 1.7.0 with `apt install platmon`, which also installed platmon-cli (2026-11-03,
+  [its gate](../releases/readiness.md#170-release-gate-2026-10-31)); the upgrade from 1.5.0, a
+  whole-system `apt upgrade` to 1.7.0 and the Hub reconnecting after it were checked only in CI's
+  containers or not at all.
 - **Probe against a remote target:** checked on loopback and with fakes only; no remote target has been
   approved ([probe.md](../reference/probe.md#verification)).
 - **Orin candidate unit:** remove it (`sudo native/tools/deploy/uninstall.sh` on the Orin).
