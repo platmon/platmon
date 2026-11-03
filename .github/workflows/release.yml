@@ -70,14 +70,19 @@ jobs:
         with:
           name: platmon-server-windows
           path: native/target/release
+      - name: Install rpmbuild and the package policy checker
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm lintian
       - name: Build fixed-version release files
         env:
           REVISION: ${{ steps.version.outputs.revision }}
         run: |
           python3 scripts/packaging/package.py --revision "$REVISION"
           python3 scripts/packaging/package_windows.py
-      - name: Install package policy checker
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lintian
+          # The .rpm packages of the same servers, beside the .deb ones and in the same SHA256SUMS.
+          python3 scripts/packaging/package_rpm.py --release "$REVISION" --output "$RUNNER_TEMP/rpm"
+          (cd "$RUNNER_TEMP/rpm" && sha256sum -c SHA256SUMS)
+          cp "$RUNNER_TEMP"/rpm/*.rpm dist/
+          cat "$RUNNER_TEMP/rpm/SHA256SUMS" >> dist/SHA256SUMS
       - name: Check package policy
         run: lintian --no-cfg --info --pedantic --fail-on error,warning dist/*.deb
       # This runner is amd64; the checks ran both architectures' packages on their own runners.
@@ -94,6 +99,25 @@ jobs:
           python3 scripts/packaging/package.py --revision "$((REVISION + 1))" --output "$RUNNER_TEMP/upgrade"
           python3 scripts/packaging/check_package_install.py dist/*_amd64.deb "$RUNNER_TEMP"/upgrade/*_amd64.deb \
             --image platmon-package-test:local
+      - name: Check package policy (rpmlint)
+        timeout-minutes: 20
+        run: |
+          docker run --rm --mount "type=bind,src=$PWD,dst=/checkout,readonly" fedora:44 sh -ec '
+            dnf install -y -q rpmlint
+            LC_ALL=C.UTF-8 rpmlint -c /checkout/packaging/rpm/rpmlint.toml /checkout/dist/*.rpm
+          '
+      # x86_64 on this runner; the checks ran both architectures under Fedora, EL9 and CentOS Stream 10.
+      - name: Prepare the rpm test image (python3, systemd)
+        timeout-minutes: 20
+        run: python3 scripts/packaging/prepare_test_image.py fedora:44 platmon-rpm-test:local
+      - name: Verify rpm lifecycle of the release package
+        env:
+          REVISION: ${{ steps.version.outputs.revision }}
+        run: |
+          # The next release is only an upgrade fixture; it is not released.
+          python3 scripts/packaging/package_rpm.py --release "$((REVISION + 1))" --output "$RUNNER_TEMP/rpm-upgrade"
+          python3 scripts/packaging/check_rpm.py dist/platmon-*.x86_64.rpm "$RUNNER_TEMP"/rpm-upgrade/platmon-*.x86_64.rpm \
+            --image platmon-rpm-test:local
       - name: Verify checksums
         working-directory: dist
         run: sha256sum -c SHA256SUMS
@@ -102,6 +126,7 @@ jobs:
         with:
           subject-path: |
             dist/*.deb
+            dist/*.rpm
             dist/*.tar.gz
             dist/*.zip
       - uses: actions/upload-artifact@v4
@@ -136,5 +161,5 @@ jobs:
           end = text.find("\n## ", start + 1)
           print(text[start:end if end != -1 else None].strip())
           PY
-          gh release create "$GITHUB_REF_NAME" release/*.deb release/*.tar.gz release/*.zip release/BUILD.json release/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" release/*.deb release/*.rpm release/*.tar.gz release/*.zip release/BUILD.json release/SHA256SUMS \
             --verify-tag --draft --title "platmon $GITHUB_REF_NAME" --notes-file notes.md

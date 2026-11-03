@@ -4,7 +4,8 @@
 > - One `platmon` `.deb` per architecture (amd64, arm64, armhf) with the static native server and no Python;
 >   the `platmon` command is `platmon-cli` (`Architecture: all`, the host's Python 3.9+), which it recommends.
 > - `.rpm` packages of the same files (x86_64, aarch64; platmon-cli noarch) build too, for Fedora and
->   Enterprise Linux 9+ ([RPM packages](#rpm-packages)); they are checked in CI, not released yet.
+>   Enterprise Linux 9+ ([RPM packages](#rpm-packages)); checked in CI and, from the release after 1.7.0,
+>   among the GitHub Release files (no DNF repository).
 > - The `VERSION` file is the single version source; releases are built once in CI and
 >   published to GitHub Releases and the APT repository.
 > - Covers install, upgrade, migration from source or Docker installs, rollback and the release procedure.
@@ -258,7 +259,11 @@ AlmaLinux 9 and CentOS Stream 10 containers (`scripts/packaging/check_rpm.py`): 
 started without platmon-cli and then with it, an upgrade that keeps an edited INI, an invalid INI, a
 disabled service, a failed start, a downgrade and the erase. SELinux is not enforcing in a container:
 the service under an enforcing policy on a real host is not verified, and neither is a real board.
-The release workflow does not publish `.rpm` files yet, and there is no DNF repository.
+From the release after 1.7.0 the release workflow builds the `.rpm` files with the `.deb` ones (the RPM
+release is the Debian revision, `-1` for `v<version>`), lists them in the same `SHA256SUMS`, runs
+`rpmlint` and the x86_64 lifecycle check on them and attaches them to the draft with a provenance
+attestation. There is no DNF repository: download the files from the release page and check them
+against its `SHA256SUMS` before `dnf install ./FILE.rpm`.
 
 ## Migrate a source or Docker installation
 
@@ -338,10 +343,11 @@ directories are never automatically deleted by subsequent updates or uninstall.
    of its current tip, before building. It verifies tag/version/changelog and runs the tests.
    It then builds the release files **once**, from the server binaries the checks built and
    compared in the same run, and checks those same files with the package checker, Lintian,
-   the dpkg lifecycle check (amd64, against a next-revision fixture that is not released) and
+   the dpkg lifecycle check (amd64, against a next-revision fixture that is not released),
+   `rpmlint`, the rpm lifecycle check (x86_64, against a next-release fixture) and
    `SHA256SUMS`. It records a GitHub build provenance attestation for the
-   `.deb` and source archive, and creates a **draft** GitHub Release with the four artifacts
-   and the version's `CHANGELOG.md` section as notes. Review the attached bytes, acceptance
+   `.deb`, `.rpm`, source archive and Windows zip, and creates a **draft** GitHub Release with
+   them, `BUILD.json`, `SHA256SUMS` and the version's `CHANGELOG.md` section as notes. Review the attached bytes, acceptance
    evidence and notes before publishing the draft. Do not distribute a container image;
    the repository's existing image licensing policy still applies.
 5. After the release is published, add it to the APT repository: run the `apt` workflow of
