@@ -163,7 +163,7 @@ OBSERVED = {"groups": {
                        "charge_now_uah": 3026000, "charge_full_uah": 3400000,
                        "charge_full_design_uah": 4000000, "energy_now_uwh": None, "energy_full_uwh": None,
                        "energy_full_design_uwh": None, "current_ua": -1200000, "power_uw": None,
-                       "voltage_uv": 16436000, "cycle_count": 237}],
+                       "voltage_uv": 16436000, "cycle_count": 237, "temp_c": 31.2}],
         # a driver name long enough to crowd a narrow terminal, as a USB-PD source really is
         "external": [{"name": "ADP1", "type": "Mains", "online": True},
                      {"name": "ucsi-source-psy-USBC000:001", "type": "USB", "online": False}]}}}}
@@ -193,7 +193,7 @@ def test_the_battery_keeps_every_reading_at_any_width(width):
     # wrapping splits a reading across lines, so the section is compared as one run of words
     section = re.sub(r"\s+", " ", " ".join(lines[start:]))
     assert "observed 4 s ago" in section and "BAT1" in section and "89 %" in section
-    for reading in ("Not charging", "16.44 V", "-1.20 A", "237 cycles", "85 % of design"):
+    for reading in ("Not charging", "16.44 V", "-1.20 A", "237 cycles", "31.2°C", "85 % of design"):
         assert reading in section, f"{reading} lost at {width} columns"
     assert "ADP1 on" in section and "ucsi-source-psy-USBC000:001 off" in section  # no supply cut off
 

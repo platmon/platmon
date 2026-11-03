@@ -84,7 +84,7 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
                    technology: 'Li-ion', health: null, charge_now_uah: 3026000, charge_full_uah: 3400000,
                    charge_full_design_uah: 4000000, energy_now_uwh: null, energy_full_uwh: null,
                    energy_full_design_uwh: null, current_ua: -1200000, power_uw: null, voltage_uv: 16436000,
-                   cycle_count: 237},
+                   cycle_count: 237, temp_c: 31.2},
                   {name: 'BAT2', present: false, percent: null, status: null, capacity_level: null, technology: null,
                    health: null, charge_now_uah: null, charge_full_uah: null, charge_full_design_uah: null,
                    energy_now_uwh: null, energy_full_uwh: null, energy_full_design_uwh: null, current_ua: null,

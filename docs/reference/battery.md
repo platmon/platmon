@@ -27,7 +27,7 @@ reported as a problem.
        "capacity_level": "Normal", "technology": "Li-ion", "health": null,
        "charge_now_uah": 3026000, "charge_full_uah": 3400000, "charge_full_design_uah": 4023000,
        "energy_now_uwh": null, "energy_full_uwh": null, "energy_full_design_uwh": null,
-       "current_ua": 0, "power_uw": null, "voltage_uv": 16436000, "cycle_count": 237}
+       "current_ua": 0, "power_uw": null, "voltage_uv": 16436000, "cycle_count": 237, "temp_c": null}
     ],
     "external": [{"name": "ADP1", "type": "Mains", "online": true}]
   }
@@ -71,6 +71,10 @@ reported.
 - `current_ua` (µA), `power_uw` (µW): **signed, and passed through**. Drivers differ: some report a
   negative current while discharging, others a positive one with a `Discharging` status. platmon does not
   reinterpret the sign, so a reader must use `status` to tell charging from discharging.
+- `temp_c` (°C): the battery's own temperature sensor, `temp` in tenths of a degree, signed (a cell can be
+  below 0 °C). Fuel-gauge drivers (an I²C gauge on a board or a phone) have it; ACPI laptop batteries do
+  not, and there it is `null`. It stays with the battery it belongs to rather than in `/api/stats`'s
+  `temperature` table: it is read on this group's cadence, never in the 1 s cycle.
 
 `external` holds every other supply (`Mains`, `USB` and its subtypes, `Wireless`) with `name`, `type` and
 `online`. Those say whether power is coming in, not how much charge is stored, so nothing else is read
@@ -139,6 +143,9 @@ own battery meter asks — with a read-only handle, and the AC line from `GetSys
 - `status` uses the Linux words for Windows's flags: `Charging`, `Discharging`, or `Not charging` (on AC,
   neither); `capacity_level` is `Critical` while Windows flags the battery critical, otherwise `null`.
   `technology` is the chemistry Windows reports (`LION`, `PbAc`, …) as given; `health` is `null`.
+- `temp_c` comes from the battery's `BatteryTemperature` query (tenths of a kelvin), with two decimals so
+  the conversion stays exact. Most batteries do not answer that query; then, and for a reported 0, it is
+  `null`, and that is not a problem.
 - `external` is one entry, `{"name": "AC", "type": "Mains", "online": …}`, from the AC line status (`null`
   when Windows reports it unknown). A desktop without a battery has it too, with an empty `batteries`.
 
@@ -149,8 +156,9 @@ Checked 2026-10-25 on a laptop (Windows 11, one Li-ion battery, non-admin): ever
 
 No charge or discharge control, no calibration, no battery threshold in `[thresholds]`: for a battery a
 low reading is the bad one, the opposite of every other level platmon colours, so the viewers show the
-charge without a warning colour. No battery history series. No `temp`, `time_to_empty_now` or
-`time_to_full_now`, and no serial number or identifying string.
+charge without a warning colour. No battery history series. No `time_to_empty_now` or `time_to_full_now`
+(Windows: `BatteryEstimatedTime`): those are the driver's extrapolation, not a reading, and a viewer can
+work out the same from the charge and the draw. No serial number or identifying string.
 
 Only the kernel's class is read. A host whose charge is reported by an external device rather than by
 `/sys/class/power_supply` is not covered; what adding such a source would take, and why it would stay a

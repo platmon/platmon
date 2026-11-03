@@ -242,6 +242,7 @@ def battery_readings(b, percent="%"):
              f"{b['current_ua'] / 1e6:+.2f} A" if b.get("current_ua") is not None else "",
              f"{b['power_uw'] / 1e6:.2f} W" if b.get("power_uw") is not None else "",
              f"{b['cycle_count']} cycles" if b.get("cycle_count") is not None else "",
+             f"{b['temp_c']:.1f}°C" if b.get("temp_c") is not None else "",
              # wear: what the gauge now calls full against what it was designed for
              f"{full * 100 / design:.0f}{percent} of design" if full and design else ""]
     return [x for x in parts if x]

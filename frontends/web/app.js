@@ -180,6 +180,7 @@ function batteryRows() {
       b.current_ua != null ? (b.current_ua / 1e6).toFixed(2) + ' A' : '',
       b.power_uw != null ? (b.power_uw / 1e6).toFixed(2) + ' W' : '',
       b.cycle_count != null ? b.cycle_count + ' cycles' : '',
+      b.temp_c != null ? b.temp_c.toFixed(1) + ' °C' : '',
       full && design ? Math.round(full * 100 / design) + ' % of design' : ''].filter(Boolean).join(' · ');
     return open + (b.percent != null ? bar(b.percent, LIMITS.battery, true, lv) : '') +
       `<div class="detail">${esc(b.status || 'status n/a')}${detail ? ' · ' + detail : ''}</div></div>`;
