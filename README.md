@@ -59,7 +59,7 @@ sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}
 ```
 
 On Fedora or Enterprise Linux 9+ (x86_64, aarch64), build the `.rpm` packages from this checkout
-([RPM packages](docs/reference/packaging.md#rpm-packages); not released yet).
+([RPM packages](docs/reference/packaging.md#rpm-packages); released files from the release after 1.7.0).
 
 ```sh
 platmon --once           # one snapshot
