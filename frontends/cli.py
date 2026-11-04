@@ -371,6 +371,7 @@ UI_SPEC = {
         "defaults": {"cpu": [80, 90], "gpu": [80, 90], "memory": [80, 90], "filesystem": [80, 90],
                      "temperature": [80, 90], "battery": [20, 10], "wifi": [-70, -80]},
     },
+    "scales": {"wifi_dbm": [-90, -30]},
     "states": {"live": "ok", "partial": "warn", "offline": "crit"},
     "roles": {
         "ok": {"light": "#2f7d5b", "dark": "#4fb286", "ansi": "32"},
@@ -911,8 +912,15 @@ def body_network(v):
                 body.append(st(f"    {i['name']:<8}  {state}", "muted"))
                 continue
             signal, extra = wifi_signal(i)
-            lv = low_level(i["signal_dbm"], LIMITS["wifi"]) if i["signal_dbm"] is not None else "ok"
-            body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), st(signal, tone(lv))]
+            if i["signal_dbm"] is None:  # a value without dBm is shown without a bar, as on the web page
+                body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), signal]
+                                   + [st(f"   {e}", "muted") for e in extra]))
+                continue
+            lv = low_level(i["signal_dbm"], LIMITS["wifi"])
+            weak, strong = UI_SPEC["scales"]["wifi_dbm"]  # the web page's bar scale
+            body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), st(pad(signal, 9), tone(lv), "bold"),
+                                         " " + meter(st, 100 * (i["signal_dbm"] - weak) / (strong - weak),
+                                                     20 if v.wide else 11, ticks=False, lv=lv)]
                                + [st(f"   {e}", "muted") for e in extra]))
 
     if targets:

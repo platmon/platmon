@@ -76,6 +76,21 @@ def test_server_levels_replace_the_defaults(monkeypatch):
     assert cli.LIMITS["memory"] == (10, 20)
 
 
+def test_wifi_signal_bar_uses_the_web_scale():
+    """-90 to -30 dBm, weak to strong, as the web page's bar (ui-spec scales.wifi_dbm); its level's color, no ticks."""
+    import copy
+    obs = copy.deepcopy(OBSERVED)
+    wlan = obs["groups"]["wifi"]["data"]["interfaces"][0]
+    for dbm, full in ((-60, 10), (-30, 20), (-95, 0)):
+        wlan["signal_dbm"] = dbm
+        row = next(line for line in plain(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "network"))
+                   if line.startswith("    wlan0"))
+        assert f"{dbm} dBm" in row and row.count("█") == full and "╎" not in row, row
+    wlan["signal_dbm"], wlan["signal_raw"] = None, 40
+    row = next(line for line in plain(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "network")) if "wlan0" in line)
+    assert "unit not reported" in row and "█" not in row and "░" not in row  # no dBm: no bar
+
+
 def test_low_levels_attention_and_colors(monkeypatch):
     """Battery charge and Wi-Fi signal: at or below a level, the opposite of the other readings; only from a
     current observation, and never from an empty bay or a disconnected interface."""

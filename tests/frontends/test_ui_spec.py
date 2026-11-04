@@ -49,6 +49,12 @@ def test_system_fields_are_the_web_rows_and_the_terminal_labels():
     assert list(cli.SYSTEM_LABELS) == fields
 
 
+def test_bar_scales_are_the_web_pages_and_the_terminals():
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    assert json.loads(re.search(r"const WIFI_DBM = (\[.*?\]);", app).group(1)) == SPEC["scales"]["wifi_dbm"]
+    assert "UI_SPEC[\"scales\"][\"wifi_dbm\"]" in Path(cli.__file__).read_text(encoding="utf-8")
+
+
 def test_level_defaults_are_the_servers_and_every_frontends():
     levels = SPEC["levels"]
     config = (ROOT / "native/src/config.rs").read_text(encoding="utf-8")

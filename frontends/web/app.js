@@ -150,6 +150,7 @@ function probeRows() {
       `<span class="${t.failures ? 't-warn' : 'muted'}">${t.failures}/${t.attempts}</span>`])));
 }
 // the signal while connected, never the last one after; a value without dBm is shown without a unit or bar
+const WIFI_DBM = [-90, -30];  // the bar's scale, weak to strong: frontends/ui-spec.json scales.wifi_dbm
 function wifiRows() {
   const g = obs && obs.groups && obs.groups.wifi, o = g && g.observation, d = g && g.data;
   const items = d && Array.isArray(d.interfaces) ? d.interfaces : [];
@@ -159,7 +160,7 @@ function wifiRows() {
       : i.signal_dbm != null ? i.signal_dbm + ' dBm' : i.signal_raw != null ? `signal ${i.signal_raw} (unit not reported)` : 'signal n/a';
     const lv = i.connected === true && i.signal_dbm != null ? lowLevel(i.signal_dbm, LIMITS.wifi) : 'ok';
     return `<div class="meter"><div class="meter-head"><span class="mono">${esc(i.name)}</span><span${lv === 'ok' ? '' : ` class="t-${lv}"`}>${state}</span></div>` +
-      (i.connected === true && i.signal_dbm != null ? bar((i.signal_dbm + 90) / 60 * 100, null, false, lv) : '') +
+      (i.connected === true && i.signal_dbm != null ? bar((i.signal_dbm - WIFI_DBM[0]) / (WIFI_DBM[1] - WIFI_DBM[0]) * 100, null, false, lv) : '') +
       (i.connected === true ? `<div class="detail">Connected${i.link_quality != null ? ' · link quality ' + i.link_quality : ''}</div>` : '') + '</div>';
   }).join('') + '</div>';
 }
