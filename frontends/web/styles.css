@@ -1,3 +1,4 @@
+  /* ok, warn, crit, muted, fg and bg are the color roles of frontends/ui-spec.json (tests/frontends/test_ui_spec.py) */
   :root {
     --bg: #f6f7f9; --card: #fff; --fg: #1d2127; --muted: #6b7280; --border: #e5e7eb; --line: #f1f2f4;
     --track: #eef0f2; --tile: #f6f7f9; --header: rgba(246, 247, 249, .94);

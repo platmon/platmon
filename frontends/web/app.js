@@ -12,6 +12,7 @@ const muted = text => `<span class="muted">${text}</span>`;
 // Status levels: ok below warn, warn from warn, crit from crit. Instantaneous values, no persistence.
 // The server fills them in from [thresholds] in platmon.ini, temperature with its board's default when
 // not set there (the server's board table, native/src/config.rs); these generic defaults apply only to a page not served by platmon.
+// They and the tab order and labels in index.html are frontends/ui-spec.json's (tests/frontends/test_ui_spec.py).
 const LIMITS = {cpu: [80, 90], gpu: [80, 90], memory: [80, 90], filesystem: [80, 90], temperature: [80, 90],
   battery: [20, 10], wifi: [-70, -80]};
 try { Object.assign(LIMITS, JSON.parse($('levels').textContent)); } catch (e) {}  // not served by platmon

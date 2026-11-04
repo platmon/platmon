@@ -352,11 +352,41 @@ def render(s, obs=None):
 # Live terminal screen (interactive terminals only). Same data, wording and levels as the web page; no
 # requests beyond render()'s: the sparklines are the last SPARK_POINTS /api/stats answers kept here.
 
-# The web page's defaults; use_levels() replaces them with the server's [thresholds] (/api/status "levels").
-LIMITS = {"cpu": (80, 90), "gpu": (80, 90), "memory": (80, 90), "filesystem": (80, 90), "temperature": None,
-          "battery": (20, 10), "wifi": (-70, -80)}
+# Copy of frontends/ui-spec.json without "about" (the design tokens shared with the web page), so this file
+# stays standalone; tests/frontends/test_ui_spec.py checks it. The terminal adapts them below: views and
+# levels as they are, the color roles as the ANSI codes of Style.
+UI_SPEC = {
+    "views": [
+        {"id": "overview", "labels": ["Overview", "Over", "Ovr", "Ov"]},
+        {"id": "resources", "labels": ["Resources", "Res", "Res", "Re"]},
+        {"id": "network", "labels": ["Network", "Net", "Net", "Ne"]},
+        {"id": "storage", "labels": ["Storage", "Store", "Sto", "St"]},
+        {"id": "thermal", "labels": ["Temperature", "Temp", "Tmp", "Tm"]},
+        {"id": "power", "labels": ["Power & battery", "Power", "Pwr", "Pw"]},
+        {"id": "system", "labels": ["System", "Sys", "Sys", "Sy"]},
+    ],
+    "levels": {
+        "names": ["ok", "warn", "crit"],
+        "low_is_bad": ["battery", "wifi"],
+        "defaults": {"cpu": [80, 90], "gpu": [80, 90], "memory": [80, 90], "filesystem": [80, 90],
+                     "temperature": [80, 90], "battery": [20, 10], "wifi": [-70, -80]},
+    },
+    "states": {"live": "ok", "partial": "warn", "offline": "crit"},
+    "roles": {
+        "ok": {"light": "#2f7d5b", "dark": "#4fb286", "ansi": "32"},
+        "warn": {"light": "#d9a21b", "dark": "#e3b341", "ansi": "33"},
+        "crit": {"light": "#c62828", "dark": "#f47067", "ansi": "31"},
+        "muted": {"light": "#6b7280", "dark": "#9aa1ab", "ansi": "90"},
+        "fg": {"light": "#1d2127", "dark": "#e6e8eb"},
+        "bg": {"light": "#f6f7f9", "dark": "#121417"},
+    },
+}
+
+# The shared defaults; use_levels() replaces them with the server's [thresholds] (/api/status "levels").
+# Temperature is left to the server (its board's level); temp_limits() falls back to the generic one.
+LIMITS = {**{name: tuple(pair) for name, pair in UI_SPEC["levels"]["defaults"].items()}, "temperature": None}
 # Levels where the low reading is the bad one: warning above critical (native/src/config.rs LOW_LEVELS).
-LOW = ("battery", "wifi")
+LOW = tuple(UI_SPEC["levels"]["low_is_bad"])
 SPARK_POINTS = 24
 WIDE = 100  # columns from which everything is on one screen; below, the overview and a few rows
 ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
@@ -365,7 +395,7 @@ ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 def temp_limits():
     """The server's temperature level (its board's default unless [thresholds] sets one); the web page's
     generic default when /api/status could not be read."""
-    return LIMITS["temperature"] or (80, 90)
+    return LIMITS["temperature"] or tuple(UI_SPEC["levels"]["defaults"]["temperature"])
 
 
 def use_levels(levels):
@@ -395,8 +425,8 @@ def tone(lv):
 
 class Style:
     """Basic ANSI colors (when color is on) and the glyphs: block characters, or ASCII without UTF-8."""
-    CODES = {"ok": "32", "warn": "33", "crit": "31", "muted": "90", "dim": "2", "bold": "1", "under": "4",
-             "crit_bg": "30;41"}
+    CODES = {**{role: value["ansi"] for role, value in UI_SPEC["roles"].items() if "ansi" in value},
+             "dim": "2", "bold": "1", "under": "4", "crit_bg": "30;41"}
 
     def __init__(self, color=True, utf8=True):
         self.color = color
@@ -526,12 +556,9 @@ def low_attention(obs):
 # The views of the live screen, one at a time, as the web page's tabs: the same data, wording and levels.
 # Overview is the whole screen as before; the detail views show their own kind in full, so a narrow
 # terminal reaches every reading by switching views instead of being enlarged.
-VIEWS = ("overview", "resources", "network", "storage", "thermal", "power", "system")
+VIEWS = tuple(view["id"] for view in UI_SPEC["views"])
 # Label sets from the widest that fits; the web page shortens its tab labels on narrow screens too.
-VIEW_LABELS = {"overview": ("Overview", "Over", "Ovr", "Ov"), "resources": ("Resources", "Res", "Res", "Re"),
-               "network": ("Network", "Net", "Net", "Ne"), "storage": ("Storage", "Store", "Sto", "St"),
-               "thermal": ("Temperature", "Temp", "Tmp", "Tm"),
-               "power": ("Power & battery", "Power", "Pwr", "Pw"), "system": ("System", "Sys", "Sys", "Sy")}
+VIEW_LABELS = {view["id"]: tuple(view["labels"]) for view in UI_SPEC["views"]}
 
 
 def next_view(keys, view):
@@ -1062,7 +1089,7 @@ def screen(s, obs, width, height, st, status, history, view="overview", offset=0
     uptime = f"up {uptime_text(s['uptime'])}"
 
     state = status["state"]
-    color = {"live": "ok", "partial": "warn", "offline": "crit"}[state]
+    color = UI_SPEC["states"][state]
     sample = s.get("sample") if isinstance(s.get("sample"), dict) else {}
     seq = f"#{sample['sequence']} · " if isinstance(sample.get("sequence"), int) and wide else ""
     age = (f"data {status['age']:.0f} s old" if state == "offline" else
