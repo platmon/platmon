@@ -45,7 +45,7 @@ def gib(b):
     return f"{b / 2**30:.1f}G"
 
 
-SYSTEM_LABELS = {"os": "", "kernel": "kernel ", "arch": "", "hostname": "host ", "l4t": "L4T "}  # others: "key value"
+SYSTEM_LABELS = {"os": "", "kernel": "kernel ", "arch": "", "hostname": "host ", "l4t": "L4T "}  # ui-spec system_fields; others: "key value"
 
 
 def uptime_text(seconds):
@@ -364,6 +364,7 @@ UI_SPEC = {
         {"id": "power", "labels": ["Power & battery", "Power", "Pwr", "Pw"]},
         {"id": "system", "labels": ["System", "Sys", "Sys", "Sy"]},
     ],
+    "system_fields": ["os", "kernel", "arch", "hostname", "l4t"],
     "levels": {
         "names": ["ok", "warn", "crit"],
         "low_is_bad": ["battery", "wifi"],

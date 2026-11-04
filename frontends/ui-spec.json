@@ -1,5 +1,5 @@
 {
-  "about": "Design tokens the frontends share: the views, the status levels and the color roles. Each frontend adapts them to its medium (web: CSS custom properties and app.js; terminal: ANSI codes in cli.py, which keeps a copy so it stays standalone). tests/frontends/test_ui_spec.py checks every adapter against this file, and the brand roles against assets/brand/brand-colors.json.",
+  "about": "Design tokens the frontends share: the views, the system fields, the status levels and the color roles. Each frontend adapts them to its medium (web: CSS custom properties and app.js; terminal: ANSI codes in cli.py, which keeps a copy so it stays standalone). tests/frontends/test_ui_spec.py checks every adapter against this file, and the brand roles against assets/brand/brand-colors.json.",
   "views": [
     {"id": "overview", "labels": ["Overview", "Over", "Ovr", "Ov"]},
     {"id": "resources", "labels": ["Resources", "Res", "Res", "Re"]},
@@ -9,6 +9,7 @@
     {"id": "power", "labels": ["Power & battery", "Power", "Pwr", "Pw"]},
     {"id": "system", "labels": ["System", "Sys", "Sys", "Sy"]}
   ],
+  "system_fields": ["os", "kernel", "arch", "hostname", "l4t"],
   "levels": {
     "names": ["ok", "warn", "crit"],
     "low_is_bad": ["battery", "wifi"],

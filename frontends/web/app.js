@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const gib = b => (b / 2 ** 30).toFixed(1) + 'G';
-const SYSTEM_FIELDS = ['os', 'kernel', 'arch', 'hostname', 'l4t'];
+const SYSTEM_FIELDS = ['os', 'kernel', 'arch', 'hostname', 'l4t'];  // frontends/ui-spec.json system_fields
 const esc = v => String(v).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
 // a grid table: cols is the CSS column template; a row is its cells' HTML, idle rows are dimmed

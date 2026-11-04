@@ -39,6 +39,16 @@ def test_views_are_the_web_tabs_and_the_terminal_views():
     assert {name: list(texts) for name, texts in cli.VIEW_LABELS.items()} == {v["id"]: v["labels"] for v in SPEC["views"]}
 
 
+def test_system_fields_are_the_web_rows_and_the_terminal_labels():
+    """The system entries the frontends know by name; any other one is shown as "key value" on both."""
+    fields = SPEC["system_fields"]
+    rows = re.findall(r'id="system-(\w+)-row"', (WEB / "index.html").read_text(encoding="utf-8"))
+    assert rows == ["platform", "uptime"] + fields  # platform and uptime are not system entries
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    assert json.loads(re.search(r"const SYSTEM_FIELDS = (\[.*?\]);", app).group(1).replace("'", '"')) == fields
+    assert list(cli.SYSTEM_LABELS) == fields
+
+
 def test_level_defaults_are_the_servers_and_every_frontends():
     levels = SPEC["levels"]
     config = (ROOT / "native/src/config.rs").read_text(encoding="utf-8")
