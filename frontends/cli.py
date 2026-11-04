@@ -120,7 +120,7 @@ def disk_line(d):
     r = d["rates"]
     value = (f"read {per_s(r['read_bytes_per_s'])} ({r['reads_per_s']:.1f}/s)  "
              f"write {per_s(r['write_bytes_per_s'])} ({r['writes_per_s']:.1f}/s)  "
-             f"I/O time {100 * r['io_time_ratio']:.1f}%" + window_text(d) if r else
+             f"I/O time {100 * r['io_time_ratio']:.1f} %" + window_text(d) if r else
              RATE_REASONS.get(d.get("reason"), str(d.get("reason"))))
     return value + (f"  in flight {d['in_flight']}" if d.get("in_flight") is not None else "")
 
@@ -138,7 +138,7 @@ def counters_lines(s):
     psi = s.get("pressure")
     res = psi.get("resources") if isinstance(psi, dict) else None
     if isinstance(res, dict) and res:  # the kernel's 10 s averages: share of time tasks were stalled
-        out.append("PSI   " + "  ".join(f"{name} some {r['some']['avg10']:.1f}%" + (f" full {r['full']['avg10']:.1f}%" if r.get("full") else "")
+        out.append("PSI   " + "  ".join(f"{name} some {r['some']['avg10']:.1f} %" + (f" full {r['full']['avg10']:.1f} %" if r.get("full") else "")
                                         for name, r in res.items()) + "  (avg10, time stalled)")
     return out
 
@@ -174,7 +174,7 @@ def storage_lines(obs):
         where = first["path"] + (" (ro)" if first["read_only"] else "") + (f" +{more} more" if more else "")
         dev = f["device"] or f"{f['major']}:{f['minor']}"
         if f["total_bytes"] is not None:  # a measured 0 is shown as 0
-            pct = f" ({100 * f['used_bytes'] / f['total_bytes']:.0f}%)" if f["total_bytes"] else ""
+            pct = f" ({100 * f['used_bytes'] / f['total_bytes']:.0f} %)" if f["total_bytes"] else ""
             out.append(f"  {where}  {f['fstype']} {dev}  used {gib(f['used_bytes'])}/{gib(f['total_bytes'])}{pct}"
                        f"  available {gib(f['available_bytes'])}")
         else:
@@ -232,9 +232,8 @@ def wifi_lines(obs):
     return out
 
 
-def battery_readings(b, percent="%"):
-    """A battery's status and readings, those it reports, in order; percent goes between the wear figure
-    and "of design"."""
+def battery_readings(b):
+    """A battery's status and readings, those it reports, in order."""
     full = b.get("charge_full_uah") or b.get("energy_full_uwh")
     design = b.get("charge_full_design_uah") or b.get("energy_full_design_uwh")
     parts = [b.get("status") or "",
@@ -242,9 +241,9 @@ def battery_readings(b, percent="%"):
              f"{b['current_ua'] / 1e6:+.2f} A" if b.get("current_ua") is not None else "",
              f"{b['power_uw'] / 1e6:.2f} W" if b.get("power_uw") is not None else "",
              f"{b['cycle_count']} cycles" if b.get("cycle_count") is not None else "",
-             f"{b['temp_c']:.1f}°C" if b.get("temp_c") is not None else "",
+             f"{b['temp_c']:.1f} °C" if b.get("temp_c") is not None else "",
              # wear: what the gauge now calls full against what it was designed for
-             f"{full * 100 / design:.0f}{percent} of design" if full and design else ""]
+             f"{full * 100 / design:.0f} % of design" if full and design else ""]
     return [x for x in parts if x]
 
 
@@ -262,7 +261,7 @@ def battery_lines(obs):
         if b.get("present") is False:
             out.append(f"  {b['name']}  not present")
             continue
-        charge = f"{b['percent']}%" if b.get("percent") is not None else b.get("capacity_level") or "charge n/a"
+        charge = f"{b['percent']} %" if b.get("percent") is not None else b.get("capacity_level") or "charge n/a"
         out.append(f"  {b['name']}  " + "  ".join([charge] + battery_readings(b)))
     if external:
         shown = "  ".join(f"{e['name']} {'on' if e['online'] else 'off' if e['online'] is False else 'n/a'}"
@@ -313,7 +312,7 @@ def render(s, obs=None):
     ]
     for c in s["cpu"]:
         freq = f"  {c['freq'] / 1e6:4.0f} MHz" if c["freq"] else ""
-        lines.append(f"CPU{c['id']:<3}{bar(c['usage'])} {c['usage']:5.1f}%{freq}")
+        lines.append(f"CPU{c['id']:<3}{bar(c['usage'])} {c['usage']:5.1f} %{freq}")
     note = cpu_note(s)
     if note:
         lines.append(note)
@@ -321,12 +320,12 @@ def render(s, obs=None):
     if g:
         freq = f"  {g['freq'] / 1e6:4.0f} MHz" if g.get("freq") else ""  # None or 0: clock not readable
         # a card whose driver publishes no load, or the first reading of a counter: a clock, no share
-        load = f"{bar(g['usage'])} {g['usage']:5.1f}%" if g.get("usage") is not None else f"{bar(0)}    n/a"
+        load = f"{bar(g['usage'])} {g['usage']:5.1f} %" if g.get("usage") is not None else f"{bar(0)}    n/a"
         lines.append(f"GPU   {load}{freq}")
     n = s.get("npu")
     if n:
         freq = f"  {n['freq'] / 1e6:4.0f} MHz" if n.get("freq") else ""
-        load = f"{bar(n['usage'])} {n['usage']:5.1f}%" if n.get("usage") is not None else f"{bar(0)}    n/a"
+        load = f"{bar(n['usage'])} {n['usage']:5.1f} %" if n.get("usage") is not None else f"{bar(0)}    n/a"
         lines.append(f"NPU   {load}{freq}")
     m = s["memory"]
     lines.append(f"RAM   {bar(100 * m['used'] / m['total'])} {gib(m['used'])}/{gib(m['total'])}")
@@ -336,11 +335,11 @@ def render(s, obs=None):
     lines.append(f"DISK  {bar(100 * d['used'] / d['total'])} {gib(d['used'])}/{gib(d['total'])}")
     lines.append("")
     if s["temperature"]:
-        lines.append("TEMP  " + "  ".join(f"{k} {v:.1f}°C" for k, v in s["temperature"].items()))
+        lines.append("TEMP  " + "  ".join(f"{k} {v:.1f} °C" for k, v in s["temperature"].items()))
     if s["power"]:
         lines.append("POWER " + "  ".join(f"{k} {v:.2f}W" for k, v in s["power"].items()))
     for f in s["fans"]:
-        vals = [f"{f['rpm']} rpm" if f["rpm"] is not None else "", f"{f['percent']}%" if f["percent"] is not None else ""]
+        vals = [f"{f['rpm']} rpm" if f["rpm"] is not None else "", f"{f['percent']} %" if f["percent"] is not None else ""]
         lines.append(f"FAN   {f['name']}  " + ("  ".join(v for v in vals if v) or "n/a"))  # n/a: unreadable
     extra = counters_lines(s) + storage_lines(obs) + wifi_lines(obs) + battery_lines(obs) + probe_lines(obs)
     if extra and lines[-1]:
@@ -622,7 +621,7 @@ def core_cell(st, c):
     lv = tone(level(c["usage"], LIMITS["cpu"]))
     freq = f"{c['freq'] / 1e6:4.0f}" if c.get("freq") else "    "
     return (st(f"{c['id']:>4} ", lv or "muted", "bold" if lv else None) + meter(st, c["usage"], 8, LIMITS["cpu"], False)
-            + st(f" {c['usage']:5.1f}%", lv, "bold" if lv else None) + st(f" {freq}", "muted"))
+            + st(f" {c['usage']:5.1f} %", lv, "bold" if lv else None) + st(f" {freq}", "muted"))
 
 
 def mhz(hz):
@@ -763,7 +762,7 @@ def body_overview(v):
             else:
                 lv = tone(level(c["usage"], LIMITS["cpu"]))
                 cells.append(st(f"{c['id']:>3} ", lv or "muted") + meter(st, c["usage"], 4, LIMITS["cpu"], False)
-                             + st(f" {c['usage']:3.0f}%", lv))
+                             + st(f" {c['usage']:3.0f} %", lv))
         if wide:
             body.append(v.title("CORES", f"%  ·  MHz  ·  {len(s['cpu'])} measured"))
         sep = "   " if wide else " "
@@ -1036,7 +1035,7 @@ def body_power(v):
                 continue
             charge = (f"{b['percent']} %" if b.get("percent") is not None
                       else b.get("capacity_level") or "charge n/a")
-            detail = " · ".join(battery_readings(b, " %"))
+            detail = " · ".join(battery_readings(b))
             lv = low_level(b["percent"], LIMITS["battery"]) if b.get("percent") is not None else "ok"
             head = [st(f"    {b['name']:<{name_w}}", "muted"), st(pad(charge, 7), tone(lv) or "bold", "bold" if tone(lv) else None)]
             bw = min(14 if v.wide else 8, max(6, v.width - 10 - name_w - vlen(charge) - vlen(detail)))

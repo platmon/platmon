@@ -78,7 +78,7 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   assert(!attention({}).includes('Needs attention'), 'above both warning levels: nothing');
   low(20, -70);
   const atWarn = attention({});
-  assert(atWarn.includes('<a class="pill warn" href="#power">BAT1 <span class="mono">20%') &&
+  assert(atWarn.includes('<a class="pill warn" href="#power">BAT1 <span class="mono">20 %') &&
          atWarn.includes('<a class="pill warn" href="#network">wlan0 <span class="mono">-70 dBm'), 'at the warning level: warn');
   low(10, -80);
   const atCrit = attention({});
@@ -130,7 +130,7 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   const label = id => run(`(([re, name]) => name(${JSON.stringify(id)}.match(re)))(HIST_LABEL.find(([re]) => re.test(${JSON.stringify(id)})))`);
   assert.equal(label('temperature/src1:abc'), 'temp cpu/a');
   assert.equal(label('temperature/name:board'), 'temp board');
-  assert.equal(el('cpu-cap').textContent, 'mean 30.0% · 2 of 2 measured');
+  assert.equal(el('cpu-cap').textContent, 'mean 30.0 % · 2 of 2 measured');
   assert.deepEqual(el('hist').innerHTML.match(/<h3>[^<]+<\/h3>/g), ['<h3>CPU cores</h3>', '<h3>GPU</h3>', '<h3>RAM</h3>'],
     'the GPU is a kind of its own, between the cores and RAM');
   clickGroup('cpu/');  // the CPU cores button off leaves the other kinds of this view

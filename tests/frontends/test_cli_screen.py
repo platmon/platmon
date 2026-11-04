@@ -193,7 +193,7 @@ def test_the_battery_keeps_every_reading_at_any_width(width):
     # wrapping splits a reading across lines, so the section is compared as one run of words
     section = re.sub(r"\s+", " ", " ".join(lines[start:]))
     assert "observed 4 s ago" in section and "BAT1" in section and "89 %" in section
-    for reading in ("Not charging", "16.44 V", "-1.20 A", "237 cycles", "31.2°C", "85 % of design"):
+    for reading in ("Not charging", "16.44 V", "-1.20 A", "237 cycles", "31.2 °C", "85 % of design"):
         assert reading in section, f"{reading} lost at {width} columns"
     assert "ADP1 on" in section and "ucsi-source-psy-USBC000:001 off" in section  # no supply cut off
 

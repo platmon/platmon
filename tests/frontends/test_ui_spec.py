@@ -78,3 +78,11 @@ def test_brand_roles_are_the_approved_brand_colors():
         assert {role: SPEC["roles"][role][theme] for role in ("ok", "fg", "bg", "muted")} == \
             {role: brand[theme][key].lower() for role, key in
              (("ok", "symbol"), ("fg", "wordmark"), ("bg", "background"), ("muted", "description"))}
+
+
+def test_units_follow_a_space_everywhere():
+    """A reading and its unit are two words in every frontend: 91.4 %, 51.2 °C, as 918 MHz and -70 dBm."""
+    read = lambda path: (ROOT / path).read_text(encoding="utf-8")
+    assert not re.findall(r".{20}\}(?:%|°C)", read("frontends/cli.py"))  # f"{v}%"
+    assert not re.findall(r".{20}(?:\+ '(?:%|°C)'|\}(?:%(?![\";)])|°C))", read("frontends/web/app.js"))  # not CSS lengths
+    assert not re.findall(r".{20}\{\}(?:%|°C)", read("native/src/render.rs"))  # format!("{}%")

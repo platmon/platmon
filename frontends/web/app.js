@@ -103,7 +103,7 @@ function diskRows(s) {
     items.map(d => {
       const r = d.rates;
       return tr([esc(d.name), r ? perS(r.read_bytes_per_s) : why(d), r ? perS(r.write_bytes_per_s) : '',
-        r ? muted(`${r.reads_per_s.toFixed(1)} · ${r.writes_per_s.toFixed(1)}`) : '', r ? (100 * r.io_time_ratio).toFixed(1) + '%' : '']);
+        r ? muted(`${r.reads_per_s.toFixed(1)} · ${r.writes_per_s.toFixed(1)}`) : '', r ? (100 * r.io_time_ratio).toFixed(1) + ' %' : '']);
     }), 560) : '';
 }
 
@@ -204,7 +204,7 @@ function storageRows() {
     return '<div class="fs"><div><div class="fs-name"><span>' + esc(m[0].path) + '</span>' +
       (m[0].read_only ? '<span class="badge">ro</span>' : '') + (m.length > 1 ? muted(`+${m.length - 1} more`) : '') + '</div>' +
       `<div class="detail">${esc(f.fstype)} · ${esc(f.device || f.major + ':' + f.minor)}</div></div>` +
-      (f.total_bytes != null ? meter(`${gib(f.used_bytes)} / ${gib(f.total_bytes)} · ${pct.toFixed(0)}%`,
+      (f.total_bytes != null ? meter(`${gib(f.used_bytes)} / ${gib(f.total_bytes)} · ${pct.toFixed(0)} %`,
         `${gib(f.available_bytes)} free`, pct, LIMITS.filesystem) : muted('capacity unknown')) + '</div>';
   }).join('') + (parts.length ? '<h3>Partitions</h3>' + table('minmax(0, 1fr) 80px minmax(0, 1fr)', ['Partition', 'Size', 'Mounted at'],
     parts.map(p => tr([esc(p.name), gib(p.size_bytes), p.mount_points.length ? esc(p.mount_points[0] +
@@ -253,10 +253,10 @@ function sensorName(group, sid) {
 }
 const histValue = (id, v) => id.startsWith('temperature') ? v.toFixed(1) + ' °C'
   : id.startsWith('power/') ? v.toFixed(2) + ' W'
-  : id.endsWith('/percent') ? v.toFixed(0) + '%'
+  : id.endsWith('/percent') ? v.toFixed(0) + ' %'
   : id.endsWith('_uah') ? (v / 1e3).toFixed(0) + ' mAh' : id.endsWith('_uwh') ? (v / 1e3).toFixed(0) + ' mWh'
   : id.endsWith('_uw') ? (v / 1e6).toFixed(2) + ' W'
-  : id.startsWith('cpu/') || id.startsWith('gpu/') || id.startsWith('npu/') ? v.toFixed(1) + '%'
+  : id.startsWith('cpu/') || id.startsWith('gpu/') || id.startsWith('npu/') ? v.toFixed(1) + ' %'
   : id.includes('/wifi/') ? v.toFixed(1) + ' dBm' : id.includes('/probe/') ? v.toFixed(1) + ' ms'
   : id.startsWith('memory') || id.includes('/storage/') ? gib(v) : perS(v);
 // x of a point on the 0–200 chart: spaced by its age, so irregular intervals stay irregular
@@ -365,7 +365,7 @@ async function pollHist() {
 // pressure stall information: the kernel's 10 s averages of the share of time tasks were stalled (not usage)
 function psiRows(s) {
   const res = s.pressure && s.pressure.resources && typeof s.pressure.resources === 'object' ? s.pressure.resources : {};
-  const rows = Object.entries(res).map(([name, r]) => tr([esc(name), r.some.avg10.toFixed(1) + '%', muted(r.full ? r.full.avg10.toFixed(1) + '%' : '—')]));
+  const rows = Object.entries(res).map(([name, r]) => tr([esc(name), r.some.avg10.toFixed(1) + ' %', muted(r.full ? r.full.avg10.toFixed(1) + ' %' : '—')]));
   return rows.length ? table('minmax(0, 1fr) 80px 80px', ['Resource', 'Some', 'Full'], rows) : '';
 }
 
@@ -388,7 +388,7 @@ function overviewRows(s) {
   // value null: unavailable, no bar; limits give the level, the threshold ticks and a Needs attention entry
   const metric = (label, sub, value, unit, limits, detail, tab, name = label) => {
     const lv = value == null ? 'ok' : level(value, limits);
-    if (lv !== 'ok') alerts.push({lv, tab, name, value: value.toFixed(1) + (unit === '°C' ? ' °C' : unit)});
+    if (lv !== 'ok') alerts.push({lv, tab, name, value: value.toFixed(1) + ' ' + unit});
     cards.push(`<article class="card metric"><div class="metric-head"><span>${esc(label)}</span><span>${esc(sub)}</span></div>` +
       (value == null ? '<div class="value">Unavailable</div>'
         : `<div class="value${textLevel(lv)}">${value.toFixed(1)}<span class="unit">${unit}</span></div>${bar(value, limits)}`) +
@@ -414,13 +414,13 @@ function overviewRows(s) {
   const fsData = storage && storage.observation && !observationStale(storage) ? storage.data : null;
   for (const f of listOf(fsData, 'filesystems')) {
     const lv = f.total_bytes && !f.mount_points.some(p => p.path === '/') ? level(fsPct(f), LIMITS.filesystem) : 'ok';
-    if (lv !== 'ok') alerts.push({lv, tab: 'storage', name: f.mount_points[0].path, value: fsPct(f).toFixed(0) + '%'});
+    if (lv !== 'ok') alerts.push({lv, tab: 'storage', name: f.mount_points[0].path, value: fsPct(f).toFixed(0) + ' %'});
   }
   // the batteries' charge and connected Wi-Fi signals, when their views fetched a current observation
   const current = name => { const g = obs && obs.groups && obs.groups[name]; return g && g.observation && !observationStale(g) ? g.data : null; };
   for (const b of listOf(current('battery'), 'batteries')) {
     const lv = b.present !== false && Number.isFinite(b.percent) ? lowLevel(b.percent, LIMITS.battery) : 'ok';
-    if (lv !== 'ok') alerts.push({lv, tab: 'power', name: b.name, value: b.percent + '%'});
+    if (lv !== 'ok') alerts.push({lv, tab: 'power', name: b.name, value: b.percent + ' %'});
   }
   for (const i of listOf(current('wifi'), 'interfaces')) {
     const lv = i.connected === true && Number.isFinite(i.signal_dbm) ? lowLevel(i.signal_dbm, LIMITS.wifi) : 'ok';
@@ -445,15 +445,15 @@ function overviewRows(s) {
 function renderResources(s) {
   const note = cpuNote(s), cpus = s.cpu.filter(c => Number.isFinite(c.usage));
   const unavailable = (s.cpu_sampling && s.cpu_sampling.unavailable || []).length;
-  $('cpu-cap').textContent = cpus.length ? `mean ${(cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length).toFixed(1)}% · ` +
+  $('cpu-cap').textContent = cpus.length ? `mean ${(cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length).toFixed(1)} % · ` +
     `${cpus.length} of ${s.cpu.length + unavailable} measured` : '';
   $('cpu').innerHTML = (s.cpu.length ? '<div class="cores">' + s.cpu.map(c => `<div class="core"><span>CPU${c.id}</span>` +
-    `<strong class="${textLevel(level(c.usage, LIMITS.cpu))}">${c.usage.toFixed(1)}%</strong>` +
+    `<strong class="${textLevel(level(c.usage, LIMITS.cpu))}">${c.usage.toFixed(1)} %</strong>` +
     bar(c.usage, LIMITS.cpu, false) + `<span>${mhz(c.freq) || '&nbsp;'}</span></div>`).join('') + '</div>' : '') +
     (note ? `<div class="muted">${esc(note)}</div>` : '');
   const m = s.memory, g = s.gpu, n = s.npu;
   // the NPU has no levels in [thresholds], so its bar carries none either
-  const load = (a, label) => meter(label, (a.usage == null ? 'no load reading' : a.usage.toFixed(1) + '%') +
+  const load = (a, label) => meter(label, (a.usage == null ? 'no load reading' : a.usage.toFixed(1) + ' %') +
     (a.freq ? ' · ' + mhz(a.freq) : ''), a.usage == null ? 0 : a.usage, label === 'GPU' ? LIMITS.gpu : null);
   $('res').innerHTML = '<div class="meters">' +
     (g ? load(g, 'GPU') : '') + (n ? load(n, 'NPU') : '') +
@@ -470,7 +470,7 @@ function renderThermal(s) {
 // against the charge that window cost
 function renderPower(s) {
   const rows = Object.entries(s.power).map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') +
-    s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
+    s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + ' %'].filter(Boolean).join(' · ') || 'n/a'))).join('');
   $('pwr-cap').innerHTML = s.power_mode ? `<span class="chip">MODE ${esc(s.power_mode)}</span>` : '';
   $('pwr').innerHTML = rows || (s.power_mode ? '<p class="muted">No power rails or fans reported.</p>' : '');
 }
