@@ -21,6 +21,10 @@ def css_tokens():
     return tokens(css[:dark_at]), tokens(css[dark_at:css.index("}", css.index("{", dark_at) + 1) + 1])
 
 
+def test_cli_copy_matches_the_spec():
+    assert cli.UI_SPEC == {key: value for key, value in SPEC.items() if key != "about"}
+
+
 def test_views_are_the_web_tabs_and_the_terminal_views():
     page = (WEB / "index.html").read_text(encoding="utf-8")
     tabs = re.findall(r'<button id="tab-(\w+)" role="tab"[^>]*>(.*?)</button>', page)
@@ -65,9 +69,7 @@ def test_states_color_the_status_the_same_way():
     css = (WEB / "styles.css").read_text(encoding="utf-8")
     web = dict(re.findall(r'#status\[data-state="(\w+)"\] \{ color: var\(--(\w+)-text\)', css))
     assert web == SPEC["states"]
-    source = Path(cli.__file__).read_text(encoding="utf-8")
-    terminal = re.search(r'color = (\{"live".*?\})\[state\]', source).group(1)
-    assert json.loads(terminal) == SPEC["states"]
+    assert re.search(r"color = UI_SPEC\[\"states\"\]\[state\]", Path(cli.__file__).read_text(encoding="utf-8"))
 
 
 def test_brand_roles_are_the_approved_brand_colors():
