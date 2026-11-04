@@ -55,7 +55,8 @@ def test_level_defaults_are_the_servers_and_every_frontends():
     server = {name: [float(x) for x in value.split(",")] if value else None
               for name, value in re.findall(r'\("(\w+)", "([^"]*)", Kind::Str\)',
                                             config[config.index('("thresholds"'):config.index("];", config.index('("thresholds"'))])}
-    generic = [float(x) for x in re.search(r"_ => \[([^\]]+)\]", config).group(1).split(",")]
+    levels_fn = config[config.index("fn levels("):config.index("\n}", config.index("fn levels("))]  # the board table
+    generic = [float(x) for x in re.search(r"_ => \[([^\]]+)\]", levels_fn).group(1).split(",")]
     assert {**server, "temperature": generic} == levels["defaults"]  # temperature unset: the board's, generic here
     assert re.findall(r'\("(\w+)", \(-?[\d.]+, -?[\d.]+, "[^"]*"\)\)', config) == levels["low_is_bad"]
 
