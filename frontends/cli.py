@@ -489,13 +489,13 @@ def metrics(s):
     """The web Overview's readings: (label, value or None, unit, limits, detail)."""
     cpus = [c["usage"] for c in s["cpu"] if isinstance(c.get("usage"), (int, float))]
     m, d, g, n = s["memory"], s["disk"], s.get("gpu"), s.get("npu")
-    out = [("CPU", sum(cpus) / len(cpus) if cpus else None, "%", LIMITS["cpu"], f"mean of {len(cpus)} cores")]
+    out = [("CPU", sum(cpus) / len(cpus) if cpus else None, "%", LIMITS["cpu"], f"mean of {len(cpus)} cores"),
+           ("RAM", 100 * m["used"] / m["total"] if m["total"] else None, "%", LIMITS["memory"],
+            f"{gib(m['used'])} / {gib(m['total'])}")]  # the web page's card order: CPU, Memory, GPU, disk
     if g:
         out.append(("GPU", g["usage"], "%", LIMITS["gpu"], f"{g['freq'] / 1e6:.0f} MHz" if g.get("freq") else ""))
     if n:  # no [thresholds] entry sets levels for an NPU, so it is shown without one
         out.append(("NPU", n["usage"], "%", None, f"{n['freq'] / 1e6:.0f} MHz" if n.get("freq") else ""))
-    out.append(("RAM", 100 * m["used"] / m["total"] if m["total"] else None, "%", LIMITS["memory"],
-                f"{gib(m['used'])} / {gib(m['total'])}"))
     out.append(("DISK", 100 * d["used"] / d["total"] if d["total"] else None, "%", LIMITS["filesystem"],
                 f"{gib(d['used'])} / {gib(d['total'])}"))
     temps = hottest_first(s)
@@ -523,13 +523,13 @@ def fs_pct(f):
 
 def attention(s, obs):
     """Readings at their warning level or worse, critical first, as on the web page: the Overview readings,
-    every temperature sensor, filesystems other than / from the storage observation, and from current
-    observations the batteries' charge and the connected Wi-Fi signals, where the low reading is the bad one."""
+    every temperature sensor, and from current observations filesystems other than /, the batteries' charge
+    and the connected Wi-Fi signals, where the low reading is the bad one."""
     out = [("/" if label == "DISK" else label, f"{v:.1f} {unit}", level(v, lim))
            for label, v, unit, lim, _ in metrics(s) if v is not None and label != "TEMP"]
     out += [(k, f"{v:.1f} °C", level(v, temp_limits())) for k, v in hottest_first(s)]
-    data, _ = group_data(obs, "storage")
-    for f in (data or {}).get("filesystems") or []:
+    data, o = group_data(obs, "storage")
+    for f in (data or {}).get("filesystems") or [] if o and not o.get("stale") else []:
         pct = fs_pct(f)
         if pct is not None and not any(p["path"] == "/" for p in f["mount_points"]):
             out.append((f["mount_points"][0]["path"], f"{pct:.0f} %", level(pct, LIMITS["filesystem"])))

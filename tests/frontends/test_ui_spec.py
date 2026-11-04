@@ -4,9 +4,14 @@ the approved brand colors."""
 import html
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
+
 from frontends import cli
+from tests.frontends.test_cli import FULL
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = json.loads((ROOT / "frontends/ui-spec.json").read_text(encoding="utf-8"))
@@ -86,3 +91,46 @@ def test_units_follow_a_space_everywhere():
     assert not re.findall(r".{20}\}(?:%|°C)", read("frontends/cli.py"))  # f"{v}%"
     assert not re.findall(r".{20}(?:\+ '(?:%|°C)'|\}(?:%(?![\";)])|°C))", read("frontends/web/app.js"))  # not CSS lengths
     assert not re.findall(r".{20}\{\}(?:%|°C)", read("native/src/render.rs"))  # format!("{}%")
+
+
+def observation(data, stale=False):
+    return {"state": "ok", "stale_after_ms": 180000, "observation": {"id": 1, "data_age_ms": 1000, "stale": stale},
+            "data": data}
+
+
+def filesystems(*used_pct):
+    return {"filesystems": [{"device": f"sd{n}", "fs_type": "ext4", "total_bytes": 100, "used_bytes": pct,
+                             "available_bytes": 100 - pct, "mount_points": [{"path": f"/data{n}"}]}
+                            for n, pct in enumerate(used_pct)]}
+
+
+HOT = dict(FULL, cpu=[{"id": 0, "usage": 95.0, "freq": None}, {"id": 1, "usage": 89.0, "freq": None}],
+           gpu={"usage": 81.0, "freq": None}, memory=dict(FULL["memory"], used=7 * 2**30),
+           disk={"total": 100 * 2**30, "used": 50 * 2**30}, temperature={"cpu": 83.5, "gpu": 91.0, "soc": 40.0})
+OBSERVED = {"schema_version": 2, "groups": {
+    "storage": observation(filesystems(85, 95, 10)),
+    "battery": observation({"batteries": [{"name": "BAT0", "present": True, "percent": 9},
+                                          {"name": "BAT1", "present": False, "percent": 5}]}),
+    "wifi": observation({"interfaces": [{"name": "wlan0", "connected": True, "signal_dbm": -75},
+                                        {"name": "wlan1", "connected": False, "signal_dbm": -90}]})}}
+STALE = {"schema_version": 2, "groups": {name: observation(g["data"], stale=True) for name, g in OBSERVED["groups"].items()}}
+
+
+@pytest.mark.parametrize("stats, obs", [(HOT, OBSERVED), (HOT, STALE), (FULL, OBSERVED), (FULL, None)],
+                         ids=["hot", "stale-observations", "observations-only", "nothing"])
+def test_needs_attention_is_the_same_on_both(stats, obs, monkeypatch, tmp_path):
+    """The same snapshot raises the same entries, in the same order, on the web page and the terminal."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    levels = {"cpu": [80, 90], "gpu": [80, 90], "memory": [80, 90], "filesystem": [80, 90],
+              "temperature": [85, 95], "battery": [20, 10], "wifi": [-70, -80]}
+    case = tmp_path / "case.json"
+    case.write_text(json.dumps({"stats": stats, "observations": obs, "levels": levels}), encoding="utf-8")
+    web = json.loads(subprocess.run([node, str(ROOT / "tests/frontends/web_attention_harness.js"), str(WEB / "app.js"),
+                                     str(case)], check=True, capture_output=True, text=True, encoding="utf-8").stdout)
+    monkeypatch.setattr(cli, "LIMITS", dict(cli.LIMITS))
+    cli.use_levels(levels)
+    # the web page's Overview card says Memory where the terminal's meter says RAM
+    terminal = [["Memory" if name == "RAM" else name, value, lv] for name, value, lv in cli.attention(stats, obs)]
+    assert [[html.unescape(name), value, lv] for name, value, lv in web] == terminal
