@@ -473,7 +473,7 @@ def text_steps():
                                                                             "connection_state": "permission_denied"},
                                     {"name": "wlan5", "connected": None}]}),
            ("battery", {"batteries": [{"name": "BAT0", "present": True, "percent": 80, "status": "Discharging", "voltage_uv": 12000000,
-                                       "current_ua": -1500000, "power_uw": None, "cycle_count": 42, "charge_full_uah": 4000000,
+                                       "current_ua": -1500000, "power_uw": None, "cycle_count": 42, "temp_c": 31.2, "charge_full_uah": 4000000,
                                        "charge_full_design_uah": 4400000},
                                       {"name": "BAT1", "present": False},
                                       {"name": "BAT2", "present": None, "percent": None, "capacity_level": "Low", "current_ua": 0,

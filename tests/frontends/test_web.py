@@ -204,7 +204,7 @@ def test_the_battery_card_is_under_power_and_battery(steps):
 def test_battery_from_observations(steps):
     batt = steps["ok"]["batt"]
     assert steps["ok"]["obs_age"]["battery"] == "observed 30 s ago"
-    assert "89 %" in batt and "Not charging" in batt and "237 cycles" in batt
+    assert "89 %" in batt and "Not charging" in batt and "237 cycles" in batt and "31.2 °C" in batt
     assert "16.44 V" in batt and "-1.20 A" in batt and "85 % of design" in batt  # 3400000/4000000
     assert "BAT2</span><span>not present" in batt and batt.count('class="bar"') == 1  # no bar for an empty bay
     assert "ADP1 on · USBC1 off" in batt

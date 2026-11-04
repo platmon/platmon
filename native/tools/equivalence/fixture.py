@@ -645,10 +645,10 @@ def slow_tree():
               "this is not a row"])
     supply("BAT0", type="Battery", present=1, capacity=80, charge_now=2000000, charge_full=4000000,
            charge_full_design=4400000, current_now=-1500000, voltage_now=12000000, cycle_count=42, status="Discharging",
-           capacity_level="Normal", technology="Li-ion", health="Good", serial_number="SECRET")
+           capacity_level="Normal", technology="Li-ion", health="Good", temp=312, serial_number="SECRET")
     supply("BAT1", type="Battery", present=0, capacity=50)
     supply("BAT2", type="Battery", capacity=101, energy_now=5000000, power_now=-7000000, status="", technology="x" * 33,
-           voltage_now=-1, cycle_count="many")
+           voltage_now=-1, cycle_count="many", temp="warm")
     supply("BAT3", type="Battery", capacity=55)
     os.chmod(sys_("class/power_supply/BAT3/capacity"), 0)
     supply("UPS0", type="UPS", capacity=99, status="Charging")

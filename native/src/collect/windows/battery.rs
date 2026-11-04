@@ -2,14 +2,14 @@
 //! battery device interface (GUID_DEVICE_BATTERY) asked through the battery class's IOCTLs, as Windows's
 //! own battery meter does, and the AC line from GetSystemPowerStatus. Read access only: nothing is set.
 use super::disk_io::error_code;
-use crate::json::Value;
+use crate::json::{round_to, Value};
 use crate::metadata::Group;
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{CM_Get_Device_Interface_ListW, CM_Get_Device_Interface_List_SizeW,
                                                                CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CR_SUCCESS};
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_NO_SUCH_DEVICE,
                                      ERROR_PATH_NOT_FOUND, GENERIC_READ, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
-use windows_sys::Win32::System::Power::{BatteryInformation, GetSystemPowerStatus, BATTERY_CAPACITY_RELATIVE, BATTERY_CHARGING,
+use windows_sys::Win32::System::Power::{BatteryInformation, BatteryTemperature, GetSystemPowerStatus, BATTERY_CAPACITY_RELATIVE, BATTERY_CHARGING,
                                         BATTERY_CRITICAL, BATTERY_DISCHARGING, BATTERY_INFORMATION, BATTERY_QUERY_INFORMATION,
                                         BATTERY_STATUS, BATTERY_UNKNOWN_CAPACITY, BATTERY_UNKNOWN_RATE, BATTERY_UNKNOWN_VOLTAGE,
                                         BATTERY_WAIT_STATUS, GUID_DEVICE_BATTERY, IOCTL_BATTERY_QUERY_INFORMATION,
@@ -94,12 +94,15 @@ fn status_text(power_state: u32) -> Option<&'static str> {
     }
 }
 
-/// One battery's entry from its information and status; None where Windows reports a value as unknown.
-fn entry(name: &str, info: &BATTERY_INFORMATION, status: &BATTERY_STATUS) -> Value {
+/// One battery's entry from its information, status and temperature (tenths of a kelvin, where the battery
+/// reports one); None where Windows reports a value as unknown.
+fn entry(name: &str, info: &BATTERY_INFORMATION, status: &BATTERY_STATUS, temp: Option<u32>) -> Value {
     let mut item = obj(vec![("name", name.into()), ("present", Value::Bool(true)), ("percent", Value::Null)]);
     for f in TEXT.iter().chain(CHARGE_ENERGY.iter()).chain(OTHER.iter()) {
         item.set(f, Value::Null);
     }
+    // 0.1 K is 0.1 °C, offset by 273.15: two decimals keep the reading exact instead of rounding every half
+    item.set("temp_c", temp.filter(|t| *t > 0).map(|t| round_to((t as f64 - 2731.5) / 10.0, 2)).into());
     let known = |v: u32| (v != BATTERY_UNKNOWN_CAPACITY).then_some(v as i64);
     let (now, full) = (known(status.Capacity), known(info.FullChargedCapacity).filter(|f| *f > 0));
     if let (Some(n), Some(f)) = (now, full) {
@@ -137,6 +140,7 @@ fn empty_bay(g: &mut Group, name: &str) -> Value {
     for f in TEXT.iter().chain(CHARGE_ENERGY.iter()).chain(OTHER.iter()) {
         item.set(f, Value::Null);
     }
+    item.set("temp_c", Value::Null);
     item
 }
 
@@ -155,12 +159,15 @@ pub fn battery(g: &mut Group) -> Value {
                 let info: BATTERY_INFORMATION = b.control(IOCTL_BATTERY_QUERY_INFORMATION, &q)?;
                 let w = BATTERY_WAIT_STATUS { BatteryTag: tag, ..Default::default() };
                 let status: BATTERY_STATUS = b.control(IOCTL_BATTERY_QUERY_STATUS, &w)?;
-                Ok(Some((info, status)))
+                // Most batteries do not report a temperature (the query fails); that is not a problem.
+                let q = BATTERY_QUERY_INFORMATION { BatteryTag: tag, InformationLevel: BatteryTemperature, AtRate: 0 };
+                let temp: Option<u32> = b.control(IOCTL_BATTERY_QUERY_INFORMATION, &q).ok();
+                Ok(Some((info, status, temp)))
             });
             match read {
-                Ok(Some((info, status))) => {
+                Ok(Some((info, status, temp))) => {
                     g.got(());
-                    batteries.push(entry(&name, &info, &status));
+                    batteries.push(entry(&name, &info, &status, temp));
                 }
                 Ok(None) => batteries.push(empty_bay(g, &name)),
                 Err(e) if error_code(&e) == ERROR_NO_SUCH_DEVICE => batteries.push(empty_bay(g, &name)),
@@ -193,7 +200,7 @@ mod tests {
         let info = BATTERY_INFORMATION { Chemistry: *b"LION", DesignedCapacity: 62115, FullChargedCapacity: 52496,
                                          CycleCount: 238, ..Default::default() };
         let status = BATTERY_STATUS { PowerState: BATTERY_DISCHARGING, Capacity: 32023, Voltage: 14862, Rate: -34614 };
-        let v = entry("BAT0", &info, &status);
+        let v = entry("BAT0", &info, &status, Some(3046));
         let get = |k: &str| v.get(k).cloned().unwrap_or_else(|| panic!("no {}", k));
         assert_eq!(get("percent"), Value::Int(61));
         assert_eq!(get("energy_now_uwh"), Value::Int(32_023_000));
@@ -203,17 +210,20 @@ mod tests {
         assert_eq!((get("status"), get("technology"), get("cycle_count")),
                    (Value::from("Discharging"), Value::from("LION"), Value::Int(238)));
         assert_eq!((get("charge_now_uah"), get("current_ua"), get("health")), (Value::Null, Value::Null, Value::Null));
+        assert_eq!(get("temp_c"), Value::Float(31.45)); // 304.6 K
 
         // unknown values, a relative gauge, no cycle counter, on AC and not charging
         let info = BATTERY_INFORMATION { Capabilities: BATTERY_CAPACITY_RELATIVE, FullChargedCapacity: 100, ..Default::default() };
         let status = BATTERY_STATUS { PowerState: 1 | BATTERY_CRITICAL, Capacity: 7, Voltage: BATTERY_UNKNOWN_VOLTAGE,
                                       Rate: BATTERY_UNKNOWN_RATE as i32 };
-        let v = entry("BAT1", &info, &status);
+        let v = entry("BAT1", &info, &status, Some(0));
         let get = |k: &str| v.get(k).cloned().unwrap();
         assert_eq!((get("percent"), get("energy_now_uwh"), get("voltage_uv"), get("power_uw"), get("cycle_count")),
                    (Value::Int(7), Value::Null, Value::Null, Value::Null, Value::Null));
         assert_eq!((get("status"), get("capacity_level"), get("technology")),
                    (Value::from("Not charging"), Value::from("Critical"), Value::Null));
+        assert_eq!(get("temp_c"), Value::Null); // 0: no temperature
+        assert_eq!(entry("BAT2", &info, &status, None).get("temp_c"), Some(&Value::Null));
     }
 
     #[test]

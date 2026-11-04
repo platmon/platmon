@@ -46,6 +46,7 @@ pub fn battery(g: &mut Group) -> Value {
             let mut item = obj(vec![("name", name.as_str().into()), ("present", Value::Null), ("percent", Value::Null)]);
             for t in TEXT { item.set(t, Value::Null); }
             for (_, f) in CHARGE_ENERGY.iter().chain(SIGNED.iter()).chain(UNSIGNED.iter()) { item.set(f, Value::Null); }
+            item.set("temp_c", Value::Null);
             let present = attr(g, &d, &attrs, name, "present", flag);
             item.set("present", present.clone());
             if present != Value::Bool(false) { // an empty bay: what follows is not its reading
@@ -63,6 +64,9 @@ pub fn battery(g: &mut Group) -> Value {
                     let v = attr(g, &d, &attrs, name, t, enum_text);
                     item.set(t, v);
                 }
+                // tenths of a degree Celsius, signed: a gauge driver's cell or pack sensor (ACPI batteries have none)
+                let temp = attr(g, &d, &attrs, name, "temp", |v| py_int(v).map(|t| Value::Float(t as f64 / 10.0)));
+                item.set("temp_c", temp);
             }
             g.got(());
             batteries.push(item);
@@ -129,7 +133,7 @@ mod tests {
             r#""percent":89,"status":"Not charging","capacity_level":"Normal","technology":"Li-ion","health":null,"#,
             r#""charge_now_uah":3026000,"charge_full_uah":3400000,"charge_full_design_uah":4023000,"energy_now_uwh":null,"#,
             r#""energy_full_uwh":null,"energy_full_design_uwh":null,"current_ua":0,"power_uw":null,"voltage_uv":16436000,"#,
-            r#""cycle_count":237}],"external":[]}"#));
+            r#""cycle_count":237,"temp_c":null}],"external":[]}"#));
     }
 
     #[test]
@@ -142,6 +146,22 @@ mod tests {
         let got: Vec<String> = ["energy_now_uwh", "energy_full_uwh", "power_uw", "current_ua", "charge_now_uah", "cycle_count"]
             .iter().map(|k| text(&b, k)).collect();
         assert_eq!(got, ["27000000", "50000000", "13680000", "-1200000", "null", "null"]);
+    }
+
+    #[test]
+    fn a_gauge_temperature_is_in_degrees_celsius() {
+        for (raw, want) in [("312", "31.2"), ("-45", "-4.5"), ("300", "30.0")] {
+            let root = Root::new(0);
+            supplies(&root, &[("bq27411-0", &[("type", "Battery"), ("present", "1"), ("capacity", "77"), ("temp", raw)])]);
+            let (data, status) = observe_battery();
+            assert_eq!(status.to_string(false), OK);
+            assert_eq!(text(&first_battery(&data), "temp_c"), want);
+        }
+        let root = Root::new(0);
+        supplies(&root, &[("bq27411-0", &[("type", "Battery"), ("present", "1"), ("temp", "warm")])]);
+        let (data, status) = observe_battery();
+        assert_eq!(text(&first_battery(&data), "temp_c"), "null");
+        assert!(status.to_string(false).contains(r#"{"target":"bq27411-0.temp","reason":"invalid_data"}"#), "{}", status.to_string(false));
     }
 
     #[test]
@@ -176,7 +196,7 @@ mod tests {
         assert_eq!(first_battery(&data).to_string(false), concat!(r#"{"name":"BAT2","present":false,"percent":null,"status":null,"#,
             r#""capacity_level":null,"technology":null,"health":null,"charge_now_uah":null,"charge_full_uah":null,"#,
             r#""charge_full_design_uah":null,"energy_now_uwh":null,"energy_full_uwh":null,"energy_full_design_uwh":null,"#,
-            r#""current_ua":null,"power_uw":null,"voltage_uv":null,"cycle_count":null}"#));
+            r#""current_ua":null,"power_uw":null,"voltage_uv":null,"cycle_count":null,"temp_c":null}"#));
     }
 
     #[test]

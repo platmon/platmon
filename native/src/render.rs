@@ -322,6 +322,7 @@ fn battery_lines(obs: Option<&Value>) -> R<Vec<String>> {
         }
         if has(b, "power_uw") { parts.push(format!("{} W", f(num(&b["power_uw"])? / 1e6, 2))); }
         if has(b, "cycle_count") { parts.push(format!("{} cycles", s(&b["cycle_count"]))); }
+        if has(b, "temp_c") { parts.push(format!("{}°C", f(num(&b["temp_c"])?, 1))); }
         if let (Some(full), Some(design)) = (full, design) {
             parts.push(format!("{}% of design", f(num(full)? * 100.0 / num(design)?, 0)));
         }
