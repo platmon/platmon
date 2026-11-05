@@ -171,7 +171,7 @@ fn network_line(i: &Value) -> R<String> {
 fn disk_line(d: &Value) -> R<String> {
     let r = key(d, "rates")?;
     let value = if truthy(Some(r)) {
-        format!("read {} ({}/s)  write {} ({}/s)  I/O time {}%{}", per_s(num(key(r, "read_bytes_per_s")?)?), f(num(key(r, "reads_per_s")?)?, 1),
+        format!("read {} ({}/s)  write {} ({}/s)  I/O time {} %{}", per_s(num(key(r, "read_bytes_per_s")?)?), f(num(key(r, "reads_per_s")?)?, 1),
                 per_s(num(key(r, "write_bytes_per_s")?)?), f(num(key(r, "writes_per_s")?)?, 1),
                 f(100.0 * num(key(r, "io_time_ratio")?)?, 1), window_text(d))
     } else {
@@ -198,9 +198,9 @@ fn counters_lines(st: &Value) -> R<Vec<String>> {
         if !res.is_empty() {
             let mut parts = Vec::new();
             for (name, r) in res {
-                let mut p = format!("{} some {}%", name, f(num(key(key(r, "some")?, "avg10")?)?, 1));
+                let mut p = format!("{} some {} %", name, f(num(key(key(r, "some")?, "avg10")?)?, 1));
                 if let Some(full) = r.get("full").filter(|v| truthy(Some(v))) {
-                    p += &format!(" full {}%", f(num(key(full, "avg10")?)?, 1));
+                    p += &format!(" full {} %", f(num(key(full, "avg10")?)?, 1));
                 }
                 parts.push(p);
             }
@@ -241,7 +241,7 @@ fn storage_lines(obs: Option<&Value>) -> R<Vec<String>> {
             let total = key(fs, "total_bytes")?;
             if !total.is_null() {
                 let (t, u) = (num(total)?, num(key(fs, "used_bytes")?)?);
-                let pct = if truthy(Some(total)) { format!(" ({}%)", f(100.0 * u / t, 0)) } else { String::new() };
+                let pct = if truthy(Some(total)) { format!(" ({} %)", f(100.0 * u / t, 0)) } else { String::new() };
                 out.push(format!("  {}  {} {}  used {}/{}{}  available {}", where_, s(key(fs, "fstype")?), dev, gib(u), gib(t), pct,
                                  gib(num(key(fs, "available_bytes")?)?)));
             } else {
@@ -312,7 +312,7 @@ fn battery_lines(obs: Option<&Value>) -> R<Vec<String>> {
         let or = |a: &str, c: &str| b.get(a).filter(|v| truthy(Some(v))).or_else(|| b.get(c).filter(|v| truthy(Some(v))));
         let (full, design) = (or("charge_full_uah", "energy_full_uwh"), or("charge_full_design_uah", "energy_full_design_uwh"));
         let mut parts = vec![
-            if has(b, "percent") { format!("{}%", s(&b["percent"])) }
+            if has(b, "percent") { format!("{} %", s(&b["percent"])) }
             else { b.get("capacity_level").filter(|v| truthy(Some(v))).map_or("charge n/a".into(), s) },
             b.get("status").filter(|v| truthy(Some(v))).map_or(String::new(), s),
         ];
@@ -322,9 +322,9 @@ fn battery_lines(obs: Option<&Value>) -> R<Vec<String>> {
         }
         if has(b, "power_uw") { parts.push(format!("{} W", f(num(&b["power_uw"])? / 1e6, 2))); }
         if has(b, "cycle_count") { parts.push(format!("{} cycles", s(&b["cycle_count"]))); }
-        if has(b, "temp_c") { parts.push(format!("{}°C", f(num(&b["temp_c"])?, 1))); }
+        if has(b, "temp_c") { parts.push(format!("{} °C", f(num(&b["temp_c"])?, 1))); }
         if let (Some(full), Some(design)) = (full, design) {
-            parts.push(format!("{}% of design", f(num(full)? * 100.0 / num(design)?, 0)));
+            parts.push(format!("{} % of design", f(num(full)? * 100.0 / num(design)?, 0)));
         }
         out.push(format!("  {}  {}", name, parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join("  ")));
     }
@@ -384,7 +384,7 @@ pub fn render(st: &Value, obs: Option<&Value>) -> R<String> {
         let freq = key(c, "freq")?;
         let freq = if truthy(Some(freq)) { format!("  {} MHz", pad_left(f(num(freq)? / 1e6, 0), 4)) } else { String::new() };
         let usage = num(key(c, "usage")?)?;
-        lines.push(format!("CPU{}{} {}%{}", pad_right(&s(key(c, "id")?), 3), bar(usage, 20), pad_left(f(usage, 1), 5), freq));
+        lines.push(format!("CPU{}{} {} %{}", pad_right(&s(key(c, "id")?), 3), bar(usage, 20), pad_left(f(usage, 1), 5), freq));
     }
     let note = cpu_note(st)?;
     if !note.is_empty() { lines.push(note); }
@@ -393,7 +393,7 @@ pub fn render(st: &Value, obs: Option<&Value>) -> R<String> {
         if !truthy(Some(g)) { continue; }
         let freq = if truthy(g.get("freq")) { format!("  {} MHz", pad_left(f(num(&g["freq"])? / 1e6, 0), 4)) } else { String::new() };
         let load = match g.get("usage") {
-            Some(u) if !u.is_null() => format!("{} {}%", bar(num(u)?, 20), pad_left(f(num(u)?, 1), 5)),
+            Some(u) if !u.is_null() => format!("{} {} %", bar(num(u)?, 20), pad_left(f(num(u)?, 1), 5)),
             _ => format!("{}    n/a", bar(0.0, 20)),
         };
         lines.push(format!("{}   {}{}", label, load, freq));
@@ -413,7 +413,7 @@ pub fn render(st: &Value, obs: Option<&Value>) -> R<String> {
     if truthy(Some(temps)) {
         let Value::Obj(items) = temps else { return Err(()) };
         let mut parts = Vec::new();
-        for (k, v) in items { parts.push(format!("{} {}°C", k, f(num(v)?, 1))); }
+        for (k, v) in items { parts.push(format!("{} {} °C", k, f(num(v)?, 1))); }
         lines.push(format!("TEMP  {}", parts.join("  ")));
     }
     let power = key(st, "power")?;
@@ -426,7 +426,7 @@ pub fn render(st: &Value, obs: Option<&Value>) -> R<String> {
     let Value::Arr(fans) = key(st, "fans")? else { return Err(()) };
     for fan in fans {
         let (rpm, pct) = (key(fan, "rpm")?, key(fan, "percent")?);
-        let vals: Vec<String> = [(!rpm.is_null()).then(|| format!("{} rpm", s(rpm))), (!pct.is_null()).then(|| format!("{}%", s(pct)))]
+        let vals: Vec<String> = [(!rpm.is_null()).then(|| format!("{} rpm", s(rpm))), (!pct.is_null()).then(|| format!("{} %", s(pct)))]
             .into_iter().flatten().collect();
         lines.push(format!("FAN   {}  {}", s(key(fan, "name")?), if vals.is_empty() { "n/a".into() } else { vals.join("  ") }));
     }

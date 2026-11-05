@@ -153,7 +153,7 @@ def test_network_and_disk_rows(steps):
     assert '<span class="muted">2.0 · 0.0</span>' in net
     assert "warming up" in net and "some_new_reason" in net  # no rate: the reason, not 0
     assert '<div class="tr idle">' not in net.split("eth0")[0].rsplit("</div>", 1)[-1]  # eth0 receives: not dimmed
-    assert "nvme0n1</span><span>3.0 MiB/s</span><span>512 B/s</span>" in dio and "4.0 · 0.5" in dio and "3.4%" in dio
+    assert "nvme0n1</span><span>3.0 MiB/s</span><span>512 B/s</span>" in dio and "4.0 · 0.5" in dio and "3.4 %" in dio
     assert "counter went backwards" in dio and "saturat" not in dio
 
 
@@ -165,7 +165,7 @@ def test_counters_absent_or_odd_show_nothing(steps):
 def test_storage_from_observations(steps):
     sto = steps["ok"]["sto"]
     assert steps["ok"]["obs_age"]["storage"] == "observed 95 s ago (not current)"  # the server's age, and stale says so
-    assert "1.0G / 4.0G · 25%" in sto and "3.0G free" in sto and "<b>" not in sto
+    assert "1.0G / 4.0G · 25 %" in sto and "3.0G free" in sto and "<b>" not in sto
     assert '/mnt/&#60;b&#62;x&#60;/b&#62;</span><span class="badge">ro</span><span class="muted">+60 more' in sto
     assert sto.index("/mnt/") < sto.index("/data")  # by usage, unknown capacity last
     assert "/bind/" not in sto  # dozens of bind mounts: counted, not listed
@@ -243,14 +243,14 @@ def test_battery_history(steps):
     µAh as the kernel counts it, shown in mAh."""
     hist = steps["ok"]["hist"]
     assert "<h3>Battery</h3>" in hist
-    assert "BAT1 charge</span><span>89%" in hist and "89% – 90%" in hist
+    assert "BAT1 charge</span><span>89 %" in hist and "89 % – 90 %" in hist
     assert "BAT1 charge now</span><span>3026 mAh" in hist
 
 
 def test_pressure_rows(steps):
     psi = steps["pressure"]["psi"]
-    assert "io</span><span>3.0%</span><span><span class=\"muted\">0.5%" in psi
-    assert "cpu</span><span>1.3%</span><span><span class=\"muted\">—" in psi  # no full for the CPU: undefined at the system level
+    assert "io</span><span>3.0 %</span><span><span class=\"muted\">0.5 %" in psi
+    assert "cpu</span><span>1.3 %</span><span><span class=\"muted\">—" in psi  # no full for the CPU: undefined at the system level
     assert steps["counters_absent"]["psi"] == ""
 
 

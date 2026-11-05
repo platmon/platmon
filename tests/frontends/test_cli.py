@@ -29,14 +29,14 @@ BARE = dict(FULL, platform="Linux", power_mode=None, gpu=None, temperature={}, p
 @pytest.mark.parametrize("expected", [
     "Jetson Orin   mode MAXN_SUPER   up 1d 01:01",
     "Ubuntu 22.04.5 LTS · kernel 5.15.199-tegra · aarch64 · host orin · L4T R36.5.2",
-    "12.5%  1728 MHz",
+    "12.5 %  1728 MHz",
     "CPU2  ",  # labelled by core id, not position (cpu1 offline)
-    "50.0%   306 MHz",
+    "50.0 %   306 MHz",
     "RAM   █████··············· 2.0G/8.0G",
     "SWAP  ",
-    "cpu 51.2°C",
+    "cpu 51.2 °C",
     "VDD_IN 4.82W",
-    "FAN   pwmfan  31%",
+    "FAN   pwmfan  31 %",
     "FAN   pwm_tach  1741 rpm",
 ])
 def test_render_full(expected):
@@ -155,7 +155,7 @@ def test_render_unreadable_gpu_clock_and_fan():
     """None means "could not read": no 0 MHz / 0 rpm, and no crash."""
     out = render(dict(FULL, gpu={"usage": 50.0, "freq": None, "max_freq": None},
                       fans=[{"name": "CPU fan", "rpm": None, "percent": None}]))
-    assert "GPU   " in out and "50.0%" in out and "MHz" not in out.split("GPU")[1].split("\n")[0]
+    assert "GPU   " in out and "50.0 %" in out and "MHz" not in out.split("GPU")[1].split("\n")[0]
     assert "FAN   CPU fan  n/a" in out
 
 
@@ -178,7 +178,7 @@ def test_render_cpu_warmup():
     out = render(dict(FULL, cpu=[], cpu_sampling=dict(SAMPLING, window_ms=None, unavailable=[
         {"id": 0, "reason": "warmup"}, {"id": 2, "reason": "warmup"}])))
     assert "CPU sampling: warming up" in out.split("\n")
-    assert "CPU0" not in out and "  0.0%" not in out.split("GPU")[0]  # no made-up 0 % bars
+    assert "CPU0" not in out and "  0.0 %" not in out.split("GPU")[0]  # no made-up 0 % bars
     assert "RAM   " in out and "GPU   " in out
 
 
@@ -232,7 +232,7 @@ def test_render_network_and_disk_io():
     assert out[i + 1:i + 4] == ["  eth0   rx 1.5 KiB/s  tx 0 B/s  2.0/0.4 pkt/s  window 1.000 s  errors 3/0 (rx/tx, total)",
                                 "  wlan0  warming up", "  x      new_code"]
     assert out[i + 4:] == ["IO    bytes/s per disk",
-                           "  nvme0n1  read 3.0 MiB/s (4.0/s)  write 512 B/s (0.5/s)  I/O time 3.4%  in flight 2",
+                           "  nvme0n1  read 3.0 MiB/s (4.0/s)  write 512 B/s (0.5/s)  I/O time 3.4 %  in flight 2",
                            "  sda      counter went backwards  in flight 0"]
     assert out[i - 1] == ""  # one blank line before, never two
 
@@ -254,7 +254,7 @@ def test_render_without_counters_is_unchanged(extra):
 def test_render_pressure_without_cpu_full():
     psi = {"resources": {"cpu": {"some": {"avg10": 1.25}, "full": None},
                          "io": {"some": {"avg10": 3.0}, "full": {"avg10": 0.5}}}}
-    assert render(dict(FULL, pressure=psi)).splitlines()[-1] == "PSI   cpu some 1.2%  io some 3.0% full 0.5%  (avg10, time stalled)"
+    assert render(dict(FULL, pressure=psi)).splitlines()[-1] == "PSI   cpu some 1.2 %  io some 3.0 % full 0.5 %  (avg10, time stalled)"
     assert render(dict(FULL, pressure={"resources": {}})) == render(FULL) == render(dict(FULL, pressure="odd"))
 
 
@@ -308,7 +308,7 @@ def test_storage_lines_and_ages():
         "partitions": [{"name": "p1", "disk": "nvme0n1", "mount_points": ["/"]}, {"name": "p2", "disk": "nvme0n1", "mount_points": []}]}}}}
     assert storage_lines(aged(body, 6)) == [
         "STORAGE  observed 10 s ago",
-        "  / +1 more  ext4 nvme0n1p1  used 1.0G/4.0G (25%)  available 3.0G",
+        "  / +1 more  ext4 nvme0n1p1  used 1.0G/4.0G (25 %)  available 3.0G",
         "  /data  btrfs 0:40  capacity unknown",
         "  nvme0n1: 2 partitions, 1 mounted"]
     assert body["groups"]["storage"]["observation"]["data_age_ms"] == 4000  # the answer itself is kept

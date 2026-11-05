@@ -77,7 +77,7 @@ Other filesystem, battery and Wi-Fi warnings use the cached Storage, Battery and
 while they are current; an empty bay or a disconnected interface raises nothing. Staying on Overview does
 not refresh those observations; open Storage, Network or Power & battery to fetch them. Their warnings
 disappear when the observation becomes stale. The Power & battery and Network views color the charge and
-the signal by the same levels.
+the signal by the same levels; the signal's bar runs from −90 dBm (empty) to −30 dBm (full) in both viewers.
 
 The **Resources, Network, Storage, Temperature** and
 **Power & battery** views show details and related recent history.

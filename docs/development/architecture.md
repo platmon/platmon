@@ -96,12 +96,15 @@ on a client machine without the server; it imports nothing from the project. The
 port of its plain renderer. The CLI keeps a copy of `VERSION`, checked by `tests/frontends/test_cli.py`.
 
 `frontends/ui-spec.json` holds the design tokens both clients share: the views and their labels, the
-status levels with their fallback thresholds, the connection states and the color roles. Each client
+system fields, the status levels with their fallback thresholds, the bar scales, the connection states
+and the color roles. Each client
 adapts them to its medium: the web page as `styles.css` custom properties (light and dark), `app.js`
 levels and the `index.html` tabs; the terminal as ANSI codes and views built from a copy in `cli.py`
 (`UI_SPEC`), so it stays one file. There is no generation step: `tests/frontends/test_ui_spec.py`
 checks every adapter, the server's `[thresholds]` defaults in `src/config.rs` and the brand roles in
-`assets/brand/brand-colors.json` against the spec. A design change starts in the spec.
+`assets/brand/brand-colors.json` against the spec. It also feeds one snapshot to both clients and
+compares their Needs attention entries, and rejects a reading written without a space before its unit.
+A design change starts in the spec.
 
 Clients request these routes from the same HTTP server. The requests below illustrate each client's
 role; clients poll independently, and the displayed order is not a shared schedule.
