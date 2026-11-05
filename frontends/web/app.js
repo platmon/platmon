@@ -399,7 +399,7 @@ function overviewRows(s) {
   metric('CPU', s.cpu.length + (s.cpu.length === 1 ? ' core' : ' cores'),
     cpus.length ? cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length : null, '%', LIMITS.cpu,
     `Mean of ${cpus.length} measured cores` + (note ? ' · ' + note : ''), 'resources');
-  metric('Memory', gib(m.total), pctOf(m.used, m.total), '%', LIMITS.memory, `${gib(m.used)} used · ${gib(m.total - m.used)} free`, 'resources');
+  metric('RAM', gib(m.total), pctOf(m.used, m.total), '%', LIMITS.memory, `${gib(m.used)} used · ${gib(m.total - m.used)} free`, 'resources');
   if (s.gpu) metric('GPU', mhz(s.gpu.freq), s.gpu.usage, '%', LIMITS.gpu, '', 'resources');
   metric('Root filesystem', gib(d.total), pctOf(d.used, d.total), '%', LIMITS.filesystem, `${gib(d.used)} used · ${gib(d.total - d.used)} free`, 'storage', '/');
   const temps = Object.entries(s.temperature).filter(([, value]) => Number.isFinite(value)).sort((a, b) => b[1] - a[1]);

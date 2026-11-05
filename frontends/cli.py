@@ -493,7 +493,7 @@ def metrics(s):
     m, d, g, n = s["memory"], s["disk"], s.get("gpu"), s.get("npu")
     out = [("CPU", sum(cpus) / len(cpus) if cpus else None, "%", LIMITS["cpu"], f"mean of {len(cpus)} cores"),
            ("RAM", 100 * m["used"] / m["total"] if m["total"] else None, "%", LIMITS["memory"],
-            f"{gib(m['used'])} / {gib(m['total'])}")]  # the web page's card order: CPU, Memory, GPU, disk
+            f"{gib(m['used'])} / {gib(m['total'])}")]  # the web page's card order: CPU, RAM, GPU, disk
     if g:
         out.append(("GPU", g["usage"], "%", LIMITS["gpu"], f"{g['freq'] / 1e6:.0f} MHz" if g.get("freq") else ""))
     if n:  # no [thresholds] entry sets levels for an NPU, so it is shown without one

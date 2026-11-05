@@ -148,6 +148,5 @@ def test_needs_attention_is_the_same_on_both(stats, obs, monkeypatch, tmp_path):
                                      str(case)], check=True, capture_output=True, text=True, encoding="utf-8").stdout)
     monkeypatch.setattr(cli, "LIMITS", dict(cli.LIMITS))
     cli.use_levels(levels)
-    # the web page's Overview card says Memory where the terminal's meter says RAM
-    terminal = [["Memory" if name == "RAM" else name, value, lv] for name, value, lv in cli.attention(stats, obs)]
+    terminal = [list(entry) for entry in cli.attention(stats, obs)]
     assert [[html.unescape(name), value, lv] for name, value, lv in web] == terminal
