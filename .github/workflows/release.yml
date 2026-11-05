@@ -49,13 +49,16 @@ jobs:
           from pathlib import Path
           import re
           from scripts.packaging.package import version
+          from scripts.packaging.package_windows import check_changelog
           release = version()
           tag = os.environ["GITHUB_REF_NAME"]
           match = re.fullmatch(r"v" + re.escape(release) + r"(?:-([1-9][0-9]*))?", tag)
           if not match:
               raise SystemExit("tag does not match the application VERSION")
-          if f"## {release} —" not in Path("CHANGELOG.md").read_text():
-              raise SystemExit("release has no changelog entry")
+          try:  # an entry, and it calls the Windows zip experimental
+              check_changelog(Path("CHANGELOG.md").read_text(encoding="utf-8"), release)
+          except ValueError as e:
+              raise SystemExit(str(e))
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write("version=" + release + "\n")
               output.write("revision=" + (match.group(1) or "1") + "\n")

@@ -1,12 +1,13 @@
 """The experimental Windows zip (scripts/packaging/package_windows.py); no Windows needed."""
 import hashlib
+import json
 import zipfile
 from pathlib import Path
 
 import pytest
 
 from scripts.packaging.package import ALLOCATOR_MARK, packaging_epoch, version
-from scripts.packaging.package_windows import build, check_binary, default_binary
+from scripts.packaging.package_windows import build, check_binary, check_changelog, default_binary
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -26,8 +27,11 @@ def exe(tmp_path):
 
 
 def output_with_sums(path):
+    """package.py's output as the zip builder finds it: BUILD.json, and SHA256SUMS with its line."""
     path.mkdir(parents=True)
-    (path / "SHA256SUMS").write_text("0" * 64 + "  platmon-x.tar.gz\n", encoding="utf-8")
+    (path / "BUILD.json").write_text('{"version": "x"}\n', encoding="utf-8")
+    build_sum = hashlib.sha256((path / "BUILD.json").read_bytes()).hexdigest()
+    (path / "SHA256SUMS").write_text("0" * 64 + f"  platmon-x.tar.gz\n{build_sum}  BUILD.json\n", encoding="utf-8")
     return path
 
 
@@ -49,8 +53,12 @@ def test_zip_contents_and_checksum(tmp_path, exe):
         # the service runs as LocalSystem: its files only where administrators alone can write
         assert "\\Program Files\\platmon\\platmon-server.exe" in readme and "Windows 10 was not checked" in readme
         assert all(i.date_time[0] >= 1980 and i.create_system == 0 for i in z.infolist())
-    lines = (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2 and lines[1] == f"{hashlib.sha256(target.read_bytes()).hexdigest()}  {target.name}"
+    sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    assert json.loads((out / "BUILD.json").read_text(encoding="utf-8")) == \
+        {"version": "x", "windows_server_sha256": {"x86_64": sha(exe)}}
+    # BUILD.json changed: its checksum line follows, and the zip's is added
+    assert (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines() == \
+        ["0" * 64 + "  platmon-x.tar.gz", f"{sha(out / 'BUILD.json')}  BUILD.json", f"{sha(target)}  {target.name}"]
 
 
 def test_repeated_builds_match(tmp_path, exe):
@@ -72,3 +80,15 @@ def test_refusals(tmp_path):
     build(out, tmp_path / "ok.exe")
     with pytest.raises(ValueError, match="already exists"):
         build(out, tmp_path / "ok.exe")
+
+
+def test_the_changelog_must_call_the_zip_experimental():
+    """The release workflow refuses a release whose entry does not (the owner's decision)."""
+    head = "# Changelog\n\n## 2.0.0 — 2026-11-10\n\n"
+    check_changelog(head + "- A Windows x86_64 zip, experimental: one laptop only.\n- rpm.\n", "2.0.0")
+    check_changelog(head + "- rpm.\n- The zip for\n  Windows is **experimental**.\n\n## 1.0.0 — x\n", "2.0.0")
+    for text, message in ((head + "- A Windows zip.\n- An experimental flag.\n", "must call"),
+                          (head + "- rpm.\n\n## 1.9.0 — x\n- Windows, experimental.\n", "must call"),
+                          (head, "must call"), ("# Changelog\n", "no changelog entry")):
+        with pytest.raises(ValueError, match=message):
+            check_changelog(text, "2.0.0")

@@ -5,10 +5,11 @@ platmon-VERSION-windows-x86_64-experimental.zip: the server built by CI's native
 Visual C++ runtime linked dynamically), the web page, platmon.ini listening on 127.0.0.1 only, the license
 and a README. No installer, no service registration, no Microsoft binaries (the owner's decisions,
 docs/development/remaining-work.md, "Windows build"). Its checksum is added to the SHA256SUMS package.py
-wrote.
+wrote, and the server's to its BUILD.json (whose own checksum line follows).
 """
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import time
@@ -135,17 +136,31 @@ def members(root, server, release):
     return files
 
 
+def check_changelog(text, release):
+    """The release's CHANGELOG.md section must call the Windows zip experimental (the owner's decision,
+    docs/development/remaining-work.md, "Windows build"): one entry names both. The release workflow runs it."""
+    start = text.find(f"## {release} —")
+    if start == -1:
+        raise ValueError("release has no changelog entry")
+    end = text.find("\n## ", start + 1)
+    entries = text[start:end if end != -1 else None].split("\n- ")
+    if not any("windows" in e.lower() and "experimental" in e.lower() for e in entries):
+        raise ValueError(f"the {release} changelog entry must call the Windows zip experimental")
+
+
 def build(output, binary=None, root=ROOT, epoch=None):
-    """Write the zip into `output` (package.py's directory, with its SHA256SUMS) and add its checksum."""
+    """Write the zip into `output` (package.py's directory, with its SHA256SUMS and BUILD.json), add its
+    checksum and the server's."""
     release = version(root)
     epoch = packaging_epoch(root) if epoch is None else epoch
     # zip times are local DOS times from 1980; the UTC fields of the epoch keep repeat builds equal
     stamp = max(time.gmtime(epoch)[:6], (1980, 1, 1, 0, 0, 0))
     server = check_binary(binary or default_binary(root))
     output = Path(output).resolve()
-    sums = output / "SHA256SUMS"
-    if not sums.is_file():
-        raise ValueError(f"{sums} not found: run package.py into {output} first")
+    sums, manifest = output / "SHA256SUMS", output / "BUILD.json"
+    for path in (sums, manifest):
+        if not path.is_file():
+            raise ValueError(f"{path} not found: run package.py into {output} first")
     target = output / f"platmon-{release}-windows-x86_64-experimental.zip"
     if target.exists():
         raise ValueError(f"{target} already exists; use a fresh output directory")
@@ -155,8 +170,14 @@ def build(output, binary=None, root=ROOT, epoch=None):
             info = zipfile.ZipInfo(top + name, date_time=stamp)
             info.compress_type, info.create_system = zipfile.ZIP_DEFLATED, 0  # 0: MS-DOS, no Unix modes
             archive.writestr(info, body)
-    with sums.open("a", encoding="utf-8", newline="\n") as f:
-        f.write(f"{hashlib.sha256(target.read_bytes()).hexdigest()}  {target.name}\n")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["windows_server_sha256"] = {"x86_64": hashlib.sha256(server).hexdigest()}
+    manifest.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    lines = [f"{sha(manifest)}  BUILD.json" if line.endswith("  BUILD.json") else line
+             for line in sums.read_text(encoding="utf-8").splitlines()]
+    sums.write_text("".join(f"{line}\n" for line in lines + [f"{sha(target)}  {target.name}"]),
+                    encoding="utf-8", newline="\n")
     return target
 
 

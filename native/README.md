@@ -674,8 +674,8 @@ Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d
 Not released and not in the support scope. The real-PC checks passed on 2026-11-01 but for two the owner
 accepted as known gaps, so the next release adds an experimental zip (the owner's decisions; the checks
 and their status: [remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26)).
-`scripts/packaging/package_windows.py` builds it from CI's binary into `package.py`'s output and adds it to
-`SHA256SUMS`: `platmon-VERSION-windows-x86_64-experimental.zip` with `platmon-server.exe`, the web page,
+`scripts/packaging/package_windows.py` builds it from CI's binary into `package.py`'s output, adds it to
+`SHA256SUMS` and the binary's SHA-256 to `BUILD.json` (`windows_server_sha256`): `platmon-VERSION-windows-x86_64-experimental.zip` with `platmon-server.exe`, the web page,
 `platmon.ini` with `bind = 127.0.0.1`, `LICENSE`, `LICENSE-MIT` (the Rust standard library and the crates)
 and a `README.txt` (the Visual C++ Redistributable it needs and does not include, running it, the
 service, what was and was not checked). No installer and no Microsoft binaries: the binary links the

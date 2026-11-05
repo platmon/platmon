@@ -44,7 +44,8 @@ notes. The Linux packages and their release gate are unchanged by it.
 **Since (owner, 2026-11-01):** the two checks this laptop cannot do (more than 64 CPUs, a discrete GPU's
 temperature) stay unchecked and are named in the zip's README instead of holding the release. The zip:
 `scripts/packaging/package_windows.py`, built by CI's `package` job and released from the next tag after
-1.7.0 (native/README.md, "Windows"). Its CHANGELOG entry must call it experimental.
+1.7.0 (native/README.md, "Windows"). Its CHANGELOG entry must call it experimental: the release workflow
+refuses a tag whose entry does not (`check_changelog` in `package_windows.py`).
 
 Real-PC checks (a laptop: Core Ultra 7 155H, Intel Arc iGPU, WD SN810 NVMe, Windows 11 26H2, Korean display
 language, non-admin unless stated). CI runs on a VM, which has none of these devices:
