@@ -4,6 +4,34 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+Draft for the next release; the version and date replace this heading when it is tagged.
+
+- **Experimental:** a Windows x86_64 zip of the server among the release files,
+  `platmon-VERSION-windows-x86_64-experimental.zip`: `platmon-server.exe`, the web page, a `platmon.ini`
+  listening on 127.0.0.1 only, the licenses and a README on running it by hand or as a Windows service. It is
+  not supported: checked in CI and on one laptop (Windows 11), not on Windows 10, on more than 64 CPUs or with
+  a discrete GPU's temperature. It needs the Visual C++ 2015-2022 Redistributable (x64), which it does not
+  include. No installer. A Wi-Fi link going down is reported as `unknown` instead of an RSSI error (#154).
+- `.rpm` packages are among the release files: `platmon` (x86_64, aarch64) and `platmon-cli` (noarch), from
+  the same servers as the `.deb` packages and in the same `SHA256SUMS`. There is no DNF repository and no
+  signing. `BUILD.json` also lists the Windows server's SHA-256.
+- Battery: `temp_c` (°C) in each battery's entry of the `battery` observation, from the `power_supply`
+  class's `temp` on Linux (fuel gauges; ACPI batteries have none, then `null`) and `BatteryTemperature` on
+  Windows. The web page, `/text` and the `platmon` command show it beside the cycle count.
+- **Changed text format:** `/text` and the `platmon` command put a space between a reading and its unit, as
+  the live terminal view and the web page now all do: `12.5 %`, `51.2 °C` (were `12.5%`, `51.2°C`). Scripts
+  that parse that text need the space. The JSON API does not change.
+- The web page and the `platmon` live view agree on their design: the views, status levels, colors and
+  system fields are defined once in `frontends/ui-spec.json` and checked in both. The live view's Network view
+  draws the Wi-Fi signal as a bar from −90 to −30 dBm as the web page does; its Overview lists CPU, RAM, GPU,
+  disk in the web page's order; Needs attention no longer lists filesystems from a stale storage observation;
+  the web page's Memory card is named RAM.
+- Internal: the soak and deployment tools run the candidate in the login user's systemd without sudo
+  (#150), count a candidate's descriptors when one closes during the reading (#152) and judge a soak's
+  settled memory by a segment baseline and its growth (#153).
+
 ## 1.7.0 — 2026-10-31
 
 - **Breaking:** the Python server (`platmon.py`, `collector/`, `runtime/`), deprecated in 1.5.0, is
