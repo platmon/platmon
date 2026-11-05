@@ -172,12 +172,12 @@ def build(output, binary=None, root=ROOT, epoch=None):
             archive.writestr(info, body)
     data = json.loads(manifest.read_text(encoding="utf-8"))
     data["windows_server_sha256"] = {"x86_64": hashlib.sha256(server).hexdigest()}
-    manifest.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    # bytes, not write_text(newline=) (Python 3.10+): LF on every host
+    manifest.write_bytes((json.dumps(data, indent=2, sort_keys=True) + "\n").encode())
     sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
     lines = [f"{sha(manifest)}  BUILD.json" if line.endswith("  BUILD.json") else line
              for line in sums.read_text(encoding="utf-8").splitlines()]
-    sums.write_text("".join(f"{line}\n" for line in lines + [f"{sha(target)}  {target.name}"]),
-                    encoding="utf-8", newline="\n")
+    sums.write_bytes("".join(f"{line}\n" for line in lines + [f"{sha(target)}  {target.name}"]).encode())
     return target
 
 
