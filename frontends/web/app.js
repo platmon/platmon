@@ -10,7 +10,7 @@ const FORMATS = {per_s_decimals: 0, size_units: ['G', 'M', 'K']};
 // bytes in the unit that fits them: 45.1G, 14M, 512K (a 100 MiB partition is not "0.1G")
 const size = b => {
   for (const [i, unit] of FORMATS.size_units.entries()) if (b >= 2 ** (30 - 10 * i)) return (b / 2 ** (30 - 10 * i)).toFixed(i ? 0 : 1) + unit;
-  return b.toFixed(0) + 'B';
+  return b ? b.toFixed(0) + 'B' : '0';  // none at all needs no unit: "0 / 15.3G"
 };
 const SYSTEM_FIELDS = ['os', 'kernel', 'arch', 'hostname', 'l4t'];  // frontends/ui-spec.json system_fields
 const esc = v => String(v).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);

@@ -135,8 +135,8 @@ sequenceDiagram
     Note over HTTP,Consumer: Replay uses an independent cursor per stream
 ```
 
-The CLI keeps its own short sparkline history from polled stats; browser detail views request
-`/api/history`. Neither built-in viewer uses replay. Web assets require `[http] web = yes`, while
+The CLI keeps the last few polled interface rates to rank the Overview's busiest interfaces; browser
+detail views request `/api/history`. Neither built-in viewer uses replay. Web assets require `[http] web = yes`, while
 the API and `/text` also work with `web = no`. Replay consumers manage their own per-stream cursors
 and durable storage outside this service.
 

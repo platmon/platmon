@@ -41,6 +41,19 @@ API schema versions are independent of release versions.
   draws the Wi-Fi signal as a bar from −90 to −30 dBm as the web page does; its Overview lists CPU, RAM, GPU,
   disk in the web page's order; Needs attention no longer lists filesystems from a stale storage observation;
   the web page's Memory card is named RAM.
+- **Changed live view:** the `platmon` live view is quieter and keeps its rows in place. Its Overview is the web
+  Overview: CPU with its busiest core (`max CPU7 91.4 %`, `+N` more at the warning level), RAM, GPU, root
+  filesystem, the hottest temperature and the busiest interfaces in fixed columns, ranked over the last
+  ~10 s; the core grid, disk I/O, temperatures, power, pressure, storage and Wi-Fi lines and the sparklines
+  are gone from it (each is in its view). Two lines under the tabs are kept on every view for Needs
+  attention, a partial collection's reason or the not-current banner, and the tab of a view with a warning
+  is marked ▲. Bars are grey until their reading reaches the warning level. The header gives the data's age
+  only when it is late and no longer the OS, L4T or sample number; the footer gives the address only for a
+  remote service and no longer the version, which System now lists with the service it reads.
+  Temperatures and interfaces keep the server's order (loopback last) instead of being re-sorted every
+  second; cores at one shared clock say it once; Power & battery sums the rails and draws the fans' duty
+  as a bar; an observation's age shows only when it is no longer current. Below 60 columns (a phone's SSH
+  window) the name beside the logo, the indents and the bars shrink before any reading is cut.
 - The web page and the `platmon` live view name things alike: the Overview readings and the network and disk
   table columns are defined once in `frontends/ui-spec.json`, long on the web page (Root filesystem,
   ↓ Receive), short in the terminal (DISK, ↓ RX). Both write sizes in the unit that fits them (`14M / 102M`,

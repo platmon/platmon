@@ -21,15 +21,21 @@ platmon --view network           # start with the Network view
 ```
 
 On an interactive Linux/macOS terminal, the live UI fits the window and shares the
-web viewer's warning/critical thresholds from `[thresholds]`. It includes a
-**Needs attention** line, sparklines of the last 24 updates and an error banner
-over the previous data when the service cannot be reached.
+web viewer's warning/critical thresholds from `[thresholds]`. Under the view tabs, two
+lines are kept for status on every view: the **Needs attention** entries, a partial
+collection's reason, or the error banner over the previous data when the service cannot
+be reached; the tab of each view with a warning is marked ▲. Bars stay grey while their
+reading is fine and take the warning or critical color when it is not.
 
 It offers the same seven views as the web dashboard:
 **Overview, Resources, Network, Storage, Temperature, Power & battery, System**.
-Overview fills the available terminal with summary readings, cores and as many
-details as fit. Dedicated views expose full details, including disk I/O, pressure,
-Wi-Fi, TCP probe times, swap, temperatures, power rails and fans.
+Overview shows what the web Overview shows: CPU (with its busiest core), RAM, GPU,
+root filesystem and the hottest temperature, then the busiest interfaces; it fits
+80×24 and a phone's SSH window. Dedicated views expose full details, including cores,
+disk I/O, pressure, Wi-Fi, TCP probe times, swap, temperatures, power rails (with
+their sum) and fans; System also names the client's version and the service it reads.
+The header gives the data's age only when it is late, and the footer the service's
+address only when it is not this device.
 
 | Key | Action |
 | --- | --- |

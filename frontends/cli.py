@@ -158,6 +158,13 @@ def observed(o):
     return f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
 
 
+def stale_text(o):
+    """An observation's age as a view's caption only when it is no longer current: a group read every few
+    seconds is current by default, and a counting age beside it would be noise (render() keeps
+    observed_text, so --once and /text are unchanged)."""
+    return observed_text(o) if o and o.get("stale") else ""
+
+
 def observed_text(o):
     """observed() as a section's caption; empty when the observation reports no age."""
     return observed(o) if isinstance(o, dict) and isinstance(o.get("data_age_ms"), (int, float)) else ""
@@ -350,7 +357,7 @@ def render(s, obs=None):
 
 # ---------------------------------------------------------------------------------------------------------
 # Live terminal screen (interactive terminals only). Same data, wording and levels as the web page; no
-# requests beyond render()'s: the sparklines are the last SPARK_POINTS /api/stats answers kept here.
+# requests beyond render()'s; the Overview's busiest interfaces are ranked by the last few answers kept here.
 
 # Copy of frontends/ui-spec.json without "about" (the design tokens shared with the web page), so this file
 # stays standalone; tests/frontends/test_ui_spec.py checks it. The terminal adapts them below: views and
@@ -407,11 +414,11 @@ UI_SPEC = {
 LIMITS = {**{name: tuple(pair) for name, pair in UI_SPEC["levels"]["defaults"].items()}, "temperature": None}
 # Levels where the low reading is the bad one: warning above critical (native/src/config.rs LOW_LEVELS).
 LOW = tuple(UI_SPEC["levels"]["low_is_bad"])
-SPARK_POINTS = 24
 LABEL = {m["id"]: m["labels"][1] for m in UI_SPEC["metrics"]}  # the Overview readings' short labels: the terminal's
 COL = {key: labels[1] for key, labels in UI_SPEC["columns"].items()}  # the table columns' short labels
 PER_S = UI_SPEC["formats"]["per_s_decimals"]  # packets and operations per second
-WIDE = 100  # columns from which everything is on one screen; below, the overview and a few rows
+WIDE = 100  # columns from which bars and details are at full length
+NARROW = 60  # columns below which the screen gives up decoration first: the name beside the logo, indents, bar length
 ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 
 
@@ -427,7 +434,7 @@ def size(b):
     for unit, power in zip(UI_SPEC["formats"]["size_units"], (30, 20, 10)):
         if b >= 2 ** power:
             return f"{b / 2 ** power:.1f}{unit}" if power == 30 else f"{b / 2 ** power:.0f}{unit}"
-    return f"{b:.0f}B"
+    return f"{b:.0f}B" if b else "0"  # none at all needs no unit: "0 / 15.3G"
 
 
 def temp_limits():
@@ -475,11 +482,9 @@ class Style:
     def __init__(self, color=True, utf8=True):
         self.color = color
         (self.full, self.track, self.tick, self.rule, self.dot, self.cross, self.up, self.gap,
-         self.larr, self.rarr, self.uarr, self.darr,
-         self.sparks) = (("█", "░", "╎", "─", "●", "✕", "▲", "·", "←", "→", "↑", "↓",
-                          "▁▂▃▄▅▆▇█") if utf8 else
-                         ("#", "-", "|", "-", "*", "x", "!", ".", "<", ">", "^", "v",
-                          "_.-:=+*#"))
+         self.larr, self.rarr, self.uarr, self.darr, self.ell, self.ge) = (
+            ("█", "░", "╎", "─", "●", "✕", "▲", "·", "←", "→", "↑", "↓", "…", "≥") if utf8 else
+            ("#", "-", "|", "-", "*", "x", "!", ".", "<", ">", "^", "v", "...", ">="))
 
     def __call__(self, text, *names):
         codes = ";".join(self.CODES[n] for n in names if n)
@@ -509,25 +514,32 @@ def fit(line, width):
     return "".join(out) + ("\033[0m" if "\033" in line else "")
 
 
+def clip(st, line, width):
+    """line cut to width visible columns with an ellipsis where it was cut, so a shortened reading says so."""
+    return line if vlen(line) <= width else fit(line, max(0, width - len(st.ell))) + st(st.ell, "muted")
+
+
+def reading(st, v, unit, lv):
+    """A value and its unit in fixed columns ("  9.6 %  ", " 86.2 °C"): the decimal point stays put as the
+    value changes, so the bars after it never move."""
+    return st(f"{v:5.1f} {unit:<2}", "bold", tone(lv))
+
+
 def spread(left, right, width):
     return left + " " * max(1, width - vlen(left) - vlen(right)) + right
 
 
 def meter(st, pct, width, limits=None, ticks=True, lv=None):
-    """A bar on a 0–100 scale in its level's color; limits also mark the warning and critical points.
-    lv, when given, is the level to color it with (a low-is-bad reading's, see low_level)."""
+    """A bar on a 0–100 scale: grey while its level is ok and in the level's color from warning on, so a
+    quiet screen makes the one bar that needs attention stand out; the empty part is a step darker. limits
+    also mark the warning and critical points. lv, when given, is the level to color it with (a
+    low-is-bad reading's, see low_level)."""
     pct = max(0.0, min(float(pct), 100.0))
     n = round(width * pct / 100)
     marks = {min(width - 1, int(width * t / 100)) for t in limits} if limits and ticks else set()
     track = "".join(st.tick if i in marks else st.track for i in range(n, width))
-    return st(st.full * n, lv or (level(pct, limits) if limits else "ok")) + st(track, "muted")
-
-
-def spark(st, values, width, lv="ok"):
-    """The latest values on a fixed 0–100 scale (percent, °C), oldest left; a missing answer is a gap."""
-    vals = list(values)[-width:]
-    chars = "".join(st.gap if v is None else st.sparks[min(7, int(max(0.0, min(v, 100.0)) * 0.08))] for v in vals)
-    return " " * (width - len(vals)) + st(chars, lv)
+    lv = lv or (level(pct, limits) if limits else "ok")
+    return st(st.full * n, tone(lv) or "muted") + st(track, "muted", "dim")
 
 
 def metrics(s):
@@ -554,46 +566,54 @@ def hottest_first(s):
                   key=lambda kv: -kv[1])
 
 
-def busiest_first(interfaces):
-    """Interfaces by traffic (rx + tx), those without rates last; otherwise in the server's order."""
-    def traffic(i):
+def busiest_first(interfaces, traffic=None):
+    """Interfaces by traffic (rx + tx), those without rates last; otherwise in the server's order. traffic:
+    {name: recent mean of rx + tx} from the live view, so two interfaces with similar traffic do not swap
+    places every second; the current rates when there is none."""
+    def busy(i):
         r = i.get("rates")
-        return -(r["rx_bytes_per_s"] + r["tx_bytes_per_s"]) if r else 1
-    return sorted(interfaces, key=traffic)
+        if not r:
+            return 1
+        return -(traffic[i["name"]] if traffic and i["name"] in traffic else r["rx_bytes_per_s"] + r["tx_bytes_per_s"])
+    return sorted(interfaces, key=busy)
 
 
 def fs_pct(f):
     return 100 * f["used_bytes"] / f["total_bytes"] if f.get("total_bytes") else None
 
 
-def attention(s, obs):
+def attention(s, obs, views=False):
     """Readings at their warning level or worse, critical first, as on the web page: the Overview readings,
     every temperature sensor, and from current observations filesystems other than /, the batteries' charge
-    and the connected Wi-Fi signals, where the low reading is the bad one."""
-    out = [("/" if label == LABEL["filesystem"] else label, f"{v:.1f} {unit}", level(v, lim))
+    and the connected Wi-Fi signals, where the low reading is the bad one. views: each entry also names the
+    view that shows it (the tab the bar marks, the web page's link)."""
+    where = {LABEL["cpu"]: "resources", LABEL["memory"]: "resources", LABEL["gpu"]: "resources",
+             LABEL["filesystem"]: "storage"}
+    out = [("/" if label == LABEL["filesystem"] else label, f"{v:.1f} {unit}", level(v, lim), where.get(label, "resources"))
            for label, v, unit, lim, _ in metrics(s) if v is not None and label != LABEL["temperature"]]
-    out += [(k, f"{v:.1f} °C", level(v, temp_limits())) for k, v in hottest_first(s)]
+    out += [(k, f"{v:.1f} °C", level(v, temp_limits()), "thermal") for k, v in hottest_first(s)]
     data, o = group_data(obs, "storage")
     for f in (data or {}).get("filesystems") or [] if o and not o.get("stale") else []:
         pct = fs_pct(f)
         if pct is not None and not any(p["path"] == "/" for p in f["mount_points"]):
-            out.append((f["mount_points"][0]["path"], f"{pct:.0f} %", level(pct, LIMITS["filesystem"])))
+            out.append((f["mount_points"][0]["path"], f"{pct:.0f} %", level(pct, LIMITS["filesystem"]), "storage"))
     out += low_attention(obs)
-    return sorted((a for a in out if a[2] != "ok"), key=lambda a: a[2] != "crit")
+    out = sorted((a for a in out if a[2] != "ok"), key=lambda a: a[2] != "crit")
+    return out if views else [a[:3] for a in out]
 
 
 def low_attention(obs):
-    """(name, value, level) of the batteries' charge and connected Wi-Fi signals; a stale observation is
-    not a current reading, so it raises nothing."""
+    """(name, value, level, view) of the batteries' charge and connected Wi-Fi signals; a stale observation
+    is not a current reading, so it raises nothing."""
     out = []
     battery, o = group_data(obs, "battery")
     for b in (battery or {}).get("batteries") or [] if o and not o.get("stale") else []:
         if b.get("present") is not False and isinstance(b.get("percent"), (int, float)):
-            out.append((b["name"], f"{b['percent']} %", level_of("battery", b["percent"])))
+            out.append((b["name"], f"{b['percent']} %", level_of("battery", b["percent"]), "power"))
     wifi, o = group_data(obs, "wifi")
     for i in (wifi or {}).get("interfaces") or [] if o and not o.get("stale") else []:
         if i.get("connected") is True and isinstance(i.get("signal_dbm"), (int, float)):
-            out.append((i["name"], f"{i['signal_dbm']} dBm", level_of("wifi", i["signal_dbm"])))
+            out.append((i["name"], f"{i['signal_dbm']} dBm", level_of("wifi", i["signal_dbm"]), "network"))
     return out
 
 
@@ -647,26 +667,33 @@ def next_offset(keys, offset, page):
     return max(0, offset)
 
 
-def tabbar(st, width, view):
+def tabbar(st, width, view, marks=None):
     """The views on one line, the active one marked, in the header's rule line: the widest label set that
-    fits, and the position alone when even the shortest does not. Without color the active label is
-    bracketed, so it stays visible in a plain terminal."""
+    fits, and the position alone when even the shortest does not. marks: {view: level} of the views whose
+    readings need attention, drawn with the attention sign in their level's color, so the tab says where
+    to look. Without color the active label is bracketed, so it stays visible in a plain terminal."""
+    marks = marks or {}
     for size, gap in enumerate(("   ", "   ", " ", " ")):  # the shortest labels also give up their spacing
-        cells = [st(f"{n} {VIEW_LABELS[name][size]}" if st.color else f"[{n} {VIEW_LABELS[name][size]}]",
-                    "ok", "bold", "under") if name == view else st(f"{n} {VIEW_LABELS[name][size]}", "muted")
-                 for n, name in enumerate(VIEWS, 1)]
+        cells = []
+        for n, name in enumerate(VIEWS, 1):
+            text = f"{st.up if name in marks else ''}{n} {VIEW_LABELS[name][size]}"
+            if name == view:
+                cells.append(st(text if st.color else f"[{text}]", "ok", "bold", "under"))
+            else:
+                cells.append(st(text, marks[name], "bold") if name in marks else st(text, "muted"))
         line = "  " + gap.join(cells)
         if vlen(line) <= width:
             return line
     return st(f"  {VIEWS.index(view) + 1}/{len(VIEWS)} {VIEW_LABELS[view][2]} {st.larr}/{st.rarr}", "ok", "bold")
 
 
-def core_cell(st, c):
-    """One core as the wide Overview and the Resources view draw it: id, bar, usage and clock."""
+def core_cell(st, c, clock=True):
+    """One core as the Resources view draws it: id, bar, usage and, unless every core runs at the same
+    clock (then the title says it once), its clock."""
     lv = tone(level(c["usage"], LIMITS["cpu"]))
     freq = f"{c['freq'] / 1e6:4.0f}" if c.get("freq") else "    "
     return (st(f"{c['id']:>4} ", lv or "muted", "bold" if lv else None) + meter(st, c["usage"], 8, LIMITS["cpu"], False)
-            + st(f" {c['usage']:5.1f} %", lv, "bold" if lv else None) + st(f" {freq}", "muted"))
+            + st(f" {c['usage']:5.1f} %", lv, "bold" if lv else None) + (st(f" {freq}", "muted") if clock else ""))
 
 
 def mhz(hz):
@@ -699,9 +726,10 @@ class View:
     """What a view body draws with: the data, the terminal width and the style, plus the layout helpers
     the sections share."""
 
-    def __init__(self, s, obs, width, st, history):
-        self.s, self.obs, self.width, self.st, self.history = s, obs, width, st, history
+    def __init__(self, s, obs, width, st, status):
+        self.s, self.obs, self.width, self.st, self.status = s, obs, width, st, status
         self.wide = width >= WIDE
+        self.bar = 20 if self.wide else 10 if width >= NARROW else 8  # bars are the first to shrink
 
     def title(self, name, right=""):
         left = self.st(f"  {name}", "muted", "bold")
@@ -751,135 +779,68 @@ class View:
             out.append(self.st(f"    +{len(disks) - MAX_ROWS} more disks (all in /api/stats)", "muted"))
         return out
 
-    def meter_row(self, label, pct, limits, detail, label_w=6):
-        """A reading as the Overview draws it, indented under a section title."""
-        bw = 20 if self.wide else 10
+    def meter_row(self, label, pct, limits, detail, label_w=6, indent=4, unit="%"):
+        """A reading as the Overview draws it: label, value, bar, detail. A narrow terminal shortens the bar
+        first and then cuts the detail at the edge, marked; it never drops the detail whole."""
+        head = self.st(" " * indent + f"{label:<{label_w}}", "muted")
         if pct is None:
-            return self.st(f"    {label:<{label_w}}", "muted") + self.st("unavailable", "muted")
+            return head + self.st("unavailable", "muted")
         lv = level(pct, limits) if limits else "ok"
-        return joined(self.width, [self.st(f"    {label:<{label_w}}", "muted"),
-                                   self.st(pad(f"{pct:.1f} %", 7), "bold", tone(lv)) + " ",
-                                   meter(self.st, pct, bw, limits), self.st(f"   {detail}", "muted")])
+        return clip(self.st, head + reading(self.st, pct, unit, lv) + " " + meter(self.st, pct, self.bar, limits)
+                    + (self.st(f"  {detail}", "muted") if detail else ""), self.width)
 
     def empty(self, text):
         return [self.st(f"  {text}", "muted")]
 
 
 def body_overview(v):
-    """Everything on one screen, as the live view has always drawn it: the readings the web Overview
-    shows, the cores, and as much of each detail kind as the terminal has room for."""
-    s, obs, st, width, wide, history = v.s, v.obs, v.st, v.width, v.wide, v.history
+    """The web Overview, line for line: the five readings (CPU with its busiest core) and the busiest
+    interfaces. No graphs and nothing else: every other reading is in its view (the tabs say which one needs
+    attention), so the Overview fits 80x24 and a phone without scrolling."""
+    s, st, width = v.s, v.st, v.width
     body = []
-    alerts = attention(s, obs)
-    if alerts:
-        body.append(st(f"  {st.up} NEEDS ATTENTION   ", tone(alerts[0][2]), "bold") + "  ".join(
-            st(f" {name} {value} ", "crit_bg") if lv == "crit" else st(f"{name} {value}", "warn", "bold") for name, value, lv in alerts))
-        body.append("")
-    note = collection_note(s)
-    if note:
-        body += [st(f"  {note}", "warn"), ""]
-
-    bw, dw, sw = (20, 22, SPARK_POINTS) if wide else (10, 16, 12 if width >= 62 else 0)
-    # The detail says which sensor is the hottest and of how many; at 16 columns "x86_pkg_temp · hottest
-    # of 38" became "x86_pkg_temp · h" while 22 columns of the terminal went unused. The column grows to
-    # what the details need, no further, so a board with short ones keeps the layout it had.
-    needed = max((len(detail) for *_, detail in metrics(s)), default=0) + 2  # +2: a gap before the spark
-    dw = max(dw, min(needed, width - (2 + 6 + 7 + 1 + bw + 2 + sw)))
-    if wide:
-        body.append(pad(v.title("OVERVIEW"), 2 + 6 + 7 + 1 + bw + 2 + dw) + st(f"last {SPARK_POINTS} updates", "muted"))
+    cpus = [c for c in s["cpu"] if isinstance(c.get("usage"), (int, float))]
     for label, value, unit, lim, detail in metrics(s):
-        if value is None:
-            body.append(st(f"  {label:<6}", "muted") + st("unavailable", "muted"))
+        if label == "NPU":  # no level and not on the web Overview: Resources shows it
             continue
-        lv = level(value, lim)
-        body.append(st(f"  {label:<6}", "muted") + st(pad(f"{value:.1f} {unit}", 7), "bold", tone(lv)) + " "
-                    + meter(st, value, bw, lim) + "  " + st(pad(detail[:dw], dw), "muted")
-                    + (spark(st, history.get(label, ()), sw, lv) if sw else ""))
-    body.append("")
-
-    if s["cpu"]:
-        cell = 25 if wide else 14  # the cells as drawn below: "  7 ████  91 %" is 14 columns
-        cols = max(1, (width + 3) // (cell + 3)) if wide else max(1, (width + 1) // (cell + 1))
-        cells = []
-        for c in s["cpu"]:
-            if wide:
-                cells.append(core_cell(st, c))
-            else:
-                lv = tone(level(c["usage"], LIMITS["cpu"]))
-                cells.append(st(f"{c['id']:>3} ", lv or "muted") + meter(st, c["usage"], 4, LIMITS["cpu"], False)
-                             + st(f" {c['usage']:3.0f} %", lv))
-        if wide:
-            body.append(v.title("CORES", f"%  ·  MHz  ·  {len(s['cpu'])} measured"))
-        sep = "   " if wide else " "
-        body += [sep.join(cells[i:i + cols]) for i in range(0, len(cells), cols)]
+        if label == LABEL["cpu"] and cpus:
+            busy = max(cpus, key=lambda c: c["usage"])
+            lv = tone(level(busy["usage"], lim))
+            more = sum(1 for c in cpus if c is not busy and level(c["usage"], lim) != "ok")
+            detail = (st(f"max CPU{busy['id']} {busy['usage']:.1f} %", lv or "muted", "bold" if lv else None)
+                      + (st(f"  +{more} {st.ge}{lim[0]:g} %", "muted") if more else ""))
+        else:
+            detail = st(detail, "muted")
+        body.append(v.meter_row(label, value, lim, "", indent=2, unit=unit) if value is None else
+                    clip(st, st(f"  {label:<6}", "muted") + reading(st, value, unit, level(value, lim)) + " "
+                         + meter(st, value, v.bar, lim) + "  " + detail, width))
     if cpu_note(s):
         body.append(st(f"  {cpu_note(s)}", "muted"))
     body.append("")
 
     net = s.get("network") if isinstance(s.get("network"), dict) else {}
-    ifaces = busiest_first(net.get("interfaces") if isinstance(net.get("interfaces"), list) else [])
-    if not wide:
-        ifaces = [i for i in ifaces if i["name"] != "lo"]
-    shown = ifaces[:MAX_ROWS if wide else 2]
-    name_w = 4 + max([len(i["name"]) for i in shown] + [6]) + 2
-    widths = [max(26, name_w), 12, 14, 18, 15] if wide else [max(18, name_w), 11, 12]
+    ifaces = [i for i in busiest_first(net.get("interfaces") if isinstance(net.get("interfaces"), list) else [],
+                                       v.status.get("traffic")) if i["name"] != "lo"]
+    if ifaces:
+        def block(i):  # the rates in fixed columns, so a changing value never moves the next interface
+            r = i.get("rates")
+            if not r:
+                return st(f"{i['name']} " + RATE_REASONS.get(i.get("reason"), str(i.get("reason"))), "muted")
+            idle = not r["rx_bytes_per_s"] and not r["tx_bytes_per_s"]
+            text = (f"{i['name']} " + st(st.darr, "muted") + pad(per_s(r["rx_bytes_per_s"]), 11, True)
+                    + "  " + st(st.uarr, "muted") + pad(per_s(r["tx_bytes_per_s"]), 11, True))
+            return st(ANSI.sub("", text), "muted", "dim") if idle else text
 
-    if shown:
-        body.append(v.row(widths, ["  NETWORK", COL["rx"], COL["tx"], COL["packets"], COL["errors"]], ["muted bold"] + ["muted"] * 4)
-                    + (st("   this netns · err/drop = totals", "muted") if wide else ""))
-        body += [v.net_row(widths, i) for i in shown]
-        if len(ifaces) > len(shown):
-            body.append(st(f"    +{len(ifaces) - len(shown)} more interfaces"
-                           + (" (all in /api/stats)" if wide else " · view 3 shows all"), "muted"))
-        body.append("")
-
-    dio = s.get("disk_io") if isinstance(s.get("disk_io"), dict) else {}
-    disks = dio.get("disks") if isinstance(dio.get("disks"), list) else []
-    if wide and disks:
-        body.append(v.row(widths, ["  DISK I/O", COL["read"], COL["write"], COL["ops"], COL["io_time"]], ["muted bold"] + ["muted"] * 4))
-        body += v.disk_rows(widths, disks)
-        body.append("")
-
-    if wide:
-        temps = hottest_first(s)
-        if temps:
-            body.append(v.kv("THERMAL", "   ".join(st(f"{k} {t:.1f}", tone(level(t, temp_limits()))) for k, t in temps) + st("  °C", "muted")))
-        power = [f"{k} {p:.2f} W" for k, p in (s.get("power") or {}).items()]
-        fans = [f"fan {f['name']} " + (" · ".join(x for x in (f["rpm"] is not None and f"{f['rpm']} rpm",
-                                                               f["percent"] is not None and f"{f['percent']} %") if x) or "n/a")
-                for f in s.get("fans") or []]
-        if power or fans:
-            body.append(v.kv("POWER", "   ".join(power + fans)))
-        psi = s.get("pressure")
-        res = psi.get("resources") if isinstance(psi, dict) else None
-        if isinstance(res, dict) and res:
-            body.append(v.kv("PRESSURE", "   ".join(f"{name} {r['some']['avg10']:.1f}" + (f" / {r['full']['avg10']:.1f}" if r.get("full") else "") + " %"
-                                                    for name, r in res.items()) + st("      some / full · avg10, time stalled", "muted")))
-
-    data, o = group_data(obs, "storage")
-    if data:
-        seen = st(observed_text(o) + " ", "muted")
-        fss = data.get("filesystems") or []
-        if wide:
-            path_w = max([len(f["mount_points"][0]["path"]) for f in fss] + [1]) + 2
-            for n, f in enumerate(fss):
-                m, pct = f["mount_points"], fs_pct(f)
-                where = pad(m[0]["path"], path_w) + ("(ro) " if m[0]["read_only"] else "") + (st(f"+{len(m) - 1} ", "muted") if len(m) > 1 else "")
-                dev = f["device"] or f"{f['major']}:{f['minor']}"
-                text = (meter(st, pct, 20, LIMITS["filesystem"]) + st(f"  {pct:3.0f} %", tone(level(pct, LIMITS["filesystem"])))
-                        + f"   {size(f['used_bytes'])} / {size(f['total_bytes'])}" + st(f"   {size(f['available_bytes'])} free   {f['fstype']} {dev}", "muted")
-                        if pct is not None else st(f"capacity unknown   {f['fstype']} {dev}", "muted"))
-                line = v.kv("STORAGE" if n == 0 else "", where + text)
-                body.append(spread(line, seen, width) if n == 0 else line)
-        else:
-            parts = [f"{f['mount_points'][0]['path']} " + st(f"{fs_pct(f):.0f} %", tone(level(fs_pct(f), LIMITS["filesystem"])))
-                     for f in fss if fs_pct(f) is not None]
-            if parts:
-                body.append(spread(v.kv("STORAGE", "   ".join(parts)), seen, width))
-    if wide:
-        for lines, label in ((wifi_lines(obs), "WIFI"), (battery_lines(obs), "BATT"), (probe_lines(obs), "TCP")):
-            for n, line in enumerate(lines[1:]):
-                body.append(v.kv(label if n == 0 else "", line.strip()))
+        line, shown = st("  NET   ", "muted"), 0
+        for i in ifaces:
+            rest = len(ifaces) - shown - 1
+            candidate = line + ("    " if shown else "") + block(i)
+            if shown and vlen(candidate) + (len(f"   +{rest}") if rest else 0) > width:
+                break
+            line, shown = candidate, shown + 1
+        if shown < len(ifaces):
+            line += st(f"   +{len(ifaces) - shown}", "muted")
+        body.append(clip(st, line, width))
     return body
 
 
@@ -889,9 +850,12 @@ def body_resources(v):
     s, st = v.s, v.st
     body = []
     if s["cpu"]:
-        body.append(v.title("CPU CORES", f"%  ·  MHz  ·  {len(s['cpu'])} measured"))
-        cells = [core_cell(st, c) for c in s["cpu"]]
-        cols = max(1, (v.width + 3) // 28)
+        clocks = {c.get("freq") for c in s["cpu"]}
+        same = len(clocks) == 1 and None not in clocks and 0 not in clocks  # the same value twelve times is said once
+        body.append(v.title("CPU CORES", f"{len(s['cpu'])} measured · all at {mhz(clocks.pop())}" if same
+                            else f"%  ·  MHz  ·  {len(s['cpu'])} measured"))
+        cells = [core_cell(st, c, clock=not same) for c in s["cpu"]]
+        cols = max(1, (v.width + 3) // (23 if same else 28))
         body += ["   ".join(cells[i:i + cols]) for i in range(0, len(cells), cols)]
     if cpu_note(s):
         body.append(st(f"  {cpu_note(s)}", "muted"))
@@ -901,14 +865,15 @@ def body_resources(v):
         body += ["", v.title("ACCELERATORS")]
         if g:  # a card whose driver publishes no load has a clock and no share
             body.append(v.meter_row("GPU", g.get("usage"), LIMITS["gpu"],
-                                    " · ".join(x for x in (mhz(g.get("freq")), g.get("max_freq") and f"max {mhz(g['max_freq'])}") if x)))
+                                    f"{g['freq'] / 1e6:.0f} / {mhz(g['max_freq'])}" if g.get("freq") and g.get("max_freq")
+                                    else mhz(g.get("freq"))))
         if n:  # no [thresholds] entry sets levels for an NPU, so it is shown without one
             body.append(v.meter_row("NPU", n.get("usage"), None, mhz(n.get("freq"))))
 
     m = s["memory"]
     body += ["", v.title("MEMORY")]
     body.append(v.meter_row("RAM", 100 * m["used"] / m["total"] if m["total"] else None, LIMITS["memory"],
-                            f"{size(m['used'])} / {size(m['total'])}   {size(m['total'] - m['used'])} free"))
+                            f"{size(m['used'])} / {size(m['total'])} · {size(m['total'] - m['used'])} free"))
     if m["swap_total"]:  # the web page gives swap the memory levels too
         body.append(v.meter_row("SWAP", 100 * m["swap_used"] / m["swap_total"], LIMITS["memory"],
                                 f"{size(m['swap_used'])} / {size(m['swap_total'])}"))
@@ -928,7 +893,8 @@ def body_network(v):
     connect times from the slower observations."""
     s, obs, st = v.s, v.obs, v.st
     net = s.get("network") if isinstance(s.get("network"), dict) else {}
-    ifaces = busiest_first(net.get("interfaces") if isinstance(net.get("interfaces"), list) else [])
+    # the server's order, loopback last: a row keeps its place whatever the traffic does
+    ifaces = sorted(net.get("interfaces") if isinstance(net.get("interfaces"), list) else [], key=lambda i: i["name"] == "lo")
     wifi, wifi_o = group_data(obs, "wifi")
     probe, probe_o = group_data(obs, "probe")
     wlans = wifi.get("interfaces") if isinstance(wifi, dict) else None
@@ -948,7 +914,7 @@ def body_network(v):
         body.append(st(pad("this netns · err/drop = totals", min(v.width, max(sum(widths), 32)), True), "muted"))
 
     if wlans:
-        body += ["", v.title("WI-FI", observed_text(wifi_o))]
+        body += ["", v.title("WI-FI", stale_text(wifi_o))]
         for i in wlans:
             if i.get("connected") is not True:  # never the last signal of a connection that ended
                 state = "not connected" if i.get("connected") is False else i.get("connection_state", "unknown")
@@ -967,7 +933,7 @@ def body_network(v):
                                + [st(f"   {e}", "muted") for e in extra]))
 
     if targets:
-        body += ["", v.title("TCP CONNECT", observed_text(probe_o))]
+        body += ["", v.title("TCP CONNECT", stale_text(probe_o))]
         where_w = max(len(target_text(t)) for t in targets) + 2
         for t in targets:
             where = target_text(t)
@@ -992,7 +958,7 @@ def body_storage(v):
 
     body = []
     if fss:
-        body.append(v.title("FILESYSTEMS", observed_text(o)))
+        body.append(v.title("FILESYSTEMS", stale_text(o)))
         path_w = max(len(f["mount_points"][0]["path"]) for f in fss) + 2
         cap_w = max(len(f"{size(f['used_bytes'])} / {size(f['total_bytes'])}") for f in fss
                     if f["total_bytes"] is not None) if any(f["total_bytes"] is not None for f in fss) else 0
@@ -1033,23 +999,24 @@ def body_storage(v):
 
 
 def body_thermal(v):
-    """The web Temperature tab: every sensor on the same 0-100 °C scale as the web page's bars. Power
-    rails, fans and the batteries are their own view, so a host with dozens of channels here does not
-    push what it draws and what it has left off the screen."""
+    """The web Temperature tab: every sensor on the same 0-100 °C scale as the web page's bars, in the
+    server's order, so a sensor keeps its line as temperatures cross; the hot ones carry their level's color
+    (and the tab its mark). Power rails, fans and the batteries are their own view, so a host with dozens of
+    channels here does not push what it draws and what it has left off the screen."""
     s, st = v.s, v.st
-    temps, limits = hottest_first(s), temp_limits()
+    temps = [(k, t) for k, t in (s.get("temperature") or {}).items() if isinstance(t, (int, float))]
+    limits = temp_limits()
     if not temps:
         return v.empty("No temperature readings · this board reports none")
 
-    body = [v.title("TEMPERATURE", f"bar scale 0-100 °C · warning from {limits[0]:g} °C" if limits
-                    else "bar scale 0-100 °C")]
+    body = [v.title("TEMPERATURE", f"0-100 °C · warning {limits[0]:g} · critical {limits[1]:g}" if limits
+                    else "0-100 °C")]
     name_w = max(len(k) for k, _ in temps) + 2  # sensor names can be long ("coretemp Package id 0")
-    bw = min(20 if v.wide else 11, max(6, v.width - 14 - name_w))
+    bw = min(20, max(6, v.width - 13 - name_w))  # nothing follows the bar here, so it takes the room there is
     for k, t in temps:
-        lv = level(t, limits)
-        body.append(joined(v.width, [st(f"    {k:<{name_w}}", "muted"),
-                                     st(pad(f"{t:.1f} °C", 9), "bold", tone(lv)),
-                                     " " + meter(st, t, bw, limits)]))
+        lv = tone(level(t, limits))
+        body.append(clip(st, st(f"    {k:<{name_w}}", lv or "muted", "bold" if lv else None)
+                         + reading(st, t, "°C", level(t, limits)) + " " + meter(st, t, bw, limits), v.width))
     return body
 
 
@@ -1067,19 +1034,28 @@ def body_power(v):
         return v.empty("No power rail, fan or battery readings · this board reports none")
 
     body = []
-    if power or fans:
+    if power:
         mode = f"mode {s['power_mode']}" if s.get("power_mode") else ""
-        body.append(v.title("POWER & FANS", mode))
-        name_w = max([len(k) for k, _ in power] + [len(f"fan {f['name']}") for f in fans]) + 2
+        body.append(v.title("POWER RAILS", mode))
+        name_w = max([len(k) for k, _ in power] + [len("sum of rails")]) + 2
         for k, p in power:
-            body.append(st(f"    {k:<{name_w}}", "muted") + f"{p:.2f} W")
+            body.append(st(f"    {k:<{name_w}}", "muted") + f"{p:6.2f} W")
+        if len(power) > 1:  # the last line in bold is the total, as a power meter reads
+            body.append(st("    " + st.rule * (name_w + 8), "muted"))
+            body.append(st(f"    {'sum of rails':<{name_w}}", "muted") + st(f"{sum(p for _, p in power):6.2f} W", "bold"))
+    if fans:
+        body += ([""] if body else []) + [v.title("FANS", "" if power else (f"mode {s['power_mode']}" if s.get("power_mode") else ""))]
+        name_w = max(len(f["name"]) for f in fans) + 2
         for f in fans:
-            vals = " · ".join(x for x in (f["rpm"] is not None and f"{f['rpm']} rpm",
-                                          f["percent"] is not None and f"{f['percent']} %") if x) or "n/a"
-            body.append(st(f"    {'fan ' + f['name']:<{name_w}}", "muted") + vals)
+            if f["percent"] is not None:
+                rpm = st(f"  {f['rpm']} rpm", "muted") if f["rpm"] is not None else ""
+                body.append(clip(st, st(f"    {f['name']:<{name_w}}", "muted") + st(f"{f['percent']:3.0f} %  ", "bold")
+                                 + meter(st, f["percent"], v.bar) + rpm, v.width))
+            else:
+                body.append(st(f"    {f['name']:<{name_w}}", "muted") + (f"{f['rpm']} rpm" if f["rpm"] is not None else "n/a"))
     if cells or supplies:
         # the group's own cadence, so its age is its caption, as for the other observations
-        body += ([""] if body else []) + [v.title("BATTERY", observed_text(battery_o))]
+        body += ([""] if body else []) + [v.title("BATTERY", stale_text(battery_o))]
         name_w = max([len(b["name"]) for b in cells] + [0]) + 2
         for b in cells:
             if b.get("present") is False:
@@ -1109,16 +1085,19 @@ def body_power(v):
 
 
 def body_system(v):
-    """The web System tab: the platform, uptime and whatever the board reported about itself. The power
-    mode stays in Power & battery, as on the web page."""
+    """The web System tab: the platform, uptime and whatever the board reported about itself, then this
+    client: its version and the service it reads, which the header and footer leave out. The power mode
+    stays in Power & battery, as on the web page."""
     s, st = v.s, v.st
     system = s.get("system") if isinstance(s.get("system"), dict) else {}
     rows = [("Model", s["model"]), ("Platform", s["platform"]), ("Uptime", uptime_text(s["uptime"]))]
     rows += [(label, system[key]) for key, label in SYSTEM_ROWS if system.get(key)]
     # Board-specific fields keep their own key, as the web page adds them without rebuilding its rows.
     rows += [(key, value) for key, value in system.items() if value and key not in dict(SYSTEM_ROWS)]
-    label_w = max(len(label) for label, _ in rows) + 3
-    return [st(f"  {label:<{label_w}}", "muted") + str(value) for label, value in rows]
+    own = [("Version", VERSION), ("Service", f"{v.status['addr']} · every {v.status['interval']:g} s")]
+    label_w = max(len(label) for label, _ in rows + own) + 3
+    return ([st(f"  {label:<{label_w}}", "muted") + str(value) for label, value in rows]
+            + ["", v.title("PLATMON")] + [st(f"  {label:<{label_w}}", "muted") + value for label, value in own])
 
 
 # The web page's System rows, in its order; anything else the board sent follows under its own key.
@@ -1128,58 +1107,50 @@ BODIES = {"overview": body_overview, "resources": body_resources, "network": bod
           "storage": body_storage, "thermal": body_thermal, "power": body_power, "system": body_system}
 
 
-def screen(s, obs, width, height, st, status, history, view="overview", offset=0):
-    """The live view as lines of at most width columns and at most height lines.
-    status: state (live, partial, offline), age (seconds), error (explain() text or None), addr, interval.
-    history: label -> the latest values of that Overview reading (None for a missed answer).
-    view: which of VIEWS to draw; the tab bar names the others.
+def screen(s, obs, width, height, st, status, view="overview", offset=0):
+    """The live view as lines of at most width columns and at most height lines: the header, the tabs, the
+    status slot, the view's body and the footer, each where it always is.
+    status: state (live, partial, offline), age (seconds), error (explain() text or None), addr, interval,
+    and traffic ({interface: recent rx + tx}, optional) for the Overview's busiest interfaces.
+    view: which of VIEWS to draw; the tab bar names the others and marks those that need attention.
     offset: how far down the view's body to start, clamped here to what there is to show. The clamped
     offset and the page size go back in status["scroll"], so the caller scrolls by what was drawn."""
-    wide = width >= WIDE
+    wide, narrow = width >= WIDE, width < NARROW
     sys_ = s.get("system") or {}
-    uptime = f"up {uptime_text(s['uptime'])}"
 
     state = status["state"]
     color = UI_SPEC["states"][state]
-    sample = s.get("sample") if isinstance(s.get("sample"), dict) else {}
-    seq = f"#{sample['sequence']} · " if isinstance(sample.get("sequence"), int) and wide else ""
-    age = (f"data {status['age']:.0f} s old" if state == "offline" else
-           f"{status['age']:.1f} s ago" if wide else f"{status['age']:.1f} s")
-    head = [spread(st(" p_", "ok", "bold") + st(" platmon", "bold") + "   " + st(s["model"] if wide else sys_.get("hostname") or s["model"], "bold"),
-                   st(f"{st.dot} {state.upper()}", color) + st(f"  {seq}{age} ", "muted"), width),
-            st("             " + " · ".join(str(value) for value in (
-                ([sys_.get("hostname")] if wide else []) + [s["platform"], s["power_mode"] and f"mode {s['power_mode']}", uptime]
-                + ([sys_.get("os"), sys_.get("l4t") and f"L4T {sys_['l4t']}", sys_.get("arch")] if wide else [sys_.get("l4t") and f"L4T {sys_['l4t']}"]))
-                if value), "muted"),
-            tabbar(st, width, view)]
+    # The age only when it says something: older than two updates, or the last data of a lost service.
+    # A number that changes every second and means "fine" is noise next to the readings.
+    stale = state == "offline" or status["age"] > 2 * status["interval"]
+    name = s["model"] if wide else sys_.get("hostname") or s["model"]
+    meta = ([sys_.get("hostname")] if wide else [s["platform"]]) + [s["power_mode"], f"up {uptime_text(s['uptime'])}"]
+    alerts = attention(s, obs, views=True)
+    marks = {}
+    for *_, lv, where in alerts:
+        marks.setdefault(where, lv)  # critical entries come first
+    head = [spread(st(" p_", "ok", "bold") + ("  " if narrow else st(" platmon", "bold") + "   ") + st(name, "bold"),
+                   st(f"{st.dot} {state.upper()}", color) + (st(f"  data {status['age']:.0f} s old", "warn") if stale else "")
+                   + " ", width),
+            st((" " * (4 if narrow else 13)) + " · ".join(str(x) for x in meta if x), "muted"),
+            tabbar(st, width, view, marks)]
 
-    banner = []
-    if status.get("error"):
-        # Why the data is old and what to do about it are the whole point of the banner, so it wraps:
-        # a cut line loses the errno, the retry interval or the name of the script to run.
-        first, *rest = status["error"].split("\n")
-        lead = f"  {st.cross} NOT CURRENT  "
-        indent = " " * len(lead)
-        room = max(16, width - len(lead))
-        said = textwrap.wrap(f"{first} · retrying every {status['interval']:g} s", room) or [""]
-        banner.append(st(pad(lead + said[0], width), "crit_bg"))
-        banner += [st(pad(indent + line, width), "crit_bg") for line in said[1:]]
-        for r in rest:
-            banner += [st(indent + line, "crit") for line in textwrap.wrap(r.strip(), room)]
+    slot = status_slot(st, width, status, alerts, collection_note(s))
 
-    body = BODIES[view](View(s, obs, width, st, history))
+    body = BODIES[view](View(s, obs, width, st, status))
     while body and not body[-1]:
         body.pop()
     if status.get("error"):  # the last data, dimmed: shown as what it is, not as current
         body = [st(ANSI.sub("", line), "dim") for line in body]
 
+    local = status["addr"].rsplit(":", 1)[0].strip("[]") in ("localhost", "127.0.0.1", "::1")
+    where = "" if local else f"{status['addr']} · "  # this device needs no address: the header names it
     keys = (st("  ") + st("q", "bold") + st(" quit", "muted")
-            + (st(" · ", "muted") + st(f"1-7 {st.larr}/{st.rarr}", "bold") + st(" view", "muted") if width >= 60 else "")
+            + (st(" · ", "muted") + st("1-7", "bold") + st(" view", "muted") if width >= 36 else "")
             + (st(" · ", "muted") + st(f"{st.uarr}/{st.darr}", "bold") + st(" scroll", "muted") if width >= 80 else ""))
     foot = [st(st.rule * width, "muted"),
-            spread(keys, st((f"platmon {VERSION} · {status['addr']} · every {status['interval']:g} s" if wide
-                             else f"{VERSION} · {status['addr']} · {status['interval']:g} s") + " ", "muted"), width)]
-    room = max(1, height - len(head) - len(banner) - len(foot))
+            spread(keys, st(f"{where}every {status['interval']:g} s " if wide else f"{where}{status['interval']:g} s ", "muted"), width)]
+    room = max(1, height - len(head) - len(slot) - len(foot))
     status["scroll"] = (0, max(1, room - 1))
     if len(body) > room:  # the last line says what is out of sight and how to reach it
         page = room - 1
@@ -1193,7 +1164,41 @@ def screen(s, obs, width, height, st, status, history, view="overview", offset=0
                            st(f"  ·  {st.uarr}{st.darr} PgUp/PgDn Home/End scroll", "muted")])]
     # A terminal too short for the header, one line and the footer still gets only the lines it has:
     # drawing past the last row scrolls the screen and leaves the frame in pieces.
-    return [fit(line, width) for line in (head + banner + body + foot)[:max(height, 1)]]
+    return [fit(line, width) for line in (head + slot + body + foot)[:max(height, 1)]]
+
+
+def status_slot(st, width, status, alerts, note):
+    """The two lines under the tabs, on every view and always there, so nothing below them moves when they
+    fill or empty: a lost service, else a collection that read only part of what it should, else the
+    readings that need attention, else nothing. The lost service keeps every word of what failed and what
+    to do (an errno, a script name), so it may take more lines; it is the one case where the body moves,
+    and the body is old data then anyway."""
+    if status.get("error"):
+        first, *rest = status["error"].split("\n")
+        lead = f"  {st.cross} NOT CURRENT  "
+        indent = " " * len(lead)
+        room = max(16, width - len(lead))
+        said = textwrap.wrap(first, room) or [""]
+        lines = [st(pad(lead + said[0], width), "crit_bg")] + [st(pad(indent + line, width), "crit_bg") for line in said[1:]]
+        advice = " · ".join([f"retrying every {status['interval']:g} s"] + [r.strip() for r in rest])
+        lines += [st(indent + line, "crit") for line in textwrap.wrap(advice, room)]
+        return lines + [""] * (2 - len(lines))
+    lines = []
+    if note:
+        why = note[len("Collection: "):] if note.startswith("Collection: ") else note
+        lines.append(clip(st, st(f"  {st.up} PARTIAL  ", "warn", "bold") + st(why, "warn"), width))
+    if alerts:
+        lead = st(f"  {st.up} NEEDS ATTENTION   ", tone(alerts[0][2]), "bold")
+        chips = [st(f" {name} {value} ", "crit_bg") if lv == "crit" else st(f"{name} {value}", "warn", "bold")
+                 for name, value, lv, _ in alerts]
+        line, n = lead, 0
+        for chip in chips:  # whole entries only; what does not fit is counted
+            rest = len(chips) - n - 1
+            if n and vlen(line + "  " + chip) + (len(f"  +{rest}") if rest else 0) > width:
+                break
+            line, n = line + ("  " if n else "") + chip, n + 1
+        lines.append(clip(st, line + (st(f"  +{len(chips) - n}", "muted") if n < len(chips) else ""), width))
+    return (lines + ["", ""])[:2]
 
 
 class Terminal:
@@ -1277,15 +1282,15 @@ def live(addr, interval, fetch, first, view="overview"):
     """The live view on an interactive terminal: one request per interval as before, nothing in between.
     view: the first of VIEWS to draw; keys switch it without asking the service for anything more."""
     st = make_style(os.environ, sys.stdout.encoding)
-    history = {}
+    traffic = {}  # interface -> its last rx + tx rates, about 10 s of them, for the Overview's busiest order
 
     def remember(s):
-        seen = set()
-        for label, v, *_ in metrics(s):
-            history.setdefault(label, deque(maxlen=SPARK_POINTS)).append(v)
-            seen.add(label)
-        for label in history.keys() - seen:
-            history[label].append(None)
+        net = s.get("network") if isinstance(s.get("network"), dict) else {}
+        for i in net.get("interfaces") if isinstance(net.get("interfaces"), list) else []:
+            r = i.get("rates")
+            if r:
+                traffic.setdefault(i["name"], deque(maxlen=max(1, round(10 / interval)))).append(
+                    r["rx_bytes_per_s"] + r["tx_bytes_per_s"])
 
     (s, obs), got, error = first, time.monotonic(), None
     offset, page = 0, 1
@@ -1296,8 +1301,8 @@ def live(addr, interval, fetch, first, view="overview"):
             cols, rows = shutil.get_terminal_size()
             state = "offline" if error else "partial" if collection_note(s) else "live"
             status = {"state": state, "age": data_age(s, got, time.monotonic()), "error": error, "addr": addr,
-                      "interval": interval}
-            term.draw(screen(s, obs, cols - 1, rows, st, status, history, view, offset))  # cols - 1: never wraps the last column
+                      "interval": interval, "traffic": {k: sum(v) / len(v) for k, v in traffic.items()}}
+            term.draw(screen(s, obs, cols - 1, rows, st, status, view, offset))  # cols - 1: never wraps the last column
             offset, page = status["scroll"]  # what was drawn, so scrolling starts from what is on screen
             event = term.wait(deadline - time.monotonic())
             if event == "resize":
@@ -1314,8 +1319,6 @@ def live(addr, interval, fetch, first, view="overview"):
                 remember(s)
             except (OSError, ValueError) as e:  # lost while watching: keep the last data, keep retrying
                 error = explain(addr, e)
-                for values in history.values():
-                    values.append(None)
             deadline += interval
             if deadline < time.monotonic():  # a slow answer: start counting again, never catch up in bursts
                 deadline = time.monotonic() + interval
