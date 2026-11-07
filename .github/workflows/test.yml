@@ -44,6 +44,14 @@ jobs:
           python3 native/tools/equivalence/runtime_fixture.py "$SERVER"
           native/tools/equivalence/fixture.sh
           python3 native/tools/equivalence/live_http.py "$SERVER"
+      # The released fleet server, pinned by hash, reads this server's answers (native/README.md)
+      - name: Check the fleet server's contract (platmon-hub from PyPI)
+        env:
+          SERVER: native/target/x86_64-unknown-linux-musl/release/platmon-server
+        run: |
+          python3 -m venv "$RUNNER_TEMP/hub"
+          "$RUNNER_TEMP/hub/bin/pip" install --quiet --require-hashes -r native/tools/equivalence/hub-requirements.txt
+          "$RUNNER_TEMP/hub/bin/python" -I native/tools/equivalence/hub_contract.py "$SERVER"
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server

@@ -1,0 +1,4 @@
+# The released fleet server hub_contract.py checks this server against (Apache-2.0, no dependencies of its own).
+# Raise it with the Hub release that reads a changed answer; the hash is the PyPI wheel's.
+platmon-hub==1.1.1 \
+    --hash=sha256:fff2a40d5695e3ec8df23efbdbbaf0e8fe0bcde5ab9c49691bf208d18ff44d4a

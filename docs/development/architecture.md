@@ -73,8 +73,18 @@ See the [live API](../reference/api.md), [observations](../reference/observation
 | `src/platform/` | Clocks, random bytes, the listening socket and the stop request, per OS |
 | `src/harness.rs`, `tools/` | Commands and scripts for the equivalence checks, measurements and candidate deployments |
 
-Equivalence checks run in CI (`native` job); the Windows collector is checked by its unit tests and
+Equivalence checks run in CI (`native` job), with the fleet server's contract below; the Windows collector is checked by its unit tests and
 `tools/windows_smoke.py`. Build, support scope and results: [native/README.md](../../native/README.md).
+
+### The fleet server's contract
+
+platmon-hub is released separately and reads this server over HTTP; it pins no server version, so every
+change here must keep the released Hub reading it. CI's `native` job installs the Hub release that
+`native/tools/equivalence/hub-requirements.txt` pins (by its PyPI wheel hash) and runs
+`native/tools/equivalence/hub_contract.py` against the server it built: Hub's validators, a raw-capture
+Hub through a server restart, and its database afterwards ([native/README.md](../../native/README.md)). An
+answer the pinned Hub refuses fails the build, also after a `--bless`. Raise the pin when a Hub release
+reads a changed answer.
 
 ## Layers
 
