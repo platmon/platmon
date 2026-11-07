@@ -253,6 +253,8 @@ mod tests {
             }
             let cfg = config::load(text.map(|_| path.to_str().unwrap()), None).ok().unwrap();
             let got: Vec<(&str, f64)> = slow_groups(&cfg).into_iter().map(|g| (g, cfg.float(g, "interval"))).collect();
+            // a group this platform has no reader for is not started (processes on Windows)
+            let groups: Vec<(&str, f64)> = groups.into_iter().filter(|(g, _)| observe::GROUPS.contains(g)).collect();
             assert_eq!(got, groups, "{:?}", text);
             assert_eq!(cfg.flag("history", "enabled"), history, "{:?}", text);
         }
