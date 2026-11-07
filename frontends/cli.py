@@ -419,6 +419,12 @@ def low_level(v, limits):
     return "ok" if not limits else "crit" if v <= limits[1] else "warn" if v <= limits[0] else "ok"
 
 
+def level_of(name, v):
+    """A named reading's level against its LIMITS, low or high as UI_SPEC's low_is_bad says (LOW); the only
+    caller of low_level."""
+    return (low_level if name in LOW else level)(v, LIMITS[name])
+
+
 def tone(lv):
     """Text color for a level: ok text stays the terminal's own color."""
     return None if lv == "ok" else lv
@@ -546,11 +552,11 @@ def low_attention(obs):
     battery, o = group_data(obs, "battery")
     for b in (battery or {}).get("batteries") or [] if o and not o.get("stale") else []:
         if b.get("present") is not False and isinstance(b.get("percent"), (int, float)):
-            out.append((b["name"], f"{b['percent']} %", low_level(b["percent"], LIMITS["battery"])))
+            out.append((b["name"], f"{b['percent']} %", level_of("battery", b["percent"])))
     wifi, o = group_data(obs, "wifi")
     for i in (wifi or {}).get("interfaces") or [] if o and not o.get("stale") else []:
         if i.get("connected") is True and isinstance(i.get("signal_dbm"), (int, float)):
-            out.append((i["name"], f"{i['signal_dbm']} dBm", low_level(i["signal_dbm"], LIMITS["wifi"])))
+            out.append((i["name"], f"{i['signal_dbm']} dBm", level_of("wifi", i["signal_dbm"])))
     return out
 
 
@@ -916,7 +922,7 @@ def body_network(v):
                 body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), signal]
                                    + [st(f"   {e}", "muted") for e in extra]))
                 continue
-            lv = low_level(i["signal_dbm"], LIMITS["wifi"])
+            lv = level_of("wifi", i["signal_dbm"])
             weak, strong = UI_SPEC["scales"]["wifi_dbm"]  # the web page's bar scale
             body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), st(pad(signal, 9), tone(lv), "bold"),
                                          " " + meter(st, 100 * (i["signal_dbm"] - weak) / (strong - weak),
@@ -1045,7 +1051,7 @@ def body_power(v):
             charge = (f"{b['percent']} %" if b.get("percent") is not None
                       else b.get("capacity_level") or "charge n/a")
             detail = " · ".join(battery_readings(b))
-            lv = low_level(b["percent"], LIMITS["battery"]) if b.get("percent") is not None else "ok"
+            lv = level_of("battery", b["percent"]) if b.get("percent") is not None else "ok"
             head = [st(f"    {b['name']:<{name_w}}", "muted"), st(pad(charge, 7), tone(lv) or "bold", "bold" if tone(lv) else None)]
             bw = min(14 if v.wide else 8, max(6, v.width - 10 - name_w - vlen(charge) - vlen(detail)))
             bar = ["  " + meter(st, b["percent"], bw, LIMITS["battery"], lv=lv)] if b.get("percent") is not None else []

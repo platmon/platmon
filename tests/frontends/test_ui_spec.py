@@ -78,6 +78,24 @@ def test_level_defaults_are_the_servers_and_every_frontends():
     assert list(cli.LOW) == levels["low_is_bad"]
 
 
+def test_low_is_bad_readings_get_their_level_from_the_spec():
+    """A low-is-bad reading's level comes from one helper per frontend, which follows the spec's list: a
+    reading added to low_is_bad turns low on both, and no call picks the low or the high rule by hand."""
+    low = SPEC["levels"]["low_is_bad"]
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    assert json.loads(re.search(r"const LOW_IS_BAD = (\[.*?\]);", app).group(1).replace("'", '"')) == low
+    terminal = Path(cli.__file__).read_text(encoding="utf-8")
+    assert not re.findall(r".{20}\blowLevel\(", app)  # only levelOf picks lowLevel
+    assert not re.findall(r".{20}(?<!def )\blow_level\(", terminal)  # only level_of picks low_level
+    # what else reads a low-is-bad reading's limits only draws its bar (the ticks), colored by the level given
+    names = "|".join(low)
+    for line in re.findall(rf".*LIMITS\.(?:{names})\b.*", app) + re.findall(rf'.*LIMITS\["(?:{names})"\].*', terminal):
+        assert re.search(r"\b(?:bar|meter)\(.*\blv\b", line), line
+    for name in low:
+        warn, crit = SPEC["levels"]["defaults"][name]
+        assert [cli.level_of(name, v) for v in (warn + abs(warn - crit), warn, crit)] == ["ok", "warn", "crit"], name
+
+
 def test_roles_are_the_web_tokens_and_the_terminal_codes():
     light, dark = css_tokens()
     for role, value in SPEC["roles"].items():
