@@ -28,6 +28,9 @@ Draft for the next release; the version and date replace this heading when it is
   draws the Wi-Fi signal as a bar from −90 to −30 dBm as the web page does; its Overview lists CPU, RAM, GPU,
   disk in the web page's order; Needs attention no longer lists filesystems from a stale storage observation;
   the web page's Memory card is named RAM.
+- Packaging: `platmon-cli` breaks and replaces only the `platmon` releases before 1.7.0, which had the
+  command, instead of every release before its own version, so that rolling `platmon` back alone
+  (`apt install --allow-downgrades platmon=VERSION`) keeps the installed `platmon-cli`.
 - Internal: the soak and deployment tools run the candidate in the login user's systemd without sudo
   (#150), count a candidate's descriptors when one closes during the reading (#152) and judge a soak's
   settled memory by a segment baseline and its growth (#153).
