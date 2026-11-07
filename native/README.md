@@ -181,6 +181,8 @@ native/tools/equivalence/fixture.sh                 # deterministic equivalence 
 python3 native/tools/equivalence/runtime_fixture.py $B
 python3 native/tools/equivalence/config_fixture.py $B
 python3 native/tools/equivalence/live_http.py $B
+python3 -m venv /tmp/hub && /tmp/hub/bin/pip install --require-hashes -r native/tools/equivalence/hub-requirements.txt
+/tmp/hub/bin/python -I native/tools/equivalence/hub_contract.py $B   # about 45 s
 native/tools/equivalence/fixture.sh --bless; python3 native/tools/equivalence/runtime_fixture.py $B --bless; python3 native/tools/equivalence/config_fixture.py $B --bless   # after an intended change: rewrite golden/ from the server, review the diff
 native/tools/perf/bench.sh $B out.jsonl native/target/cache-alloc/x86_64-unknown-linux-musl/release/platmon-server
 python3 native/tools/perf/service_ab.py --tree . --binary $B --variant M=OTHER --order "B M M B" --out ab.jsonl   # about 2.5 h; --quick to try it
@@ -247,6 +249,14 @@ linger (`loginctl enable-linger`). `uninstall_user.sh` removes them.
 - `equivalence/live_http.py`: **a live check of the service.** Starts `platmon-server serve` with the
   defaults on a local port and checks it, against what the Python service answered where it did not
   depend on the host (see its docstring). It stops only the process it started, by its handle.
+- `equivalence/hub_contract.py` and `hub-requirements.txt`: **the fleet server's contract.** The released
+  platmon-hub, installed from PyPI at the version and wheel hash `hub-requirements.txt` pins, reads a local
+  server: Hub's own validators accept `/api/status`, `/api/stats` and `/api/observations`, every group is
+  one Hub stores, and a Hub with raw capture on runs through a restart of the server. The node must end live
+  with no error, the writer healthy with nothing dropped, and the database must hold every stream from id 1
+  without a hole, with only the restart's losses (see its docstring). A failure means that Hub would
+  mis-read the server: change the server, or release a Hub that reads the new answer and raise the pin.
+  CI's `native` job runs it; `deploy/hub_check.py` remains the check on real boards and units.
 - `perf/bench.sh`: two builds (B, C) over the same scope, B C C B, with 30 s warmup and 120 s windows. Each
   window reports its own CPU (`getrusage`), RSS at the start, every 30 collections and the end, collection
   time p50/p95/max, missed 1 s deadlines, how often each group was in each state, the number of source ids
