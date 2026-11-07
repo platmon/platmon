@@ -4,8 +4,8 @@
 > - `/api/stats` is the latest snapshot (503 before the first one), `/api/status` the runtime state
 >   (always 200: check `ready`); `/api/observations`, `/api/history`, `/api/samples` and `/text` cover the
 >   rest.
-> - Requests never trigger a collection; at most 32 connections, 10 s read and write timeouts, no
->   authentication.
+> - Requests never trigger a collection; at most 32 connections, 10 s to send the whole request (line and
+>   headers), 10 s without progress per response write, no authentication.
 > - Optional groups report their state and reason in `collectors`; sensor values carry their source and
 >   read time.
 
