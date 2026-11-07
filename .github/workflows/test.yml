@@ -263,8 +263,31 @@ jobs:
         with:
           name: platmon-rpm-upgrade-fixture
           path: dist/rpm-second
+      # The prepared image is kept in the Actions cache for the ISO week (#166): a slow mirror can take longer
+      # than prepare_test_image.py's three attempts (AlmaLinux 9's BaseOS and AppStream metadata are 88 MB),
+      # so the mirrors are used once a week per base and architecture, and again when the script changes.
+      - name: Name the test image's cache
+        id: image-cache
+        run: echo "key=rpm-test-image-${{ matrix.base }}-${{ matrix.arch }}-$(date -u +%G-W%V)-${{ hashFiles('scripts/packaging/prepare_test_image.py') }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: image-restore
+        with:
+          path: rpm-test-image.tar
+          key: ${{ steps.image-cache.outputs.key }}
       - name: Prepare the test image (python3, systemd)
         timeout-minutes: 20
-        run: python3 scripts/packaging/prepare_test_image.py ${{ matrix.base }} platmon-rpm-test:local
+        run: |
+          if [ -f rpm-test-image.tar ]; then
+            docker load -i rpm-test-image.tar
+          else
+            python3 scripts/packaging/prepare_test_image.py ${{ matrix.base }} platmon-rpm-test:local
+            docker save -o rpm-test-image.tar platmon-rpm-test:local
+          fi
+      # saved now, not after the checks, so that a failing check does not cost the next run the mirrors again
+      - if: steps.image-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: rpm-test-image.tar
+          key: ${{ steps.image-cache.outputs.key }}
       - name: Check the packages under systemd (install, upgrade, invalid INI, failed start, downgrade, erase)
         run: python3 scripts/packaging/check_rpm.py dist/rpm-first/platmon-*.${{ matrix.arch }}.rpm dist/rpm-second/platmon-*.${{ matrix.arch }}.rpm --image platmon-rpm-test:local

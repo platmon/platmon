@@ -258,7 +258,10 @@ container (`packaging/rpm/rpmlint.toml` names the deliberately static server and
 architecture's packages run on a runner of that architecture under a booted systemd in Fedora 44,
 AlmaLinux 9 and CentOS Stream 10 containers (`scripts/packaging/check_rpm.py`): a refused local unit, the first install
 started without platmon-cli and then with it, an upgrade that keeps an edited INI, an invalid INI, a
-disabled service, a failed start, a downgrade and the erase. SELinux is not enforcing in a container:
+disabled service, a failed start, a downgrade and the erase. Their test image
+(`scripts/packaging/prepare_test_image.py`) is kept in the Actions cache for the ISO week, per base and
+architecture, so the distributions' mirrors are used once a week rather than on every run (#166); the
+release workflow builds its own. SELinux is not enforcing in a container:
 the service under an enforcing policy on a real host is not verified, and neither is a real board.
 From the release after 1.7.0 the release workflow builds the `.rpm` files with the `.deb` ones (the RPM
 release is the Debian revision, `-1` for `v<version>`), lists them in the same `SHA256SUMS`, runs
