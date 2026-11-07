@@ -31,6 +31,9 @@ Draft for the next release; the version and date replace this heading when it is
 - Packaging: `platmon-cli` breaks and replaces only the `platmon` releases before 1.7.0, which had the
   command, instead of every release before its own version, so that rolling `platmon` back alone
   (`apt install --allow-downgrades platmon=VERSION`) keeps the installed `platmon-cli`.
+- The HTTP server gives a client 10 s for its whole request line and headers, not 10 s per read: a client
+  that sends a byte now and then can no longer hold one of the 32 connections indefinitely, and 32 of them
+  can no longer keep the API from everyone else. A request sent at once is answered as before.
 - Internal: the soak and deployment tools run the candidate in the login user's systemd without sudo
   (#150), count a candidate's descriptors when one closes during the reading (#152) and judge a soak's
   settled memory by a segment baseline and its growth (#153).

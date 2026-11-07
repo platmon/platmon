@@ -1,7 +1,8 @@
 //! The live HTTP API. Requests only read the latest publication (runtime::Sampler,
 //! slow::Observations) and never collect. HTTP/1.0, one request per connection, at most 32 connections
 //! (excess ones are closed before a thread is started for them), 10 s to send the request line and
-//! headers (per read, as Python's socket timeout), 10 s without progress per response write.
+//! headers in all (a client trickling bytes cannot hold a connection), 10 s without progress per response
+//! write.
 //! Contract: docs/reference/api.md.
 //!
 //! /api/stats, /api/status, /api/observations, /api/history, /api/samples, /api/observation-samples,
@@ -16,7 +17,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const LIVE: [&str; 7] = ["/api/stats", "/api/status", "/api/observations", "/api/history", "/api/samples",
                          "/api/observation-samples", "/text"];
@@ -185,6 +186,23 @@ impl Exchange<'_> {
     }
 }
 
+/// The request's reads, all within one deadline: each read may wait only for what is left of it.
+struct DeadlineReader<'a> {
+    stream: &'a TcpStream,
+    deadline: Instant,
+}
+
+impl Read for DeadlineReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        self.stream.set_read_timeout(Some(left))?;
+        (&*self.stream).read(buf)
+    }
+}
+
 /// One line of at most limit bytes (more is read but not kept: its length tells it is too long).
 fn read_line(r: &mut impl BufRead, limit: usize) -> std::io::Result<Vec<u8>> {
     let mut line = Vec::new();
@@ -221,9 +239,8 @@ impl Server {
     }
 
     fn handle(&self, stream: &TcpStream) -> std::io::Result<()> {
-        stream.set_read_timeout(Some(self.request_timeout))?;
         stream.set_write_timeout(Some(self.write_timeout))?;
-        let mut r = BufReader::new(stream);
+        let mut r = BufReader::new(DeadlineReader { stream, deadline: Instant::now() + self.request_timeout });
         let mut x = Exchange { stream, head_only: false };
         let raw = read_line(&mut r, MAX_LINE)?;
         if raw.len() > MAX_LINE {
@@ -541,6 +558,27 @@ mod tests {
         let mut out = Vec::new();
         assert_eq!(s.read_to_end(&mut out).unwrap(), 0);
         assert!(t0.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_trickling_client_is_dropped_at_the_deadline() {
+        let (addr, _) = server(|s| s.request_timeout = Duration::from_millis(300));
+        let mut s = TcpStream::connect(addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let t0 = std::time::Instant::now();
+        // one byte every 50 ms, each well within the timeout: the whole request still has 300 ms
+        for b in b"GET /api/status HTTP/1.0\r\nX-Slow: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+            if s.write_all(&[*b]).is_err() {
+                break; // already closed
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let mut out = Vec::new();
+        let _ = s.read_to_end(&mut out);
+        assert!(out.is_empty(), "{:?}", String::from_utf8_lossy(&out)); // closed without an answer
+        assert!(t0.elapsed() < Duration::from_secs(3), "{:?}", t0.elapsed());
+        // a request sent at once is still answered
+        assert!(get(addr, "GET /api/status HTTP/1.0\r\n\r\n").starts_with("HTTP/1.0 200 OK"));
     }
 
     #[test]
