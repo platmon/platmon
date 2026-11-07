@@ -464,8 +464,8 @@ fn replay_query(query: &str, observation: bool) -> Result<(String, Option<String
         return Err("instance_id is required when after > 0".into());
     }
     let stream = if observation { one(&q, "group").unwrap_or("").to_string() } else { "core".into() };
-    if observation && !crate::history::OBSERVED.contains(&stream.as_str()) {
-        return Err("group must be storage, wifi, battery or probe".into());
+    if observation && !crate::history::OBSERVED.contains(&stream.as_str()) && stream != "processes" {
+        return Err("group must be storage, wifi, battery, probe or processes".into());
     }
     Ok((stream, instance_id, after as i64, limit))
 }

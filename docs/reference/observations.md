@@ -8,7 +8,7 @@
 > - Envelope `schema_version` 2: Wi-Fi `connected` can be `null` (unknown); test `connected === true`.
 
 Some data changes slowly or is slow to read: [storage](storage.md), [Wi-Fi](wifi.md),
-[battery](battery.md) and the [TCP connect probe](probe.md). Each such group is observed on its own cadence by its own thread, apart from the core Sampler, and served at
+[battery](battery.md), the [TCP connect probe](probe.md) and [processes](processes.md). Each such group is observed on its own cadence by its own thread, apart from the core Sampler, and served at
 `/api/observations` with its own id, times and age. `/api/stats` (the 1 s snapshot) is unchanged and never
 contains these groups, so an old or blocked observation can never make the core snapshot stale or 503.
 
@@ -56,7 +56,8 @@ Clients ask for `/api/observations` on the groups' cadence, not every second: th
 `platmon` command ask at most every 10 s (the page only while visible with Network, Storage or Power & battery selected) and add the time since that
 answer to the ages shown. A server without the endpoint (404) is not asked again.
 
-Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `battery` ([battery.md](battery.md)), `probe` ([probe.md](probe.md)).
+Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `battery` ([battery.md](battery.md)), `probe` ([probe.md](probe.md)),
+`processes` ([processes.md](processes.md), off by default, Linux only).
 
 The viewers also compare the growing age to `stale_after_ms` between answers, so a cached observation
 becomes not current without waiting for a new server response. The web page limits each optional

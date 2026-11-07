@@ -77,7 +77,7 @@ thread_local! {
 }
 
 /// The whole file into the reused buffer, then f(bytes): open, read until EOF, close.
-fn with_file<T>(path: &str, f: impl FnOnce(&[u8]) -> T) -> io::Result<T> {
+pub fn with_file<T>(path: &str, f: impl FnOnce(&[u8]) -> T) -> io::Result<T> {
     #[cfg(test)]
     if let Some(answer) = fake::answer(path) {
         return answer.map(|bytes| f(&bytes));
@@ -186,6 +186,47 @@ pub fn entries(path: &str, groups: &mut [&mut Group], listed: bool) -> Vec<Strin
             Vec::new()
         }
     }
+}
+
+/// The numeric names (process ids) in directory path, unsorted, into out: getdents64 into a reused buffer,
+/// so a listing of /proc allocates nothing per entry. All or nothing like entries(): on an error out is
+/// emptied and the error returned.
+pub fn pids(path: &str, out: &mut Vec<u32>) -> io::Result<()> {
+    out.clear();
+    #[cfg(test)]
+    if let Some(e) = fake::unlisted(path) {
+        return Err(io::Error::from_raw_os_error(e));
+    }
+    let fd = sys_open(path, (libc::O_RDONLY | libc::O_DIRECTORY) as libc::c_long)?;
+    thread_local! {
+        static DIRBUF: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(vec![0u8; 32 * 1024]);
+    }
+    let listed = DIRBUF.with(|b| {
+        let mut b = b.borrow_mut();
+        loop {
+            let n = retry(|| unsafe { libc::syscall(libc::SYS_getdents64, fd, b.as_mut_ptr(), b.len() as libc::c_long) })? as usize;
+            if n == 0 {
+                return Ok(());
+            }
+            let mut off = 0;
+            while off < n { // struct linux_dirent64: ino u64, off i64, reclen u16, type u8, name NUL-terminated
+                let reclen = u16::from_ne_bytes([b[off + 16], b[off + 17]]) as usize;
+                let name = &b[off + 19..off + reclen];
+                let name = &name[..name.iter().position(|&c| c == 0).unwrap_or(name.len())];
+                if !name.is_empty() && name.len() <= 10 && name.iter().all(u8::is_ascii_digit) {
+                    if let Ok(pid) = std::str::from_utf8(name).unwrap().parse::<u32>() {
+                        out.push(pid);
+                    }
+                }
+                off += reclen;
+            }
+        }
+    });
+    sys_close(fd);
+    if listed.is_err() {
+        out.clear();
+    }
+    listed
 }
 
 /// The driver bound to a device, from the DRIVER= line of its uevent.
