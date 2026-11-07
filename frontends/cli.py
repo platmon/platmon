@@ -762,7 +762,7 @@ def body_overview(v):
     body.append("")
 
     if s["cpu"]:
-        cell = 25 if wide else 12
+        cell = 25 if wide else 14  # the cells as drawn below: "  7 ████  91 %" is 14 columns
         cols = max(1, (width + 3) // (cell + 3)) if wide else max(1, (width + 1) // (cell + 1))
         cells = []
         for c in s["cpu"]:

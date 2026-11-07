@@ -26,6 +26,15 @@ def test_fits_the_terminal(width, height):
     assert all(vlen(line) <= width for line in lines)
 
 
+def test_narrow_overview_keeps_every_core_whole():
+    """Below 100 columns the cores wrap into as many cells as fit, each cell whole: the column count was
+    worked out for a narrower cell than the one drawn, so the last cell of a row was cut ("  5 " at 79)."""
+    cores = [{"id": n, "usage": 10.0 + n, "freq": None} for n in range(12)]
+    for width in (79, 60, 44):
+        out = "\n".join(plain(screen(dict(FULL, cpu=cores), None, width, 60, Style(), LIVE, {})))
+        assert all(re.search(rf"\b{n} \S+ +{10 + n} %", out) for n in range(12)), (width, out)
+
+
 def test_no_color_means_no_escapes():
     lines = screen(HOT, None, 119, 40, Style(color=False), LIVE, {})
     assert not any("\033" in line for line in lines)

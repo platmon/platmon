@@ -168,3 +168,12 @@ def test_needs_attention_is_the_same_on_both(stats, obs, monkeypatch, tmp_path):
     cli.use_levels(levels)
     terminal = [list(entry) for entry in cli.attention(stats, obs)]
     assert [[html.unescape(name), value, lv] for name, value, lv in web] == terminal
+
+
+def test_the_narrow_tab_bar_has_a_column_per_view():
+    """On a phone the tab list is a fixed bottom bar: one column per view, or the last view wraps onto a
+    second row under the bar (a 6-column grid held 7 views)."""
+    css = (WEB / "styles.css").read_text(encoding="utf-8")
+    narrow = css[css.index("@media (max-width: 639px)"):]
+    tabs = narrow[narrow.index(".tabs {"):narrow.index("}", narrow.index(".tabs {"))]
+    assert int(re.search(r"grid-template-columns: repeat\((\d+),", tabs).group(1)) == len(SPEC["views"])

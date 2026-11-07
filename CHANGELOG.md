@@ -41,6 +41,9 @@ API schema versions are independent of release versions.
   draws the Wi-Fi signal as a bar from −90 to −30 dBm as the web page does; its Overview lists CPU, RAM, GPU,
   disk in the web page's order; Needs attention no longer lists filesystems from a stale storage observation;
   the web page's Memory card is named RAM.
+- Fixed: on a phone-width web page the bottom tab bar had six columns for seven views, so System wrapped onto
+  a second row behind the bar; it now has one column per view. The `platmon` live view below 100 columns cut
+  the last core of each row of its Overview core grid.
 - Packaging: `platmon-cli` breaks and replaces only the `platmon` releases before 1.7.0, which had the
   command, instead of every release before its own version, so that rolling `platmon` back alone
   (`apt install --allow-downgrades platmon=VERSION`) keeps the installed `platmon-cli`.
