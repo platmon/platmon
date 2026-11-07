@@ -5,8 +5,8 @@ Section: admin
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.9)
-Breaks: platmon (<< @UPSTREAM@)
-Replaces: platmon (<< @UPSTREAM@)
+Breaks: platmon (<< 1.7.0)
+Replaces: platmon (<< 1.7.0)
 Maintainer: platmon maintainers <jwsung91@users.noreply.github.com>
 Homepage: https://github.com/platmon/platmon
 Installed-Size: @SIZE@

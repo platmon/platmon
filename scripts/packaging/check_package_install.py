@@ -57,6 +57,11 @@ def inside(first, second):
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == second_version
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon-cli") == second_version
     assert invoke("systemctl", "is-enabled", "platmon.service", success=False) == "disabled"
+    # The documented rollback moves platmon alone; the newer platmon-cli stays and keeps the command.
+    invoke("dpkg", "--force-confold", "-i", str(first))
+    assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == first_version
+    assert invoke("dpkg-query", "-W", "-f=${Version} ${Status}", "platmon-cli") == second_version + " install ok installed"
+    assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-cli: /usr/bin/platmon"
     invoke("systemctl", "mask", "platmon.service")
     invoke("dpkg", "--force-confold", "-i", str(first), str(first_cli))
     assert unit.is_symlink() and os.readlink(unit) == "/dev/null"
@@ -98,7 +103,7 @@ def inside(first, second):
     assert not ini.exists() and extra.read_text() == "local backup\n"
     assert local.read_text() == "retained local command\n"
     print("dpkg lifecycle passed: the server without platmon-cli, then with it, config-preserving "
-          "upgrade/downgrade, disabled/masked state, remove/purge, migration refusal and invalid config recovery")
+          "upgrade/downgrade, platmon rolled back alone beside platmon-cli, disabled/masked state, remove/purge, migration refusal and invalid config recovery")
 
 
 def check(first, second, image):

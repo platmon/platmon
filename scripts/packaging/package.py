@@ -205,14 +205,15 @@ def build_deb(root, deb, arch, server, release, revision, epoch):
 
 
 def build_cli_deb(root, deb, release, revision, epoch):
-    """platmon-cli: the platmon command and its manual. It breaks and replaces the platmon packages before
-    this release, which had the command (1.6.0 and earlier); later ones are released with it."""
+    """platmon-cli: the platmon command and its manual. It breaks and replaces the platmon packages that had
+    the command, those before 1.7.0 (a fixed bound in its control file, not this release's version, so that
+    rolling platmon back to a release that has no command keeps the newer platmon-cli)."""
     with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
         stage = Path(directory)
         stage_cli(root, stage, epoch)
         docs(root, stage, "platmon-cli", release, revision, epoch)
         pack(root, stage, deb, "platmon-cli", root / "packaging/debian/cli", ("postinst",), "",
-             {"@VERSION@": f"{release}-{revision}", "@UPSTREAM@": release}, revision, epoch)
+             {"@VERSION@": f"{release}-{revision}"}, revision, epoch)
 
 
 def docs(root, stage, package, release, revision, epoch, extra=()):

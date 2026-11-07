@@ -211,7 +211,7 @@ def test_cli_package_contents(package, tmp_path):
     assert cli.name == f"platmon-cli_{version()}-1_all.deb"
     metadata = run("dpkg-deb", "-f", str(cli)).stdout
     for field in ("Package: platmon-cli", "Source: platmon", f"Version: {version()}-1", "Architecture: all",
-                  "Depends: python3 (>= 3.9)", f"Breaks: platmon (<< {version()})", f"Replaces: platmon (<< {version()})"):
+                  "Depends: python3 (>= 3.9)", "Breaks: platmon (<< 1.7.0)", "Replaces: platmon (<< 1.7.0)"):
         assert field + "\n" in metadata, field
     root = tmp_path / "extracted"
     assert run("dpkg-deb", "-R", str(cli), str(root)).returncode == 0

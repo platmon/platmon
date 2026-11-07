@@ -175,11 +175,12 @@ the vendor unit to `/usr/lib/systemd/system/platmon.service`, and config to `/et
 `platmon-cli` puts the client in `/usr/bin/platmon` and its manual (`man platmon`).
 
 Up to 1.6.0 the command was in `platmon` itself. `platmon-cli` breaks and replaces the `platmon` releases
-before its own version, so an upgrade moves `/usr/bin/platmon` to it: `apt upgrade` and `apt install
+before 1.7.0, so an upgrade moves `/usr/bin/platmon` to it: `apt upgrade` and `apt install
 platmon` install the newly recommended `platmon-cli` with it. `apt-get upgrade` installs no new package and
 so keeps `platmon` back at the old version, command included, until `apt install platmon` (checked with
 1.3.0 and a local repository). Rolling `platmon` back to 1.6.0 or earlier makes apt
-remove `platmon-cli`, as the old package has the command itself. Compressed documentation and
+remove `platmon-cli`, as the old package has the command itself; rolling it back to 1.7.0 or later keeps the
+newer `platmon-cli`. Compressed documentation and
 changelogs are in `/usr/share/doc/platmon/` (and `/usr/share/doc/platmon-cli/`); `copyright` references the system's
 Apache-2.0 license. Package metadata includes `md5sums` for non-conffile contents
 for tools such as `debsums`; release artifact verification uses `SHA256SUMS`.
