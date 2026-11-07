@@ -83,7 +83,8 @@ lintian --no-cfg --info --pedantic --fail-on error,warning "$platmon_dist"/*.deb
 
 The fresh output directory contains `platmon_<version>-1_amd64.deb`, `platmon_<version>-1_arm64.deb`,
 `platmon_<version>-1_armhf.deb`, `platmon-cli_<version>-1_all.deb`,
-`platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the servers' SHA-256 and versions) and
+`platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the servers' SHA-256 and versions; `package_windows.py` adds the
+Windows server's) and
 `SHA256SUMS`. The builder takes the servers from `native/target/` by default, or one per
 `--binary ARCH=PATH`; it refuses a file that is not an ELF for that architecture or lacks the
 system allocator's mark. `check_package.py` runs the extracted server, so it needs a host of the
@@ -347,7 +348,8 @@ directories are never automatically deleted by subsequent updates or uninstall.
    `rpmlint`, the rpm lifecycle check (x86_64, against a next-release fixture) and
    `SHA256SUMS`. It records a GitHub build provenance attestation for the
    `.deb`, `.rpm`, source archive and Windows zip, and creates a **draft** GitHub Release with
-   them, `BUILD.json`, `SHA256SUMS` and the version's `CHANGELOG.md` section as notes. Review the attached bytes, acceptance
+   them, `BUILD.json`, `SHA256SUMS` and the version's `CHANGELOG.md` section as notes. Before building it
+   refuses a tag whose `CHANGELOG.md` section has no entry calling the Windows zip experimental. Review the attached bytes, acceptance
    evidence and notes before publishing the draft. Do not distribute a container image;
    the repository's existing image licensing policy still applies.
 5. After the release is published, add it to the APT repository: run the `apt` workflow of
