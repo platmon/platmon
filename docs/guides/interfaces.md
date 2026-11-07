@@ -62,12 +62,20 @@ start script (`~/.local/bin`). For a monitoring-only PC, install
 
 Open `http://<device>:9797` (with `[http] web = yes`, the default).
 The **Overview** shows CPU, memory, available GPU, root filesystem
-capacity and the hottest temperature. CPU is the mean across measured cores.
-Network summarizes up to four non-loopback interfaces and indicates omitted
-interfaces; it neither guesses an uplink nor sums overlapping interfaces.
+capacity and the hottest temperature, in one row on a wide screen and as rows
+of one card on a phone, so all five are on its first screen. CPU is the mean
+across measured cores; its detail names the busiest core. Bars stay grey while
+their reading is fine and take the warning or critical color when it is not.
+Network summarizes up to four non-loopback interfaces, the busiest over the last
+few updates, and indicates omitted interfaces; it neither guesses an uplink nor
+sums overlapping interfaces.
 
 The **Needs attention** strip lists readings at or above their warning
-threshold and links to the relevant view. By default, CPU, GPU, memory and
+threshold and links to the relevant view; that view's tab carries a dot in the
+warning's color. It sits in a status slot under the tabs on every view, which
+the not-current and partial-collection banners share (a partial collection's
+banner carries the warnings), and which keeps its height when empty, so the
+views never move as warnings come and go. By default, CPU, GPU, memory and
 filesystem levels are warning at 80% and critical at 90%. Temperature defaults
 are Jetson Orin 85/95 °C, Raspberry Pi 75/80 °C and other platforms 80/90 °C.
 Battery charge and the connected Wi-Fi signal are the other way round, since their low reading is the
@@ -87,7 +95,12 @@ the signal by the same levels; the signal's bar runs from −90 dBm (empty) to �
 
 The **Resources, Network, Storage, Temperature** and
 **Power & battery** views show details and related recent history.
-Hovering or touching a chart gives the nearest value and its age.
+Hovering or touching a chart gives the nearest value and its age. Percentages
+and temperatures are drawn on the 0–100 scale of their bars; values without a
+top (bytes/s, W) use their own range. More than eight cores are drawn as one
+chart of their mean and the busiest core, each core's own chart on request.
+Temperatures, interfaces (loopback last) and filesystems keep the server's order;
+partitions are folded under one line a disk; Power & battery sums the rails.
 **System** shows platform, uptime, OS, kernel, architecture, hostname and
 board-specific information (such as Jetson L4T); power mode stays under
 Power & battery. System only refreshes changed values and does not make
@@ -96,7 +109,9 @@ optional API requests.
 A shared header presents the model, host, uptime and **Live / Partial /
 Offline** state on every tab. The status tooltip includes sample number and
 data age. When requests fail, a banner names the error and age of retained
-data, and the views are dimmed. The footer shows the running version.
+data, and the views are dimmed. The data's age appears beside the status only
+when it is older than two updates. System lists the running version and the
+service the page reads. On a phone the header names the host instead of the model.
 
 Arrow-key focus and Enter/Space activate tabs. On narrow screens the
 tabs move to the bottom. A selected tab appears in the URL fragment

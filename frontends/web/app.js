@@ -102,7 +102,8 @@ const netCaption = s => {
   return "This process's network namespace" + (timed ? ` · window ${(timed.window_ms / 1000).toFixed(3)} s` : '') + ' · errors and drops are totals';
 };
 function netRows(s) {
-  const items = listOf(s.network, 'interfaces');
+  // the server's order, loopback last, as the terminal: a row keeps its place whatever the traffic does
+  const items = listOf(s.network, 'interfaces').slice().sort((a, b) => (a.name === 'lo') - (b.name === 'lo'));
   return items.length ? table('minmax(90px, 1fr) 110px 110px 150px 110px',
     ['Interface', COLUMNS.rx[0], COLUMNS.tx[0], COLUMNS.packets[0], COLUMNS.errors[0]], items.map(i => {
       const r = i.rates, total = k => ((i.rx || {})[k] || 0) + ((i.tx || {})[k] || 0);
@@ -215,16 +216,28 @@ function storageRows() {
   if (!o || !d) return '';
   const fss = Array.isArray(d.filesystems) ? d.filesystems : [], parts = Array.isArray(d.partitions) ? d.partitions : [];
   if (!fss.length && !parts.length) return '';
-  return [...fss].sort((a, b) => fsPct(b) - fsPct(a)).map(f => {
+  // the server's order, as the terminal: a filesystem keeps its place as usage changes
+  return fss.map(f => {
     const m = f.mount_points, pct = fsPct(f);
     return '<div class="fs"><div><div class="fs-name"><span>' + esc(m[0].path) + '</span>' +
       (m[0].read_only ? '<span class="badge">ro</span>' : '') + (m.length > 1 ? muted(`+${m.length - 1} more`) : '') + '</div>' +
       `<div class="detail">${esc(f.fstype)} · ${esc(f.device || f.major + ':' + f.minor)}</div></div>` +
       (f.total_bytes != null ? meter(`${size(f.used_bytes)} / ${size(f.total_bytes)} · ${pct.toFixed(0)} %`,
         `${size(f.available_bytes)} free`, pct, LIMITS.filesystem) : muted('capacity unknown')) + '</div>';
-  }).join('') + (parts.length ? '<h3>Partitions</h3>' + table('minmax(0, 1fr) 80px minmax(0, 1fr)', ['Partition', 'Size', 'Mounted at'],
-    parts.map(p => tr([esc(p.name), size(p.size_bytes), p.mount_points.length ? esc(p.mount_points[0] +
-      (p.mount_points.length > 1 ? ` +${p.mount_points.length - 1} more` : '')) : muted('not mounted')]))) : '');
+  }).join('') + (parts.length ? '<h3>Partitions</h3>' + partitionsByDisk(parts) : '');
+}
+// One line a disk, the table folded under it: a board with a dozen boot and recovery partitions (a Jetson has 15)
+// would otherwise fill the view with rows that are not mounted, as the terminal's count already avoids.
+function partitionsByDisk(parts) {
+  const disks = {};
+  for (const p of parts) (disks[p.disk || ''] ||= []).push(p);
+  return Object.entries(disks).map(([disk, items]) => {
+    const mounted = items.filter(p => p.mount_points.length).length;
+    return `<details><summary><span class="disk">${esc(disk || 'partitions')}</span>${items.length} partition${items.length === 1 ? '' : 's'} · ${mounted} mounted</summary>` +
+      table('minmax(0, 1fr) 80px minmax(0, 1fr)', ['Partition', 'Size', 'Mounted at'],
+        items.map(p => tr([esc(p.name), size(p.size_bytes), p.mount_points.length ? esc(p.mount_points[0] +
+          (p.mount_points.length > 1 ? ` +${p.mount_points.length - 1} more` : '')) : muted('not mounted')]))) + '</details>';
+  }).join('');
 }
 
 // One bounded history cache shared across detail views, fetched at most every 10 s.
@@ -280,11 +293,14 @@ const histX = (points, p) => {
   const oldest = points[0][1], newest = points[points.length - 1][1];
   return oldest > newest ? 200 * (oldest - p[1]) / (oldest - newest) : 0;
 };
-function spark(points) {
-  const vs = points.map(p => p[2]).filter(v => v != null), lo = Math.min(...vs), hi = Math.max(...vs);
+// Percentages and temperatures are drawn on the 0–100 scale of their bars, so a reading that moves by a few
+// points looks like it, not like a swing across the chart; values with no top (bytes/s, W) use their own range.
+const FIXED = id => /^(cpu|gpu|npu)\//.test(id) || id.startsWith('temperature') || id.endsWith('/percent');
+function spark(points, fixed = false) {
+  const vs = points.map(p => p[2]).filter(v => v != null), lo = fixed ? 0 : Math.min(...vs), hi = fixed ? 100 : Math.max(...vs);
   const svg = paths => `<svg class="spark" viewBox="0 0 200 28" preserveAspectRatio="none">${paths}</svg>`;
   if (!vs.length) return svg('');  // keeps the chart's height
-  const y = v => hi > lo ? 26 - 24 * (v - lo) / (hi - lo) : 14;
+  const y = v => hi > lo ? 26 - 24 * (Math.max(lo, Math.min(v, hi)) - lo) / (hi - lo) : 14;
   let line = '', area = '', run = [];
   const close = () => { if (run.length > 1) area += `M${run[0][0]},28L${run.map(p => p.join(',')).join('L')}L${run[run.length - 1][0]},28Z`; run = []; };
   points.forEach(p => {
@@ -300,9 +316,35 @@ function chartOf(id, points, rule) {
   const latest = points[points.length - 1], last = latest[2], vs = points.map(p => p[2]).filter(v => v != null);
   const lo = vs.length && histValue(id, Math.min(...vs)), hi = vs.length && histValue(id, Math.max(...vs));
   return `<div class="card chart"><div class="chart-head"><span>${esc(rule[1](id.match(rule[0])))}</span><span>${last == null ? 'no value' : histValue(id, last)}</span></div>` +
-    `<div class="plot" data-series="${esc(id)}">${spark(points)}</div>` +
+    `<div class="plot" data-series="${esc(id)}">${spark(points, FIXED(id))}</div>` +
     `<div class="chart-foot"><span>${!vs.length ? '' : lo === hi ? lo : lo + ' – ' + hi}</span>` +
     `<span data-history-age="${Number(latest[1])}">${historyAge(latest[1])}</span></div></div>`;
+}
+// Many cores: one chart of their mean and the busiest core at each point, on the cores' 0–100 scale with the warning
+// and critical levels dashed; each core's own chart only when asked for (a 64-core board would draw 64).
+const CORES_FOLDED = 8;
+let histCoresOpen = false;
+function coresChart(ids, series) {
+  const first = series[ids[0]], at = k => ids.map(id => series[id][k] && series[id][k][2]).filter(v => v != null);
+  const mean = first.map((p, k) => { const vs = at(k); return [p[0], p[1], vs.length ? vs.reduce((a, v) => a + v, 0) / vs.length : null]; });
+  const max = first.map((p, k) => { const vs = at(k); return [p[0], p[1], vs.length ? Math.max(...vs) : null]; });
+  const path = pts => {  // a point with no core reading is a gap in both lines, never 0
+    let out = '', gap = true;
+    for (const p of pts) {
+      if (p[2] == null) { gap = true; continue; }
+      out += `${gap ? 'M' : 'L'}${histX(pts, p).toFixed(1)},${(26 - 24 * Math.min(p[2], 100) / 100).toFixed(1)}`;
+      gap = false;
+    }
+    return out;
+  };
+  const guides = LIMITS.cpu.map(t => `<path class="guide" d="M0,${(26 - 24 * t / 100).toFixed(1)}L200,${(26 - 24 * t / 100).toFixed(1)}"/>`).join('');
+  const last = pts => pts[pts.length - 1][2], lv = last(max) == null ? 'ok' : level(last(max), LIMITS.cpu);
+  return '<div class="card chart"><div class="chart-head"><span>CPU mean · busiest core</span>' +
+    `<span>${last(mean) == null ? 'no value' : last(mean).toFixed(1) + ' %'} · ${last(max) == null ? '–' : last(max).toFixed(1) + ' %'}</span></div>` +
+    `<div class="plot"><svg class="spark" viewBox="0 0 200 28" preserveAspectRatio="none">${guides}` +
+    `<path class="line" d="${path(mean)}"/><path class="max ${lv}" d="${path(max)}"/></svg></div>` +
+    `<div class="chart-foot"><span class="legend"><b>━</b> mean · <b class="${textLevel(lv).trim()}">━</b> busiest of ${ids.length}</span>` +
+    `<button data-cores aria-expanded="${histCoresOpen}">${histCoresOpen ? 'Hide' : 'Show'} each core</button></div></div>`;
 }
 // One section per kind of series, in the button row's order: a single RAM graph never sits in a wall of cores.
 function histRows() {
@@ -310,12 +352,16 @@ function histRows() {
   const sections = [];
   for (const [prefix, label] of HIST_GROUPS) {
     if (histOff.has(prefix)) continue;
-    const rows = [];
+    const rows = [], ids = [];
     for (const [id, points] of Object.entries(series)) {
       const rule = HIST_LABEL.find(([re]) => re.test(id));
       if (!rule || !historyMatches(id) || histGroup(id) !== prefix
         || !Array.isArray(points) || !points.length) continue;
       rows.push(chartOf(id, points, rule));
+      ids.push(id);
+    }
+    if (prefix === 'cpu/' && ids.length > CORES_FOLDED && ids.every(id => series[id].length === series[ids[0]].length)) {
+      rows.splice(0, rows.length, coresChart(ids, series), ...(histCoresOpen ? rows : []));
     }
     if (rows.length) sections.push(`<div class="hist-group"><h3>${esc(label)}</h3><div>${rows.join('')}</div></div>`);
   }
@@ -399,32 +445,42 @@ function hideEmptyPanels() {
   $('power-empty').hidden = ['pwr', 'batt'].some(id => $(id).innerHTML);
 }
 
-function overviewRows(s) {
-  const cards = [], alerts = [];
-  // value null: unavailable, no bar; limits give the level, the threshold ticks and a Needs attention entry
-  const metric = (label, sub, value, unit, limits, detail, tab, name = label) => {
-    const lv = value == null ? 'ok' : level(value, limits);
-    if (lv !== 'ok') alerts.push({lv, tab, name, value: value.toFixed(1) + ' ' + unit});
-    cards.push(`<article class="card metric"><div class="metric-head"><span>${esc(label)}</span><span>${esc(sub)}</span></div>` +
-      (value == null ? '<div class="value">Unavailable</div>'
-        : `<div class="value${textLevel(lv)}">${value.toFixed(1)}<span class="unit">${unit}</span></div>${bar(value, limits)}`) +
-      (detail ? `<div class="detail">${esc(detail)}</div>` : '') + '</article>');
-  };
-  const cpus = s.cpu.filter(c => Number.isFinite(c.usage)), m = s.memory, d = s.disk, note = cpuNote(s);
-  metric(METRICS.cpu[0], s.cpu.length + (s.cpu.length === 1 ? ' core' : ' cores'),
-    cpus.length ? cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length : null, '%', LIMITS.cpu,
-    `Mean of ${cpus.length} measured cores` + (note ? ' · ' + note : ''), 'resources');
-  metric(METRICS.memory[0], size(m.total), pctOf(m.used, m.total), '%', LIMITS.memory, `${size(m.used)} / ${size(m.total)}`, 'resources');
-  if (s.gpu) metric(METRICS.gpu[0], mhz(s.gpu.freq), s.gpu.usage, '%', LIMITS.gpu, '', 'resources');
+// The Overview readings, in the web page's and the terminal's order: {label, sub, value, unit, limits, detail, tab, name}
+// (value null: unavailable). CPU's detail names its busiest core, the signal its mean hides.
+function readings(s) {
+  const cpus = s.cpu.filter(c => Number.isFinite(c.usage)), m = s.memory, d = s.disk, note = cpuNote(s), out = [];
+  let detail = note;
+  if (cpus.length) {
+    const top = cpus.reduce((a, c) => c.usage > a.usage ? c : a), lv = level(top.usage, LIMITS.cpu);
+    const more = cpus.filter(c => c !== top && level(c.usage, LIMITS.cpu) !== 'ok').length;
+    detail = `Busiest <span class="${lv === 'ok' ? '' : 't-' + lv}">CPU${top.id} ${top.usage.toFixed(1)} %</span>` +
+      (more ? ` · ${more} more ≥ ${LIMITS.cpu[0]} %` : '') + (note ? ' · ' + esc(note) : '');
+  }
+  out.push({label: METRICS.cpu[0], sub: s.cpu.length + (s.cpu.length === 1 ? ' core' : ' cores'), unit: '%', limits: LIMITS.cpu,
+    value: cpus.length ? cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length : null, detail, tab: 'resources'});
+  out.push({label: METRICS.memory[0], sub: size(m.total), value: pctOf(m.used, m.total), unit: '%', limits: LIMITS.memory,
+    detail: `${size(m.used)} / ${size(m.total)}`, tab: 'resources'});
+  if (s.gpu) out.push({label: METRICS.gpu[0], sub: mhz(s.gpu.freq), value: s.gpu.usage, unit: '%', limits: LIMITS.gpu, detail: '', tab: 'resources'});
   // used / total, as the terminal: "free" is the filesystem's available space, which only the Storage view has
-  metric(METRICS.filesystem[0], size(d.total), pctOf(d.used, d.total), '%', LIMITS.filesystem, `${size(d.used)} / ${size(d.total)}`, 'storage', '/');
-  const temps = Object.entries(s.temperature).filter(([, value]) => Number.isFinite(value)).sort((a, b) => b[1] - a[1]);
-  if (temps.length) {
-    metric(METRICS.temperature[0], temps[0][0], temps[0][1], '°C', LIMITS.temperature, `Hottest of ${temps.length} ${temps.length === 1 ? 'sensor' : 'sensors'}`, 'thermal', temps[0][0]);
-    for (const [name, value] of temps.slice(1)) {  // every hot sensor, not only the hottest
-      const lv = level(value, LIMITS.temperature);
-      if (lv !== 'ok') alerts.push({lv, tab: 'thermal', name, value: value.toFixed(1) + ' °C'});
-    }
+  out.push({label: METRICS.filesystem[0], sub: size(d.total), value: pctOf(d.used, d.total), unit: '%', limits: LIMITS.filesystem,
+    detail: `${size(d.used)} / ${size(d.total)}`, tab: 'storage', name: '/'});
+  const temps = hottest(s);
+  if (temps.length) out.push({label: METRICS.temperature[0], sub: temps[0][0], value: temps[0][1], unit: '°C', limits: LIMITS.temperature,
+    detail: `Hottest of ${temps.length} ${temps.length === 1 ? 'sensor' : 'sensors'}`, tab: 'thermal', name: temps[0][0]});
+  return out;
+}
+const hottest = s => Object.entries(s.temperature).filter(([, value]) => Number.isFinite(value)).sort((a, b) => b[1] - a[1]);
+
+// Readings at their warning level or worse, critical first, with the view that shows each (the link, the tab's dot)
+function alertsOf(s) {
+  const alerts = [];
+  for (const r of readings(s)) {
+    const lv = r.value == null ? 'ok' : level(r.value, r.limits);
+    if (lv !== 'ok') alerts.push({lv, tab: r.tab, name: r.name || r.label, value: r.value.toFixed(1) + ' ' + r.unit});
+  }
+  for (const [name, value] of hottest(s).slice(1)) {  // every hot sensor, not only the hottest
+    const lv = level(value, LIMITS.temperature);
+    if (lv !== 'ok') alerts.push({lv, tab: 'thermal', name, value: value.toFixed(1) + ' °C'});
   }
   // other filesystems, from the storage observation when the Storage view fetched it; the root card covers /
   const storage = obs && obs.groups && obs.groups.storage;
@@ -443,13 +499,37 @@ function overviewRows(s) {
     const lv = i.connected === true && Number.isFinite(i.signal_dbm) ? levelOf('wifi', i.signal_dbm) : 'ok';
     if (lv !== 'ok') alerts.push({lv, tab: 'network', name: i.name, value: i.signal_dbm + ' dBm'});
   }
-  alerts.sort((a, b) => (b.lv === 'crit') - (a.lv === 'crit'));
-  let html = alerts.length ? '<div class="card attention"><strong>Needs attention</strong>' + alerts.map(a =>
-    `<a class="pill ${a.lv}" href="#${a.tab}">${esc(a.name)} <span class="mono">${esc(a.value)}</span></a>`).join('') + '</div>' : '';
-  html += `<div class="metrics">${cards.join('')}</div>`;
+  return alerts.sort((a, b) => (b.lv === 'crit') - (a.lv === 'crit'));
+}
+const pills = alerts => alerts.map(a =>
+  `<a class="pill ${a.lv}" href="#${a.tab}">${esc(a.name)} <span class="mono">${esc(a.value)}</span></a>`).join('');
+// The Needs attention card of the status slot (empty when nothing needs attention)
+const attentionHtml = s => { const alerts = alertsOf(s); return alerts.length ? '<strong>Needs attention</strong>' + pills(alerts) : ''; };
+
+// recent rx + tx of each interface, about 10 answers, so two interfaces with similar traffic do not swap places every second
+const traffic = {};
+function remember(s) {
+  for (const i of listOf(s.network, 'interfaces')) if (i.rates) {
+    const seen = traffic[i.name] ||= [];
+    seen.push(i.rates.rx_bytes_per_s + i.rates.tx_bytes_per_s);
+    if (seen.length > 10) seen.shift();
+  }
+}
+const busy = i => !i.rates ? -1 : traffic[i.name] && traffic[i.name].length
+  ? traffic[i.name].reduce((a, v) => a + v, 0) / traffic[i.name].length : i.rates.rx_bytes_per_s + i.rates.tx_bytes_per_s;
+
+function overviewRows(s) {
+  const cards = readings(s).map(r => {
+    const lv = r.value == null ? 'ok' : level(r.value, r.limits);
+    return `<article class="card metric"><div class="metric-head"><span>${esc(r.label)}</span><span>${esc(r.sub)}</span></div>` +
+      (r.value == null ? '<div class="value">Unavailable</div>'
+        : `<div class="value${textLevel(lv)}">${r.value.toFixed(1)}<span class="unit">${r.unit}</span></div>${bar(r.value, r.limits)}`) +
+      // the CPU detail is built from escaped parts (it colors the busiest core); the others are plain text
+      (r.detail ? `<div class="detail">${r.label === METRICS.cpu[0] ? r.detail : esc(r.detail)}</div>` : '') + '</article>';
+  });
+  let html = `<div class="metrics">${cards.join('')}</div>`;
   // Show individual readings: names and traffic volume do not identify the host's uplink.
-  const traffic = i => i.rates ? i.rates.rx_bytes_per_s + i.rates.tx_bytes_per_s : -1;  // busiest first
-  const interfaces = listOf(s.network, 'interfaces').filter(i => i.name !== 'lo').sort((a, b) => traffic(b) - traffic(a));
+  const interfaces = listOf(s.network, 'interfaces').filter(i => i.name !== 'lo').sort((a, b) => busy(b) - busy(a));
   if (interfaces.length) {
     const shown = interfaces.slice(0, 4);
     html += '<section class="card"><div class="card-head"><h2>Network</h2><a class="cap" href="#network">All interfaces →</a></div>' +
@@ -462,38 +542,48 @@ function overviewRows(s) {
 function renderResources(s) {
   const note = cpuNote(s), cpus = s.cpu.filter(c => Number.isFinite(c.usage));
   const unavailable = (s.cpu_sampling && s.cpu_sampling.unavailable || []).length;
+  // every core at one clock: said once in the caption rather than under each of them
+  const clocks = new Set(s.cpu.map(c => c.freq)), same = clocks.size === 1 && !!s.cpu[0].freq;
   $('cpu-cap').textContent = cpus.length ? `mean ${(cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length).toFixed(1)} % · ` +
-    `${cpus.length} of ${s.cpu.length + unavailable} measured` : '';
+    `${cpus.length} of ${s.cpu.length + unavailable} measured` + (same ? ` · all at ${mhz(s.cpu[0].freq)}` : '') : '';
   $('cpu').innerHTML = (s.cpu.length ? '<div class="cores">' + s.cpu.map(c => `<div class="core"><span>CPU${c.id}</span>` +
     `<strong class="${textLevel(level(c.usage, LIMITS.cpu))}">${c.usage.toFixed(1)} %</strong>` +
-    bar(c.usage, LIMITS.cpu, false) + `<span>${mhz(c.freq) || '&nbsp;'}</span></div>`).join('') + '</div>' : '') +
+    bar(c.usage, LIMITS.cpu, false) + (same ? '' : `<span>${mhz(c.freq) || '&nbsp;'}</span>`) + '</div>').join('') + '</div>' : '') +
     (note ? `<div class="muted">${esc(note)}</div>` : '');
   const m = s.memory, g = s.gpu, n = s.npu;
   // the NPU has no levels in [thresholds], so its bar carries none either
   const load = (a, label) => meter(label, (a.usage == null ? 'no load reading' : a.usage.toFixed(1) + ' %') +
-    (a.freq ? ' · ' + mhz(a.freq) : ''), a.usage == null ? 0 : a.usage, label === 'GPU' ? LIMITS.gpu : null);
+    (a.freq ? ' · ' + (a.max_freq ? `${(a.freq / 1e6).toFixed(0)} / ${mhz(a.max_freq)}` : mhz(a.freq)) : ''),
+    a.usage == null ? 0 : a.usage, label === 'GPU' ? LIMITS.gpu : null);
   $('res').innerHTML = '<div class="meters">' +
     (g ? load(g, 'GPU') : '') + (n ? load(n, 'NPU') : '') +
     meter('RAM', `${size(m.used)} / ${size(m.total)}`, pctOf(m.used, m.total), LIMITS.memory) +
     (m.swap_total ? meter('Swap', `${size(m.swap_used)} / ${size(m.swap_total)}`, pctOf(m.swap_used, m.swap_total), LIMITS.memory) : '') + '</div>';
   $('psi').innerHTML = psiRows(s);
 }
+// in the server's order, as the history below and the terminal: a sensor keeps its line as temperatures cross
 function renderThermal(s) {
-  const temps = Object.entries(s.temperature).sort((a, b) => b[1] - a[1]);
+  const temps = Object.entries(s.temperature).filter(([, v]) => Number.isFinite(v));
+  $('temp-cap').textContent = `Bar scale 0–100 °C · warning ${LIMITS.temperature[0]} · critical ${LIMITS.temperature[1]}`;
   $('temp').innerHTML = temps.length ? '<div class="temps">' + temps.map(([k, v]) =>
     `<div class="temp"><span>${esc(k)}</span>${bar(v, LIMITS.temperature)}<span>${v.toFixed(1)} °C</span></div>`).join('') + '</div>' : '';
 }
 // what the board draws and what it has left, read together: consumption is the draw over a window
 // against the charge that window cost
 function renderPower(s) {
-  const rows = Object.entries(s.power).map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') +
-    s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + ' %'].filter(Boolean).join(' · ') || 'n/a'))).join('');
+  const rails = Object.entries(s.power);
+  // the last line in bold is the total, as a power meter reads; one rail is its own total
+  const sum = rails.length > 1 ? `<div class="kv sum"><span>Sum of rails</span><span><b>${rails.reduce((a, [, v]) => a + v, 0).toFixed(2)} W</b></span></div>` : '';
+  // a fan with a duty gets its bar (grey: a duty has no level), its speed beside it
+  const fan = f => f.percent !== null ? meter('Fan ' + esc(f.name), [f.rpm !== null && f.rpm + ' rpm', f.percent + ' %'].filter(Boolean).join(' · '), f.percent, null)
+    : kv('Fan ' + esc(f.name), f.rpm !== null ? f.rpm + ' rpm' : 'n/a');
+  const rows = rails.map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') + sum + s.fans.map(fan).join('');
   $('pwr-cap').innerHTML = s.power_mode ? `<span class="chip">MODE ${esc(s.power_mode)}</span>` : '';
   $('pwr').innerHTML = rows || (s.power_mode ? '<p class="muted">No power rails or fans reported.</p>' : '');
 }
 function renderSystem(s) {
   const sys = s.system || {};
-  const fields = {platform: s.platform, uptime: uptimeText(s.uptime)};
+  const fields = {model: s.model, platform: s.platform, uptime: uptimeText(s.uptime)};
   for (const key of SYSTEM_FIELDS) fields[key] = sys[key];
   for (const [key, value] of Object.entries(fields)) {
     const text = value == null ? '' : String(value);
@@ -504,6 +594,9 @@ function renderSystem(s) {
   const extra = Object.entries(sys).filter(([key, value]) => !SYSTEM_FIELDS.includes(key) && value)
     .map(([key, value]) => `<div class="sys"><span>${esc(key)}</span><span>${esc(value)}</span></div>`).join('');
   if ($('system-extra').innerHTML !== extra) $('system-extra').innerHTML = extra;
+  // this page's own: the service it reads (the version is filled in by the server)
+  const service = `${location.host || 'this page'} · every 1 s`;
+  if ($('system-service').textContent !== service) $('system-service').textContent = service;
 }
 function renderActive() {
   if (!latestStats || !visible()) return;
@@ -531,13 +624,28 @@ function renderObservations() {
 }
 function render(s) {
   // Keep the last good snapshot for instant view switches even if the next request fails.
-  $('model').textContent = s.model;
-  const sys = s.system || {};
-  $('subtitle').textContent = [sys.hostname, s.platform, Number.isFinite(s.uptime) ? 'up ' + uptimeText(s.uptime) : '']
-    .filter(Boolean).join(' · ');
+  // A phone has no room for the model: it gets the host's name and the platform, as the terminal does below 100 columns.
+  const sys = s.system || {}, up = Number.isFinite(s.uptime) ? 'up ' + uptimeText(s.uptime) : '';
+  const both = (wide, narrow) => wide === narrow ? esc(wide) : `<span class="wide">${esc(wide)}</span><span class="narrow">${esc(narrow)}</span>`;
+  $('model').innerHTML = both(s.model, sys.hostname || s.model);
+  $('subtitle').innerHTML = both([sys.hostname, s.power_mode, up].filter(Boolean).join(' · '),
+    [s.platform, s.power_mode, up].filter(Boolean).join(' · '));
   $('coll').textContent = collectionNote(s);
   latestStats = s;
+  remember(s);
   renderActive();
+  renderSlot();
+}
+// The status slot, every view: a lost service, else a partial collection with the warnings in its banner, else the
+// warnings' card, else an empty slot of the same height; and each view's tab marked with its worst warning.
+function renderSlot() {
+  const alerts = latestStats ? alertsOf(latestStats) : [], coll = $('coll').textContent;
+  $('err-banner').hidden = !failing;
+  $('coll-banner').hidden = failing || !coll;
+  $('coll-attention').innerHTML = !failing && coll ? pills(alerts) : '';
+  $('attention').innerHTML = !failing && !coll && latestStats ? attentionHtml(latestStats) : '';
+  $('attention').hidden = !$('attention').innerHTML;
+  for (const tab of TABS) $('tab-' + tab).setAttribute('data-attention', (alerts.find(a => a.tab === tab) || {}).lv || '');
 }
 function updateDetailAges() {
   document.querySelectorAll('#panel-' + activeTab + ' [data-observation-age]').forEach(el => {
@@ -576,11 +684,14 @@ function showAge() {
   if ($('status').textContent !== status) $('status').textContent = status;
   $('status').setAttribute('data-state', state);
   $('main').setAttribute('data-offline', String(failing));
-  $('err-banner').hidden = !failing;
-  $('coll-banner').hidden = failing || !coll;
+  renderSlot();
+  $('stale').hidden = true;
   if (!shown) { $('status').title = $('err-age').textContent = ''; return; }
   const since = performance.now() - shown.t0;
   const secs = ms => Math.round(ms / 1000) + ' s';
+  // the age beside the status only when it says something: older than two updates (offline: the banner says it)
+  const age = shown.kind === 'sample' ? shown.ageMs + since : since;
+  if (!failing && !checking && age > 2000) { $('stale').textContent = `data ${secs(age)} old`; $('stale').hidden = false; }
   const text = shown.kind === 'sample' ? `sample #${shown.seq} · data age ${secs(shown.ageMs + since)}`
     : `response received ${secs(since)} ago · ` + (shown.kind === 'legacy'
       ? 'this server reports no sample age' : 'sample age unavailable (invalid metadata)');
@@ -652,6 +763,11 @@ $('history-groups').addEventListener('click', event => {
   const button = event.target.closest && event.target.closest('[data-group]');
   if (!button) return;
   if (!histOff.delete(button.dataset.group)) histOff.add(button.dataset.group);  // delete reports a hit
+  histDraw();
+});
+$('hist').addEventListener('click', event => {
+  if (!event.target.closest || !event.target.closest('[data-cores]')) return;
+  histCoresOpen = !histCoresOpen;
   histDraw();
 });
 $('hist').addEventListener('pointermove', readout);

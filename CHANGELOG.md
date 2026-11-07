@@ -41,6 +41,17 @@ API schema versions are independent of release versions.
   draws the Wi-Fi signal as a bar from −90 to −30 dBm as the web page does; its Overview lists CPU, RAM, GPU,
   disk in the web page's order; Needs attention no longer lists filesystems from a stale storage observation;
   the web page's Memory card is named RAM.
+- The web page follows the same design: a status slot under the tabs on every view holds the not-current
+  banner, a partial collection's banner (with the warnings in it) or Needs attention, and keeps its height
+  when empty; a view's tab carries a dot in its worst warning's color. Bars are grey until a warning level.
+  The Overview's five readings sit in one row on a wide screen and as rows of one card on a phone; CPU names
+  its busiest core; Network ranks interfaces over the last ~10 answers. The data's age shows beside the status
+  only when late; the subtitle reads host · power mode · uptime (on a phone the title is the host). History
+  charts of percentages and temperatures use the 0–100 scale of their bars; more than eight cores are one
+  chart of their mean and busiest core, each core's on request. Temperatures, interfaces (loopback last) and
+  filesystems keep the server's order; partitions are folded under one line a disk; Power & battery sums the
+  rails and draws fan duty; System lists the model, the version (the footer is gone) and the service; a
+  phone's tab bar uses the short labels.
 - **Changed live view:** the `platmon` live view is quieter and keeps its rows in place. Its Overview is the web
   Overview: CPU with its busiest core (`max CPU7 91.4 %`, `+N` more at the warning level), RAM, GPU, root
   filesystem, the hottest temperature and the busiest interfaces in fixed columns, ranked over the last

@@ -13,6 +13,6 @@ const context = vm.createContext({AbortController, console, performance: {now: (
 elements.levels = {textContent: JSON.stringify(input.levels)};  // as the server fills it in from [thresholds]
 vm.runInContext(code, context);
 context.input = input;
-const html = vm.runInContext('obs = input.observations; obsAt = 0; overviewRows(input.stats)', context);
+const html = vm.runInContext('obs = input.observations; obsAt = 0; attentionHtml(input.stats)', context);
 const pills = [...html.matchAll(/<a class="pill (warn|crit)" href="#\w+">(.*?) <span class="mono">(.*?)<\/span><\/a>/g)];
 console.log(JSON.stringify(pills.map(([, lv, name, value]) => [name, value, lv])));

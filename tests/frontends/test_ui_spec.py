@@ -34,7 +34,11 @@ def test_views_are_the_web_tabs_and_the_terminal_views():
     page = (WEB / "index.html").read_text(encoding="utf-8")
     tabs = re.findall(r'<button id="tab-(\w+)" role="tab"[^>]*>(.*?)</button>', page)
     labels = [(v["id"], v["labels"][0]) for v in SPEC["views"]]
-    assert [(name, html.unescape(re.sub(r"<[^>]+>", "", text))) for name, text in tabs] == labels
+    # the long label, and on a phone's bottom bar the spec's short one, as the terminal's narrow tab bar
+    text = lambda part: html.unescape(re.sub(r"<[^>]+>", "", part))
+    assert [(name, text(re.sub(r'<span class="narrow">.*?</span>', "", label))) for name, label in tabs] == labels
+    assert [text(re.search(r'<span class="narrow">(.*?)</span>', label).group(1)) for _, label in tabs] == \
+        [v["labels"][1] for v in SPEC["views"]]
     assert list(cli.VIEWS) == [v["id"] for v in SPEC["views"]]
     assert {name: list(texts) for name, texts in cli.VIEW_LABELS.items()} == {v["id"]: v["labels"] for v in SPEC["views"]}
 
@@ -43,7 +47,8 @@ def test_system_fields_are_the_web_rows_and_the_terminal_labels():
     """The system entries the frontends know by name; any other one is shown as "key value" on both."""
     fields = SPEC["system_fields"]
     rows = re.findall(r'id="system-(\w+)-row"', (WEB / "index.html").read_text(encoding="utf-8"))
-    assert rows == ["platform", "uptime"] + fields  # platform and uptime are not system entries
+    # model, platform and uptime are not system entries; version and service are the page's own (the terminal's System view too)
+    assert rows == ["model", "platform", "uptime"] + fields + ["version", "service"]
     app = (WEB / "app.js").read_text(encoding="utf-8")
     assert json.loads(re.search(r"const SYSTEM_FIELDS = (\[.*?\]);", app).group(1).replace("'", '"')) == fields
     assert list(cli.SYSTEM_LABELS) == fields

@@ -167,7 +167,8 @@ def test_storage_from_observations(steps):
     assert steps["ok"]["obs_age"]["storage"] == "observed 95 s ago (not current)"  # the server's age, and stale says so
     assert "1.0G / 4.0G · 25 %" in sto and "3.0G free" in sto and "<b>" not in sto
     assert '/mnt/&#60;b&#62;x&#60;/b&#62;</span><span class="badge">ro</span><span class="muted">+60 more' in sto
-    assert sto.index("/mnt/") < sto.index("/data")  # by usage, unknown capacity last
+    assert sto.index("/mnt/") < sto.index("/data")  # the server's order: a filesystem keeps its place as usage changes
+    assert "<details><summary>" in sto and "2 partitions · 1 mounted</summary>" in sto  # folded under one line a disk
     assert "/bind/" not in sto  # dozens of bind mounts: counted, not listed
     assert "capacity unknown" in sto and "0:40" in sto  # no numbers made up when statvfs gave none
     assert "nvme0n1p2" in sto and "not mounted" in sto
