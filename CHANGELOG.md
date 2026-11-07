@@ -41,6 +41,13 @@ API schema versions are independent of release versions.
   draws the Wi-Fi signal as a bar from −90 to −30 dBm as the web page does; its Overview lists CPU, RAM, GPU,
   disk in the web page's order; Needs attention no longer lists filesystems from a stale storage observation;
   the web page's Memory card is named RAM.
+- The web page and the `platmon` live view name things alike: the Overview readings and the network and disk
+  table columns are defined once in `frontends/ui-spec.json`, long on the web page (Root filesystem,
+  ↓ Receive), short in the terminal (DISK, ↓ RX). Both write sizes in the unit that fits them (`14M / 102M`,
+  not `0.0G / 0.1G`) and packets and operations per second as whole numbers, rounded the same way. The web
+  Overview's RAM and root filesystem read `used / total`, as the terminal: its "free" for the root filesystem
+  was the total minus used, not the space available, which the Storage view shows. `/text` and `--once` do
+  not change.
 - Fixed: on a phone-width web page the bottom tab bar had six columns for seven views, so System wrapped onto
   a second row behind the bar; it now has one column per view. The `platmon` live view below 100 columns cut
   the last core of each row of its Overview core grid.

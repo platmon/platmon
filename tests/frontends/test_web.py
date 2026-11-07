@@ -150,10 +150,10 @@ def test_network_and_disk_rows(steps):
     assert "eth0</span><span>1.5 KiB/s</span><span>0 B/s</span>" in net and '<span class="t-warn">3 · 0</span>' in net
     assert steps["counters"]["net_cap"] == "This process's network namespace · window 1.000 s · errors and drops are totals"
     assert "&#60;img src=x onerror=alert(1)&#62;" in net and "<img" not in net  # a name is text, never HTML
-    assert '<span class="muted">2.0 · 0.0</span>' in net
+    assert '<span class="muted">2 · 0</span>' in net  # per second: ui-spec formats, as the terminal
     assert "warming up" in net and "some_new_reason" in net  # no rate: the reason, not 0
     assert '<div class="tr idle">' not in net.split("eth0")[0].rsplit("</div>", 1)[-1]  # eth0 receives: not dimmed
-    assert "nvme0n1</span><span>3.0 MiB/s</span><span>512 B/s</span>" in dio and "4.0 · 0.5" in dio and "3.4 %" in dio
+    assert "nvme0n1</span><span>3.0 MiB/s</span><span>512 B/s</span>" in dio and "4 · 1" in dio and "3.4 %" in dio
     assert "counter went backwards" in dio and "saturat" not in dio
 
 

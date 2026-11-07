@@ -365,6 +365,24 @@ UI_SPEC = {
         {"id": "power", "labels": ["Power & battery", "Power", "Pwr", "Pw"]},
         {"id": "system", "labels": ["System", "Sys", "Sys", "Sy"]},
     ],
+    "metrics": [
+        {"id": "cpu", "labels": ["CPU", "CPU"], "unit": "%"},
+        {"id": "memory", "labels": ["RAM", "RAM"], "unit": "%"},
+        {"id": "gpu", "labels": ["GPU", "GPU"], "unit": "%"},
+        {"id": "filesystem", "labels": ["Root filesystem", "DISK"], "unit": "%"},
+        {"id": "temperature", "labels": ["Temperature", "TEMP"], "unit": "°C"},
+    ],
+    "columns": {
+        "rx": ["↓ Receive", "↓ RX"],
+        "tx": ["↑ Send", "↑ TX"],
+        "packets": ["Packets/s rx · tx", "PKT/S rx · tx"],
+        "errors": ["Errors · drops", "ERR · DROP"],
+        "read": ["Read", "READ"],
+        "write": ["Write", "WRITE"],
+        "ops": ["Ops/s r · w", "OPS/S r · w"],
+        "io_time": ["I/O time", "I/O TIME"],
+    },
+    "formats": {"per_s_decimals": 0, "size_units": ["G", "M", "K"]},
     "system_fields": ["os", "kernel", "arch", "hostname", "l4t"],
     "levels": {
         "names": ["ok", "warn", "crit"],
@@ -390,8 +408,26 @@ LIMITS = {**{name: tuple(pair) for name, pair in UI_SPEC["levels"]["defaults"].i
 # Levels where the low reading is the bad one: warning above critical (native/src/config.rs LOW_LEVELS).
 LOW = tuple(UI_SPEC["levels"]["low_is_bad"])
 SPARK_POINTS = 24
+LABEL = {m["id"]: m["labels"][1] for m in UI_SPEC["metrics"]}  # the Overview readings' short labels: the terminal's
+COL = {key: labels[1] for key, labels in UI_SPEC["columns"].items()}  # the table columns' short labels
+PER_S = UI_SPEC["formats"]["per_s_decimals"]  # packets and operations per second
 WIDE = 100  # columns from which everything is on one screen; below, the overview and a few rows
 ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
+
+
+def per_sec(v):
+    """Packets or operations per second as the web page writes them: half up, as JavaScript's toFixed does
+    (Python's format rounds half to even, so 0.5 would read 0 here and 1 there)."""
+    return f"{math.floor(v * 10 ** PER_S + 0.5) / 10 ** PER_S:.{PER_S}f}"
+
+
+def size(b):
+    """Bytes in the unit that fits them, as the web page writes them: 45.1G, 14M, 512K (render() keeps
+    gib(), so --once and /text are unchanged)."""
+    for unit, power in zip(UI_SPEC["formats"]["size_units"], (30, 20, 10)):
+        if b >= 2 ** power:
+            return f"{b / 2 ** power:.1f}{unit}" if power == 30 else f"{b / 2 ** power:.0f}{unit}"
+    return f"{b:.0f}B"
 
 
 def temp_limits():
@@ -498,18 +534,18 @@ def metrics(s):
     """The web Overview's readings: (label, value or None, unit, limits, detail)."""
     cpus = [c["usage"] for c in s["cpu"] if isinstance(c.get("usage"), (int, float))]
     m, d, g, n = s["memory"], s["disk"], s.get("gpu"), s.get("npu")
-    out = [("CPU", sum(cpus) / len(cpus) if cpus else None, "%", LIMITS["cpu"], f"mean of {len(cpus)} cores"),
-           ("RAM", 100 * m["used"] / m["total"] if m["total"] else None, "%", LIMITS["memory"],
-            f"{gib(m['used'])} / {gib(m['total'])}")]  # the web page's card order: CPU, RAM, GPU, disk
+    out = [(LABEL["cpu"], sum(cpus) / len(cpus) if cpus else None, "%", LIMITS["cpu"], f"mean of {len(cpus)} cores"),
+           (LABEL["memory"], 100 * m["used"] / m["total"] if m["total"] else None, "%", LIMITS["memory"],
+            f"{size(m['used'])} / {size(m['total'])}")]  # the web page's card order: CPU, RAM, GPU, disk
     if g:
-        out.append(("GPU", g["usage"], "%", LIMITS["gpu"], f"{g['freq'] / 1e6:.0f} MHz" if g.get("freq") else ""))
+        out.append((LABEL["gpu"], g["usage"], "%", LIMITS["gpu"], f"{g['freq'] / 1e6:.0f} MHz" if g.get("freq") else ""))
     if n:  # no [thresholds] entry sets levels for an NPU, so it is shown without one
         out.append(("NPU", n["usage"], "%", None, f"{n['freq'] / 1e6:.0f} MHz" if n.get("freq") else ""))
-    out.append(("DISK", 100 * d["used"] / d["total"] if d["total"] else None, "%", LIMITS["filesystem"],
-                f"{gib(d['used'])} / {gib(d['total'])}"))
+    out.append((LABEL["filesystem"], 100 * d["used"] / d["total"] if d["total"] else None, "%", LIMITS["filesystem"],
+                f"{size(d['used'])} / {size(d['total'])}"))
     temps = hottest_first(s)
     if temps:
-        out.append(("TEMP", temps[0][1], "°C", temp_limits(), f"{temps[0][0]} · hottest of {len(temps)}"))
+        out.append((LABEL["temperature"], temps[0][1], "°C", temp_limits(), f"{temps[0][0]} · hottest of {len(temps)}"))
     return out
 
 
@@ -534,8 +570,8 @@ def attention(s, obs):
     """Readings at their warning level or worse, critical first, as on the web page: the Overview readings,
     every temperature sensor, and from current observations filesystems other than /, the batteries' charge
     and the connected Wi-Fi signals, where the low reading is the bad one."""
-    out = [("/" if label == "DISK" else label, f"{v:.1f} {unit}", level(v, lim))
-           for label, v, unit, lim, _ in metrics(s) if v is not None and label != "TEMP"]
+    out = [("/" if label == LABEL["filesystem"] else label, f"{v:.1f} {unit}", level(v, lim))
+           for label, v, unit, lim, _ in metrics(s) if v is not None and label != LABEL["temperature"]]
     out += [(k, f"{v:.1f} °C", level(v, temp_limits())) for k, v in hottest_first(s)]
     data, o = group_data(obs, "storage")
     for f in (data or {}).get("filesystems") or [] if o and not o.get("stale") else []:
@@ -695,7 +731,7 @@ class View:
         drop = (i.get("rx") or {}).get("dropped", 0) + (i.get("tx") or {}).get("dropped", 0)
         idle = not r["rx_bytes_per_s"] and not r["tx_bytes_per_s"]
         return self.row(widths, [f"    {i['name']}", per_s(r["rx_bytes_per_s"]), per_s(r["tx_bytes_per_s"]),
-                                 f"{r['rx_packets_per_s']:.0f} · {r['tx_packets_per_s']:.0f}", f"{err} · {drop}"],
+                                 f"{per_sec(r['rx_packets_per_s'])} · {per_sec(r['tx_packets_per_s'])}", f"{err} · {drop}"],
                         ["muted"] * 5 if idle else [None, None, None, "muted", "warn" if err or drop else "muted"])
 
     def disk_rows(self, widths, disks):
@@ -708,7 +744,7 @@ class View:
                 continue
             idle = not r["read_bytes_per_s"] and not r["write_bytes_per_s"]
             out.append(self.row(widths, [f"    {d['name']}", per_s(r["read_bytes_per_s"]), per_s(r["write_bytes_per_s"]),
-                                         f"{r['reads_per_s']:.0f} · {r['writes_per_s']:.0f}",
+                                         f"{per_sec(r['reads_per_s'])} · {per_sec(r['writes_per_s'])}",
                                          f"{100 * r['io_time_ratio']:.1f} %"],
                                 ["muted"] * 5 if idle else [None, None, None, "muted", None]))
         if len(disks) > MAX_ROWS:
@@ -789,7 +825,7 @@ def body_overview(v):
     widths = [max(26, name_w), 12, 14, 18, 15] if wide else [max(18, name_w), 11, 12]
 
     if shown:
-        body.append(v.row(widths, ["  NETWORK", "↓ RX", "↑ TX", "PKT/S rx · tx", "ERR · DROP"], ["muted bold"] + ["muted"] * 4)
+        body.append(v.row(widths, ["  NETWORK", COL["rx"], COL["tx"], COL["packets"], COL["errors"]], ["muted bold"] + ["muted"] * 4)
                     + (st("   this netns · err/drop = totals", "muted") if wide else ""))
         body += [v.net_row(widths, i) for i in shown]
         if len(ifaces) > len(shown):
@@ -800,7 +836,7 @@ def body_overview(v):
     dio = s.get("disk_io") if isinstance(s.get("disk_io"), dict) else {}
     disks = dio.get("disks") if isinstance(dio.get("disks"), list) else []
     if wide and disks:
-        body.append(v.row(widths, ["  DISK I/O", "READ", "WRITE", "OPS/S r · w", "I/O TIME"], ["muted bold"] + ["muted"] * 4))
+        body.append(v.row(widths, ["  DISK I/O", COL["read"], COL["write"], COL["ops"], COL["io_time"]], ["muted bold"] + ["muted"] * 4))
         body += v.disk_rows(widths, disks)
         body.append("")
 
@@ -831,7 +867,7 @@ def body_overview(v):
                 where = pad(m[0]["path"], path_w) + ("(ro) " if m[0]["read_only"] else "") + (st(f"+{len(m) - 1} ", "muted") if len(m) > 1 else "")
                 dev = f["device"] or f"{f['major']}:{f['minor']}"
                 text = (meter(st, pct, 20, LIMITS["filesystem"]) + st(f"  {pct:3.0f} %", tone(level(pct, LIMITS["filesystem"])))
-                        + f"   {gib(f['used_bytes'])} / {gib(f['total_bytes'])}" + st(f"   {gib(f['available_bytes'])} free   {f['fstype']} {dev}", "muted")
+                        + f"   {size(f['used_bytes'])} / {size(f['total_bytes'])}" + st(f"   {size(f['available_bytes'])} free   {f['fstype']} {dev}", "muted")
                         if pct is not None else st(f"capacity unknown   {f['fstype']} {dev}", "muted"))
                 line = v.kv("STORAGE" if n == 0 else "", where + text)
                 body.append(spread(line, seen, width) if n == 0 else line)
@@ -872,10 +908,10 @@ def body_resources(v):
     m = s["memory"]
     body += ["", v.title("MEMORY")]
     body.append(v.meter_row("RAM", 100 * m["used"] / m["total"] if m["total"] else None, LIMITS["memory"],
-                            f"{gib(m['used'])} / {gib(m['total'])}   {gib(m['total'] - m['used'])} free"))
+                            f"{size(m['used'])} / {size(m['total'])}   {size(m['total'] - m['used'])} free"))
     if m["swap_total"]:  # the web page gives swap the memory levels too
         body.append(v.meter_row("SWAP", 100 * m["swap_used"] / m["swap_total"], LIMITS["memory"],
-                                f"{gib(m['swap_used'])} / {gib(m['swap_total'])}"))
+                                f"{size(m['swap_used'])} / {size(m['swap_total'])}"))
 
     psi = s.get("pressure")
     res = psi.get("resources") if isinstance(psi, dict) else None
@@ -904,7 +940,7 @@ def body_network(v):
     if ifaces:
         shown = ifaces[:MAX_ROWS]
         widths = detail_widths(v.width, shown, [13, 13, 17, 12])
-        body.append(v.row(widths, ["  INTERFACES", "↓ RX", "↑ TX", "PKT/S rx · tx", "ERR · DROP"],
+        body.append(v.row(widths, ["  INTERFACES", COL["rx"], COL["tx"], COL["packets"], COL["errors"]],
                           ["muted bold"] + ["muted"] * 4))
         body += [v.net_row(widths, i) for i in shown]
         if len(ifaces) > len(shown):
@@ -958,7 +994,7 @@ def body_storage(v):
     if fss:
         body.append(v.title("FILESYSTEMS", observed_text(o)))
         path_w = max(len(f["mount_points"][0]["path"]) for f in fss) + 2
-        cap_w = max(len(f"{gib(f['used_bytes'])} / {gib(f['total_bytes'])}") for f in fss
+        cap_w = max(len(f"{size(f['used_bytes'])} / {size(f['total_bytes'])}") for f in fss
                     if f["total_bytes"] is not None) if any(f["total_bytes"] is not None for f in fss) else 0
         bw = min(20 if v.wide else 11, max(6, v.width - 20 - path_w))
         for f in fss:
@@ -974,8 +1010,8 @@ def body_storage(v):
             body.append(joined(v.width, [
                 st(f"    {where}", "muted"), more, meter(st, pct, bw, LIMITS["filesystem"]),
                 st(pad(f"{pct:.0f} %", 7, True), tone(level(pct, LIMITS["filesystem"]))),
-                "   " + pad(f"{gib(f['used_bytes'])} / {gib(f['total_bytes'])}", cap_w),
-                st(f"   {gib(f['available_bytes'])} free", "muted"), dev]))
+                "   " + pad(f"{size(f['used_bytes'])} / {size(f['total_bytes'])}", cap_w),
+                st(f"   {size(f['available_bytes'])} free", "muted"), dev]))
 
     if parts:
         by_disk = {}
@@ -989,7 +1025,7 @@ def body_storage(v):
 
     if disks:
         widths = detail_widths(v.width, disks, [13, 13, 17, 12])
-        body += ["", v.row(widths, ["  DISK I/O", "READ", "WRITE", "OPS/S r · w", "I/O TIME"],
+        body += ["", v.row(widths, ["  DISK I/O", COL["read"], COL["write"], COL["ops"], COL["io_time"]],
                            ["muted bold"] + ["muted"] * 4)]
         body += v.disk_rows(widths, disks)
         body.append(st(pad("I/O time = share of window with I/O in flight", min(v.width, max(sum(widths), 46)), True), "muted"))

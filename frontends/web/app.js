@@ -1,5 +1,17 @@
 const $ = id => document.getElementById(id);
-const gib = b => (b / 2 ** 30).toFixed(1) + 'G';
+// The Overview readings' and the table columns' labels, long (here) and short (the terminal's), and the number
+// formats: frontends/ui-spec.json's metrics, columns and formats (tests/frontends/test_ui_spec.py).
+const METRICS = {cpu: ['CPU', 'CPU'], memory: ['RAM', 'RAM'], gpu: ['GPU', 'GPU'], filesystem: ['Root filesystem', 'DISK'],
+  temperature: ['Temperature', 'TEMP']};
+const COLUMNS = {rx: ['↓ Receive', '↓ RX'], tx: ['↑ Send', '↑ TX'], packets: ['Packets/s rx · tx', 'PKT/S rx · tx'],
+  errors: ['Errors · drops', 'ERR · DROP'], read: ['Read', 'READ'], write: ['Write', 'WRITE'], ops: ['Ops/s r · w', 'OPS/S r · w'],
+  io_time: ['I/O time', 'I/O TIME']};
+const FORMATS = {per_s_decimals: 0, size_units: ['G', 'M', 'K']};
+// bytes in the unit that fits them: 45.1G, 14M, 512K (a 100 MiB partition is not "0.1G")
+const size = b => {
+  for (const [i, unit] of FORMATS.size_units.entries()) if (b >= 2 ** (30 - 10 * i)) return (b / 2 ** (30 - 10 * i)).toFixed(i ? 0 : 1) + unit;
+  return b.toFixed(0) + 'B';
+};
 const SYSTEM_FIELDS = ['os', 'kernel', 'arch', 'hostname', 'l4t'];  // frontends/ui-spec.json system_fields
 const esc = v => String(v).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
@@ -92,21 +104,21 @@ const netCaption = s => {
 function netRows(s) {
   const items = listOf(s.network, 'interfaces');
   return items.length ? table('minmax(90px, 1fr) 110px 110px 150px 110px',
-    ['Interface', '↓ Receive', '↑ Send', 'Packets/s rx · tx', 'Errors · drops'], items.map(i => {
+    ['Interface', COLUMNS.rx[0], COLUMNS.tx[0], COLUMNS.packets[0], COLUMNS.errors[0]], items.map(i => {
       const r = i.rates, total = k => ((i.rx || {})[k] || 0) + ((i.tx || {})[k] || 0);
       const errs = `${total('errors')} · ${total('dropped')}`;
       return tr([esc(i.name), r ? perS(r.rx_bytes_per_s) : why(i), r ? perS(r.tx_bytes_per_s) : '',
-        r ? muted(`${r.rx_packets_per_s.toFixed(1)} · ${r.tx_packets_per_s.toFixed(1)}`) : '',
+        r ? muted(`${r.rx_packets_per_s.toFixed(FORMATS.per_s_decimals)} · ${r.tx_packets_per_s.toFixed(FORMATS.per_s_decimals)}`) : '',
         total('errors') || total('dropped') ? `<span class="t-warn">${errs}</span>` : muted(errs)], idle(r));
     }), 600) : '';
 }
 function diskRows(s) {
   const items = listOf(s.disk_io, 'disks');
-  return items.length ? table('minmax(90px, 1fr) 110px 110px 140px 80px', ['Disk', 'Read', 'Write', 'Ops/s r · w', 'I/O time'],
+  return items.length ? table('minmax(90px, 1fr) 110px 110px 140px 80px', ['Disk', COLUMNS.read[0], COLUMNS.write[0], COLUMNS.ops[0], COLUMNS.io_time[0]],
     items.map(d => {
       const r = d.rates;
       return tr([esc(d.name), r ? perS(r.read_bytes_per_s) : why(d), r ? perS(r.write_bytes_per_s) : '',
-        r ? muted(`${r.reads_per_s.toFixed(1)} · ${r.writes_per_s.toFixed(1)}`) : '', r ? (100 * r.io_time_ratio).toFixed(1) + ' %' : '']);
+        r ? muted(`${r.reads_per_s.toFixed(FORMATS.per_s_decimals)} · ${r.writes_per_s.toFixed(FORMATS.per_s_decimals)}`) : '', r ? (100 * r.io_time_ratio).toFixed(1) + ' %' : '']);
     }), 560) : '';
 }
 
@@ -208,10 +220,10 @@ function storageRows() {
     return '<div class="fs"><div><div class="fs-name"><span>' + esc(m[0].path) + '</span>' +
       (m[0].read_only ? '<span class="badge">ro</span>' : '') + (m.length > 1 ? muted(`+${m.length - 1} more`) : '') + '</div>' +
       `<div class="detail">${esc(f.fstype)} · ${esc(f.device || f.major + ':' + f.minor)}</div></div>` +
-      (f.total_bytes != null ? meter(`${gib(f.used_bytes)} / ${gib(f.total_bytes)} · ${pct.toFixed(0)} %`,
-        `${gib(f.available_bytes)} free`, pct, LIMITS.filesystem) : muted('capacity unknown')) + '</div>';
+      (f.total_bytes != null ? meter(`${size(f.used_bytes)} / ${size(f.total_bytes)} · ${pct.toFixed(0)} %`,
+        `${size(f.available_bytes)} free`, pct, LIMITS.filesystem) : muted('capacity unknown')) + '</div>';
   }).join('') + (parts.length ? '<h3>Partitions</h3>' + table('minmax(0, 1fr) 80px minmax(0, 1fr)', ['Partition', 'Size', 'Mounted at'],
-    parts.map(p => tr([esc(p.name), gib(p.size_bytes), p.mount_points.length ? esc(p.mount_points[0] +
+    parts.map(p => tr([esc(p.name), size(p.size_bytes), p.mount_points.length ? esc(p.mount_points[0] +
       (p.mount_points.length > 1 ? ` +${p.mount_points.length - 1} more` : '')) : muted('not mounted')]))) : '');
 }
 
@@ -262,7 +274,7 @@ const histValue = (id, v) => id.startsWith('temperature') ? v.toFixed(1) + ' °C
   : id.endsWith('_uw') ? (v / 1e6).toFixed(2) + ' W'
   : id.startsWith('cpu/') || id.startsWith('gpu/') || id.startsWith('npu/') ? v.toFixed(1) + ' %'
   : id.includes('/wifi/') ? v.toFixed(1) + ' dBm' : id.includes('/probe/') ? v.toFixed(1) + ' ms'
-  : id.startsWith('memory') || id.includes('/storage/') ? gib(v) : perS(v);
+  : id.startsWith('memory') || id.includes('/storage/') ? size(v) : perS(v);
 // x of a point on the 0–200 chart: spaced by its age, so irregular intervals stay irregular
 const histX = (points, p) => {
   const oldest = points[0][1], newest = points[points.length - 1][1];
@@ -399,15 +411,16 @@ function overviewRows(s) {
       (detail ? `<div class="detail">${esc(detail)}</div>` : '') + '</article>');
   };
   const cpus = s.cpu.filter(c => Number.isFinite(c.usage)), m = s.memory, d = s.disk, note = cpuNote(s);
-  metric('CPU', s.cpu.length + (s.cpu.length === 1 ? ' core' : ' cores'),
+  metric(METRICS.cpu[0], s.cpu.length + (s.cpu.length === 1 ? ' core' : ' cores'),
     cpus.length ? cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length : null, '%', LIMITS.cpu,
     `Mean of ${cpus.length} measured cores` + (note ? ' · ' + note : ''), 'resources');
-  metric('RAM', gib(m.total), pctOf(m.used, m.total), '%', LIMITS.memory, `${gib(m.used)} used · ${gib(m.total - m.used)} free`, 'resources');
-  if (s.gpu) metric('GPU', mhz(s.gpu.freq), s.gpu.usage, '%', LIMITS.gpu, '', 'resources');
-  metric('Root filesystem', gib(d.total), pctOf(d.used, d.total), '%', LIMITS.filesystem, `${gib(d.used)} used · ${gib(d.total - d.used)} free`, 'storage', '/');
+  metric(METRICS.memory[0], size(m.total), pctOf(m.used, m.total), '%', LIMITS.memory, `${size(m.used)} / ${size(m.total)}`, 'resources');
+  if (s.gpu) metric(METRICS.gpu[0], mhz(s.gpu.freq), s.gpu.usage, '%', LIMITS.gpu, '', 'resources');
+  // used / total, as the terminal: "free" is the filesystem's available space, which only the Storage view has
+  metric(METRICS.filesystem[0], size(d.total), pctOf(d.used, d.total), '%', LIMITS.filesystem, `${size(d.used)} / ${size(d.total)}`, 'storage', '/');
   const temps = Object.entries(s.temperature).filter(([, value]) => Number.isFinite(value)).sort((a, b) => b[1] - a[1]);
   if (temps.length) {
-    metric('Temperature', temps[0][0], temps[0][1], '°C', LIMITS.temperature, `Hottest of ${temps.length} ${temps.length === 1 ? 'sensor' : 'sensors'}`, 'thermal', temps[0][0]);
+    metric(METRICS.temperature[0], temps[0][0], temps[0][1], '°C', LIMITS.temperature, `Hottest of ${temps.length} ${temps.length === 1 ? 'sensor' : 'sensors'}`, 'thermal', temps[0][0]);
     for (const [name, value] of temps.slice(1)) {  // every hot sensor, not only the hottest
       const lv = level(value, LIMITS.temperature);
       if (lv !== 'ok') alerts.push({lv, tab: 'thermal', name, value: value.toFixed(1) + ' °C'});
@@ -440,7 +453,7 @@ function overviewRows(s) {
   if (interfaces.length) {
     const shown = interfaces.slice(0, 4);
     html += '<section class="card"><div class="card-head"><h2>Network</h2><a class="cap" href="#network">All interfaces →</a></div>' +
-      table('minmax(0, 1fr) 110px 110px', ['Interface', '↓ Receive', '↑ Send'], shown.map(i => tr([esc(i.name),
+      table('minmax(0, 1fr) 110px 110px', ['Interface', COLUMNS.rx[0], COLUMNS.tx[0]], shown.map(i => tr([esc(i.name),
         i.rates ? perS(i.rates.rx_bytes_per_s) : why(i), i.rates ? muted(perS(i.rates.tx_bytes_per_s)) : ''], idle(i.rates)))) +
       (shown.length < interfaces.length ? `<p class="note">Showing ${shown.length} of ${interfaces.length}</p>` : '') + '</section>';
   }
@@ -461,8 +474,8 @@ function renderResources(s) {
     (a.freq ? ' · ' + mhz(a.freq) : ''), a.usage == null ? 0 : a.usage, label === 'GPU' ? LIMITS.gpu : null);
   $('res').innerHTML = '<div class="meters">' +
     (g ? load(g, 'GPU') : '') + (n ? load(n, 'NPU') : '') +
-    meter('RAM', `${gib(m.used)} / ${gib(m.total)}`, pctOf(m.used, m.total), LIMITS.memory) +
-    (m.swap_total ? meter('Swap', `${gib(m.swap_used)} / ${gib(m.swap_total)}`, pctOf(m.swap_used, m.swap_total), LIMITS.memory) : '') + '</div>';
+    meter('RAM', `${size(m.used)} / ${size(m.total)}`, pctOf(m.used, m.total), LIMITS.memory) +
+    (m.swap_total ? meter('Swap', `${size(m.swap_used)} / ${size(m.swap_total)}`, pctOf(m.swap_used, m.swap_total), LIMITS.memory) : '') + '</div>';
   $('psi').innerHTML = psiRows(s);
 }
 function renderThermal(s) {
