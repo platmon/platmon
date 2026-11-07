@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn slow_groups_and_history_follow_configuration() {
         const BAT: (&str, f64) = ("battery", 60.0); // on by default, like storage and wifi
-        let cases: [(Option<&str>, Vec<(&str, f64)>, bool); 10] = [
+        let cases: [(Option<&str>, Vec<(&str, f64)>, bool); 12] = [
             (None, vec![("storage", 30.0), ("wifi", 5.0), BAT], true),
             (Some("[storage]\ninterval = 60\n"), vec![("storage", 60.0), ("wifi", 5.0), BAT], true),
             (Some("[storage]\nenabled = no\n"), vec![("wifi", 5.0), BAT], true),
@@ -241,7 +241,11 @@ mod tests {
             (Some("[storage]\nenabled = no\n[wifi]\nenabled = no\n[battery]\nenabled = no\n[history]\nenabled = no\n"), vec![], false),
             (Some("[probe]\ntargets = 127.0.0.1:9797\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT, ("probe", 10.0)], true),
             (Some("[probe]\nenabled = no\ntargets = 127.0.0.1:9797\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT], true),
-            (Some("[probe]\ntargets = , ,\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT], true)];
+            (Some("[probe]\ntargets = , ,\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT], true),
+            // off by default (docs/reference/processes.md); after probe in the groups' order
+            (Some("[processes]\nenabled = yes\n"), vec![("storage", 30.0), ("wifi", 5.0), BAT, ("processes", 5.0)], true),
+            (Some("[processes]\nenabled = yes\ninterval = 10\n[probe]\ntargets = 127.0.0.1:9797\n"),
+             vec![("storage", 30.0), ("wifi", 5.0), BAT, ("probe", 10.0), ("processes", 10.0)], true)];
         let path = std::env::temp_dir().join(format!("platmon-server-slow-{}.ini", std::process::id()));
         for (text, groups, history) in cases {
             if let Some(t) = text {

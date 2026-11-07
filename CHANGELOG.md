@@ -8,6 +8,12 @@ API schema versions are independent of release versions.
 
 Draft for the next release; the version and date replace this heading when it is tagged.
 
+- **New, off by default:** a `processes` observation (`[processes] enabled = yes`, Linux only): every 5 s the
+  10 busiest processes by CPU and the 10 largest by memory (name, state, CPU in % of one core, resident
+  memory, threads, cgroup unit) and the host's process counts, at `/api/observations` and in replay.
+  Names only, never command lines. Not shown by the web page or the `platmon` command yet, not in
+  `/api/history`; platmon-hub 1.1.1 ignores it (docs/reference/processes.md). The observation-samples
+  error for an unknown group now lists `processes`.
 - **Experimental:** a Windows x86_64 zip of the server among the release files,
   `platmon-VERSION-windows-x86_64-experimental.zip`: `platmon-server.exe`, the web page, a `platmon.ini`
   listening on 127.0.0.1 only, the licenses and a README on running it by hand or as a Windows service. It is

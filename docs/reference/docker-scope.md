@@ -27,6 +27,7 @@ Dynamic readings differ in time; this comparison checks availability, identity a
 | Other mounted filesystems | host /boot/efi is not exposed by the non-recursive root bind | still requires an explicit read-only directory bind |
 | PSI | unavailable on the Orin host too; kernel lacks CONFIG_PSI | networking cannot enable kernel PSI |
 | Probe | configured targets use the container network; loopback is container-local | loopback means the host; empty targets remain idle |
+| Processes (off by default) | the container's own processes only, `scope: container` (checked 2026-11-07 on x86 with `docker run`; `--pid=host` lists the host's) | unchanged: Compose does not share the host's PID namespace |
 | History / CLI / web | only records/displays the data the collectors can see | restored Network/Wi-Fi data becomes available to the same consumers |
 
 ## Native image check

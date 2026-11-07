@@ -15,6 +15,7 @@ const DEFAULTS: &[(&str, &[(&str, &str, Kind)])] = &[
     ("history", &[("enabled", "yes", Kind::Bool), ("retention", "600.0", Kind::Float)]),
     ("replay", &[("enabled", "yes", Kind::Bool), ("retention", "600.0", Kind::Float), ("max_bytes", "16777216", Kind::Int)]),
     ("pressure", &[("enabled", "yes", Kind::Bool)]),
+    ("processes", &[("enabled", "no", Kind::Bool), ("interval", "5.0", Kind::Float), ("top", "10", Kind::Int)]),
     ("http", &[("enabled", "yes", Kind::Bool), ("bind", "0.0.0.0", Kind::Str), ("port", "9797", Kind::Int), ("web", "yes", Kind::Bool)]),
     ("thresholds", &[("cpu", "80, 90", Kind::Str), ("gpu", "80, 90", Kind::Str), ("memory", "80, 90", Kind::Str),
                      ("filesystem", "80, 90", Kind::Str), ("temperature", "", Kind::Str), ("battery", "20, 10", Kind::Str),
@@ -25,7 +26,7 @@ const RANGES: &[((&str, &str), (f64, f64))] = &[
     (("core", "interval"), (0.1, 3600.0)), (("storage", "interval"), (5.0, 3600.0)), (("wifi", "interval"), (1.0, 3600.0)),
     (("probe", "interval"), (1.0, 3600.0)), (("battery", "interval"), (10.0, 3600.0)), (("replay", "retention"), (1.0, 3600.0)),
     (("replay", "max_bytes"), (1048576.0, 67108864.0)), (("probe", "timeout"), (0.1, 10.0)), (("history", "retention"), (60.0, 3600.0)),
-    (("http", "port"), (1.0, 65535.0)),
+    (("http", "port"), (1.0, 65535.0)), (("processes", "interval"), (2.0, 3600.0)), (("processes", "top"), (1.0, 50.0)),
 ];
 const LOW_LEVELS: &[(&str, (f64, f64, &str))] = &[("battery", (0.0, 100.0, "%")), ("wifi", (-120.0, 0.0, " dBm"))];
 pub const FRONTENDS: &[&str] = &["http"];
@@ -567,6 +568,11 @@ mod tests {
             ("[http]\nenabled = maybe\n", None, Some("is not a valid bool")),
             ("[http]\nport = 70000\n", None, Some("out of range")),
             ("[core]\ninterval = 0\n", None, Some("out of range")), // 0 would make the sampler spin
+            ("[processes]\ninterval = 1\n", None, Some("[processes] interval = 1.0 is out of range (2 to 3600)")),
+            ("[processes]\ntop = 0\n", None, Some("[processes] top = 0 is out of range (1 to 50)")),
+            ("[processes]\ntop = 51\n", None, Some("out of range")),
+            ("[processes]\ntop = 2.5\n", None, Some("is not a valid int")),
+            ("[processes]\ncmdline = yes\n", None, Some("[processes] unknown key(s): cmdline")),
             ("[http]\nenabled = no\n", None, Some("nothing to run: every output is disabled; set enabled = yes in [http]")),
             ("", Some(&[]), Some("nothing to run")), // --frontends with no name
             ("[core]\ninterval = -1\n", None, Some("out of range")),

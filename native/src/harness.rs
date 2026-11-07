@@ -258,10 +258,12 @@ pub fn observe_script(args: &[String]) {
     let targets = crate::config::parse_targets(args.first().map_or("", String::as_str)).unwrap_or_else(|e| { eprintln!("observe-script: {}", e); std::process::exit(2) });
     let timeout: f64 = args.get(1).and_then(|t| t.parse().ok()).unwrap_or(2.0);
     let mut probe = crate::collect::probe::Probe::new(targets, timeout);
-    let mut logged: Vec<Vec<(String, Vec<String>)>> = vec![vec![]; 4];
+    // the groups the recorded answers hold; processes is checked by its unit tests (observe/processes.rs)
+    const RECORDED: [&str; 4] = ["storage", "wifi", "battery", "probe"];
+    let mut logged: Vec<Vec<(String, Vec<String>)>> = vec![vec![]; RECORDED.len()];
     for _ in std::io::stdin().lock().lines() {
         let mut groups = Value::obj();
-        for (i, name) in observe::GROUPS.iter().enumerate() {
+        for (i, name) in RECORDED.iter().enumerate() {
             let mut g = metadata::Group::new(name, false);
             let data = match *name {
                 "storage" => observe::storage(&mut g),

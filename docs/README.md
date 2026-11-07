@@ -26,8 +26,8 @@ document for implementation and validation evidence.
   numeric history and bounded publication replay.
 - Metric contracts: [network](reference/network.md), [disk I/O](reference/disk-io.md),
   [storage](reference/storage.md), [pressure](reference/pressure.md),
-  [Wi-Fi](reference/wifi.md), [battery](reference/battery.md) and
-  [TCP probes](reference/probe.md).
+  [Wi-Fi](reference/wifi.md), [battery](reference/battery.md),
+  [TCP probes](reference/probe.md) and [processes](reference/processes.md).
 - [Packaging and releases](reference/packaging.md) — versioning, artifacts,
   migration, rollback and release workflow.
 - [Docker observation scope](reference/docker-scope.md) — verified host visibility,
@@ -45,6 +45,8 @@ document for implementation and validation evidence.
   shown now: a Rust test, a recorded comparison, or why none is needed.
 - [Remaining work](development/remaining-work.md) — what is still open: the Windows build's
   real-PC checks and Linux release gaps.
+- [Process group](development/processes-design.md) — the `processes` observation's design, probe and
+  validation results (x86, Orin) and the owner's open decisions.
 - [Release readiness](releases/readiness.md) — acceptance gates and release evidence.
 - [Performance reports](performance/README.md) — budgets, current measurements,
   and background studies.
