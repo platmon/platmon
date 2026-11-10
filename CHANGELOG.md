@@ -49,6 +49,9 @@ Draft for the next release; the version and date replace this heading when it is
 - The HTTP server gives a client 10 s for its whole request line and headers, not 10 s per read: a client
   that sends a byte now and then can no longer hold one of the 32 connections indefinitely, and 32 of them
   can no longer keep the API from everyone else. A request sent at once is answered as before.
+- Packaging: the first installation of the `.deb` or `.rpm`, and the first run of `deploy/systemd/install.sh`,
+  say where the service listens and that it has no authentication, with how to restrict it when the bind is
+  not a loopback address (#175). Upgrades say nothing new.
 - Internal: CI checks every build against the released platmon-hub (1.1.1, pinned by its PyPI hash): its
   validators, a raw-capture Hub through a server restart and its database (`hub_contract.py`).
 - Internal: the soak and deployment tools run the candidate in the login user's systemd without sudo

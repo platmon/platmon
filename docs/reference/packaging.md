@@ -210,6 +210,15 @@ the cause and run `sudo dpkg --configure platmon`. Check the expected readings o
 device. The health check is not evidence that every
 sensor or filesystem is exposed. The unauthenticated API belongs on a trusted network.
 
+The first installation (not an upgrade) ends by saying where the service listens, from the checked
+configuration's `[http] bind` and `port`, and that it has no authentication; when the bind is not a
+loopback address it adds how to restrict it. `deploy/systemd/install.sh` says the same on its first run.
+
+```text
+platmon serves http://0.0.0.0:9797 (every IPv4 interface) without authentication.
+To restrict it, set [http] bind in /etc/platmon/platmon.ini and restart: systemctl restart platmon
+```
+
 ```sh
 sudo apt remove platmon    # removes code and stops service; preserves config
 sudo apt purge platmon     # also removes the packaged conffile
@@ -242,7 +251,8 @@ The scriptlets do what the `.deb`'s maintainer scripts do, within what rpm allow
 
 - The first install refuses a local `/etc/systemd/system/platmon.service` or a running Docker instance
   (as the `.deb` does; [migrate](#migrate-a-source-or-docker-installation) first), then enables the
-  service. An upgrade keeps the administrator's enabled or disabled choice.
+  service and says where it will listen (`%post`, before the service starts: only `%post` tells a first
+  install from an upgrade). An upgrade keeps the administrator's enabled or disabled choice.
 - After the transaction (`%posttrans`), `platmon-server config-check` validates the kept INI; an invalid
   one is reported and the running server is left alone. Otherwise an enabled or running service is
   restarted and must answer within 20 s, as after a `.deb` install; a disabled service is not started.

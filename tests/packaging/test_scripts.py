@@ -117,3 +117,34 @@ elif not ("up" in args or "logs" in args):
     assert expected in result.stdout
     recorded = [json.loads(line) for line in calls.read_text().splitlines()]
     assert any("exec" in call for call in recorded) == (mode == "host")
+
+
+LISTENING = [  # [http] as config-check prints it -> what the first installation says
+    ('{"http":{"enabled":true,"bind":"0.0.0.0","port":9797,"web":true}}',
+     ["platmon serves http://0.0.0.0:9797 (every IPv4 interface) without authentication.",
+      "To restrict it, set [http] bind in /etc/platmon/platmon.ini and restart: systemctl restart platmon"]),
+    ('{"http":{"enabled":true,"bind":"192.168.1.5","port":8080,"web":false}}',
+     ["platmon serves http://192.168.1.5:8080 without authentication.",
+      "To restrict it, set [http] bind in /etc/platmon/platmon.ini and restart: systemctl restart platmon"]),
+    ('{"http":{"enabled":true,"bind":"127.0.0.1","port":9797,"web":true}}',  # loopback: nothing to restrict
+     ["platmon serves http://127.0.0.1:9797 without authentication."]),
+    ('{"http":{"enabled":false,"bind":"0.0.0.0","port":9797,"web":true}}', []),  # nothing listens
+    ('{"error":"[http] unknown key(s): prot"}', []),
+]
+
+
+@pytest.mark.parametrize("path", ["packaging/debian/postinst", "packaging/rpm/platmon.spec", "deploy/systemd/install.sh"])
+@pytest.mark.parametrize("checked, said", LISTENING)
+def test_the_first_installation_says_where_it_listens(tmp_path, path, checked, said):
+    """postinst, the RPM's %posttrans and install.sh read bind and port from config-check's JSON, without
+    Python, and print the same words (issue #175)."""
+    import re
+    text = (ROOT / path).read_text(encoding="utf-8")
+    function = re.search(r"^listen_notice\(\) \{\n.*?^\}\n", text, re.S | re.M).group(0)
+    server = tmp_path / "platmon-server"
+    server.write_text(f"#!/bin/sh\n[ \"$1\" = config-check ] && cat <<'JSON'\n{checked}\nJSON\n")
+    server.chmod(0o755)
+    function = function.replace("/usr/lib/platmon/platmon-server", str(server))
+    script = f'binary={server}\nconfig=/etc/platmon/platmon.ini\n{function}listen_notice\n'
+    out = subprocess.run(["sh", "-c", script], text=True, capture_output=True, check=True)
+    assert out.stdout.splitlines() == said and not out.stderr

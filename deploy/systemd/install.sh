@@ -16,6 +16,8 @@ repo=$(cd "$here/../.." && pwd)
 prefix=/opt/platmon
 config=/etc/platmon/platmon.ini
 unit=/etc/systemd/system/platmon.service
+first=false
+[ -f "$unit" ] || first=true  # no unit yet: the first installation
 
 if command -v dpkg-query >/dev/null && [ "$(dpkg-query -W -f='${db:Status-Status}' platmon 2>/dev/null)" = installed ]; then
     echo "platmon is managed by dpkg; update it with apt, not this source installer" >&2
@@ -45,6 +47,23 @@ if [ ! -x "$binary" ]; then
     exit 1
 fi
 version=$(python3 "$repo/scripts/packaging/package.py" --version)
+
+# Where the service listens and that it has no authentication, from the checked configuration
+# (config-check's JSON, one line), said on the first installation only. Nothing when [http] is off.
+listen_notice() {
+    http=$("$binary" config-check "$config" 2>/dev/null | sed -n 's/.*"http":{\([^}]*\)}.*/\1/p')
+    case $http in *'"enabled":true'*) ;; *) return 0 ;; esac
+    bind=$(printf '%s\n' "$http" | sed -n 's/.*"bind":"\([^"]*\)".*/\1/p')
+    port=$(printf '%s\n' "$http" | sed -n 's/.*"port":\([0-9]*\).*/\1/p')
+    [ -n "$bind" ] && [ -n "$port" ] || return 0
+    where=""
+    [ "$bind" != 0.0.0.0 ] || where=" (every IPv4 interface)"
+    echo "platmon serves http://$bind:$port$where without authentication."
+    case $bind in
+        127.*) ;;
+        *) echo "To restrict it, set [http] bind in $config and restart: systemctl restart platmon" ;;
+    esac
+}
 
 # check the config with this checkout's server before replacing anything
 candidate_config=$config
@@ -136,3 +155,4 @@ else
 fi
 # the `platmon` command to look at it; a failure here must not stop the service install
 "$repo/scripts/install-cli.sh" || echo "the platmon command was not installed (see above)" >&2
+[ "$first" != true ] || listen_notice
