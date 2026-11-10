@@ -89,7 +89,7 @@ flowchart LR
 
 | Device | System | Checked |
 | --- | --- | --- |
-| Jetson Orin Nano devkit | L4T R36.5.2, Ubuntu 22.04 | every release: package install and upgrade, 24 h soak, GPU, power rails, fans, power mode |
+| Jetson Orin Nano devkit | L4T R36.5.2, Ubuntu 22.04 | 1.4.0 to 1.7.0: the release binary checked on the device before each release, with a soak (24 h at 1.4.0 and 1.7.0, 1 h at 1.5.0 and 1.6.0); GPU, power rails, fans, power mode |
 | Raspberry Pi 4 Model B | Debian 13 | package install and upgrade (1.3.0), CPU and memory comparison (1.4.0) |
 | x86-64 PC | Ubuntu 24.04 | development baseline |
 | amd64 and arm64 containers | Ubuntu 22.04, 24.04, 26.04 | every commit: package lifecycle and the service under systemd |
