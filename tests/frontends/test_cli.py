@@ -139,7 +139,10 @@ def test_not_running_explains_and_exits():
         port = s.getsockname()[1]
     r = run_cli(f"localhost:{port}")  # without --once too: fail once, no endless retry loop
     assert r.returncode == 1
-    assert f"platmon is not running on localhost:{port}" in r.stderr and "deploy/docker/start.sh" in r.stderr
+    lines = r.stderr.splitlines()
+    assert f"platmon is not running on localhost:{port}" in lines[0]
+    assert lines[1].split()[:5] == ["check", "the", "service:", "systemctl", "status"]  # what a package install has
+    assert "deploy/docker/start.sh" in r.stderr  # and a checkout's way still
 
 
 def test_no_current_data_is_explained():
