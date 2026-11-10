@@ -1,0 +1,71 @@
+name: Hardware report
+description: How platmon behaves on a board or computer, also when everything works
+title: "hardware: <board>"
+labels: ["hardware"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        platmon is validated on few devices. A report from yours tells other users what to expect and
+        tells us which readers are missing. The output asked for below contains the device's host name,
+        interface names and mount points: edit out what you do not want to publish.
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Board or computer and its SoC or CPU; for a Jetson the L4T release
+      placeholder: "Raspberry Pi 5 Model B, BCM2712"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS, kernel and architecture
+      description: "`. /etc/os-release; echo \"$PRETTY_NAME\"; uname -rm`"
+      placeholder: "Debian GNU/Linux 13 (trixie), 6.12.25+rpt-rpi-2712, aarch64"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: platmon version and installation
+      placeholder: "1.7.0, APT repository"
+    validations:
+      required: true
+  - type: checkboxes
+    id: works
+    attributes:
+      label: Readings that are right
+      description: Tick what platmon shows and what agrees with the device's own tools. Leave unticked what the device does not have.
+      options:
+        - label: CPU usage and clocks
+        - label: GPU or NPU usage
+        - label: Memory and swap
+        - label: Temperatures
+        - label: Power rails or power mode
+        - label: Fans
+        - label: Network interfaces
+        - label: Disk I/O
+        - label: Storage (file systems)
+        - label: Wi-Fi signal
+        - label: Battery
+        - label: Pressure (PSI)
+  - type: textarea
+    id: gaps
+    attributes:
+      label: Missing or wrong
+      description: What the device has that platmon does not show, or shows differently from the device's own tools. Name the tool and its value.
+  - type: textarea
+    id: collect
+    attributes:
+      label: One collection
+      description: "`/usr/lib/platmon/platmon-server collect`. It reads the device once and prints what the service would publish, with the state and reason of every reader."
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: service
+    attributes:
+      label: Service
+      description: "`systemctl status platmon --no-pager | head -n 12` and anything the install or the start printed"
+      render: text

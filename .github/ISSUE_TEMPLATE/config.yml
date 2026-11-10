@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/platmon/platmon/security/advisories/new
+    about: Report a vulnerability privately. Do not open a public issue for it.
+  - name: Question or idea
+    url: https://github.com/platmon/platmon/discussions
+    about: Ask how to use platmon or propose something before it becomes an issue.

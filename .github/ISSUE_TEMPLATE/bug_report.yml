@@ -1,0 +1,79 @@
+name: Bug report
+description: Wrong, missing or stale readings, a failed install or upgrade, a crash
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The outputs asked for below contain the device's host name, interface
+        names and mount points: edit out what you do not want to publish.
+        For a vulnerability, use [private reporting](https://github.com/platmon/platmon/security/advisories/new) instead.
+  - type: input
+    id: version
+    attributes:
+      label: platmon version
+      description: "`/usr/lib/platmon/platmon-server --version` (or `platmon --version`)"
+      placeholder: "1.7.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation
+      options:
+        - APT repository
+        - .deb from GitHub Releases
+        - .rpm
+        - Source installation (deploy/systemd)
+        - Docker (deploy/docker)
+        - Windows zip
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Board or computer, and for a Jetson the L4T release
+      placeholder: "Jetson Orin Nano devkit, L4T R36.5.2"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS, kernel and architecture
+      description: "`. /etc/os-release; echo \"$PRETTY_NAME\"; uname -rm`"
+      placeholder: "Ubuntu 22.04.5 LTS, 5.15.148-tegra, aarch64"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead. Where it shows, say which view (terminal, web page, API).
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Service status
+      description: "`curl -s localhost:9797/api/status`"
+      render: json
+  - type: textarea
+    id: collect
+    attributes:
+      label: One collection
+      description: "`/usr/lib/platmon/platmon-server collect` (from a checkout: the built `platmon-server collect`). It reads the device once and prints what the service would publish."
+      render: json
+  - type: textarea
+    id: log
+    attributes:
+      label: Service log
+      description: "`journalctl -u platmon -n 50 --no-pager`"
+      render: text
+  - type: textarea
+    id: config
+    attributes:
+      label: Changes to platmon.ini
+      description: Only the keys you changed from the defaults, or "none"
+      render: ini
