@@ -103,9 +103,8 @@ Other Linux systems can use the release source archive and the
 installation lifecycle, migration and rollback.
 
 To watch several devices in one place, run [platmon-hub](https://github.com/platmon/platmon-hub)
-on another computer. platmon-hub 1.0.0 to 1.1.1 reads platmon 1.0.0 to 1.3.0 (1.1.1 also 1.4.0) and checks
-each endpoint's schema rather than the application version; its opt-in raw capture needs platmon 1.3.0 or
-later.
+on another computer. Which Hub release reads which platmon release, and what checked each pairing, is in
+[platmon-hub compatibility](../reference/hub-compatibility.md).
 
 ## View a running device
 
