@@ -2,7 +2,8 @@
 //! slow::Observations) and never collect. HTTP/1.0, one request per connection, at most 32 connections
 //! (excess ones are closed before a thread is started for them), 10 s to send the request line and
 //! headers in all (a client trickling bytes cannot hold a connection), 10 s without progress per response
-//! write.
+//! write. A request whose Host header names neither this device nor an address is refused (421): a web page
+//! elsewhere cannot read the device through a name it points here (DNS rebinding).
 //! Contract: docs/reference/api.md.
 //!
 //! /api/stats, /api/status, /api/observations, /api/history, /api/samples, /api/observation-samples,
@@ -51,7 +52,55 @@ pub struct Server {
     pub first_wait: Duration,
     /// the elapsed clock answers are aged on (the runtime script sets its own)
     pub clock: fn() -> i64,
+    /// [http] hosts, the names a Host header may carry besides the device's own (host_allowed); None
+    /// leaves Host unchecked (the runtime script's servers, which only local tools reach)
+    pub hosts: Option<Vec<String>>,
     active: AtomicUsize,
+}
+
+/// Sent with the web page and its files: no other site may frame the page, and the page loads and
+/// connects to nothing but this server. Inline style attributes stay allowed, app.js sizes the bars with them.
+const PAGE_HEADERS: [(&str, &str); 3] = [
+    ("X-Content-Type-Options", "nosniff"),
+    ("X-Frame-Options", "DENY"),
+    ("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"),
+];
+
+/// This device's host name as the collectors report it ("" if it cannot be read), read for each request:
+/// it can change while the service runs.
+fn own_name() -> String {
+    #[cfg(target_os = "linux")]
+    return crate::collect::linux::common::os_uname()[1].clone();
+    #[cfg(windows)]
+    return crate::collect::windows::hostname();
+}
+
+/// Whether a request with this Host header value is meant for this device: no value, an IPv4 or bracketed
+/// IPv6 address, localhost, the device's name (own), that name with .local, or one of extra ([http] hosts;
+/// "*" accepts everything). The port is not compared. A browser reaches the device under any other name
+/// only if that name was pointed here, which is what a DNS rebinding page does.
+fn host_allowed(value: &str, own: &str, extra: &[String]) -> bool {
+    let value = value.trim_matches([' ', '\t']);
+    if value.is_empty() || extra.iter().any(|h| h == "*") {
+        return true;
+    }
+    let port_ok = |p: &str| p.len() <= 5 && p.bytes().all(|b| b.is_ascii_digit());
+    if let Some(rest) = value.strip_prefix('[') {
+        return rest.split_once(']').is_some_and(|(addr, after)| {
+            addr.parse::<std::net::Ipv6Addr>().is_ok() && (after.is_empty() || after.strip_prefix(':').is_some_and(port_ok))
+        });
+    }
+    let name = match value.rsplit_once(':') {
+        Some((name, port)) if port_ok(port) => name,
+        Some(_) => return false,
+        None => value,
+    };
+    if name.parse::<std::net::Ipv4Addr>().is_ok() {
+        return true;
+    }
+    let lower = |n: &str| n.strip_suffix('.').unwrap_or(n).to_ascii_lowercase();
+    let (name, own) = (lower(name), lower(own));
+    name == "localhost" || (!own.is_empty() && (name == own || name == format!("{}.local", own))) || extra.contains(&name)
 }
 
 /// An IPv4 listening socket as Python's HTTPServer makes it: a backlog of 5 (and SO_REUSEADDR on Linux).
@@ -109,6 +158,7 @@ fn phrase(code: u16) -> (&'static str, &'static str) {
         400 => ("Bad Request", "Bad request syntax or unsupported method"),
         404 => ("Not Found", "Nothing matches the given URI"),
         409 => ("Conflict", "Request conflict"),
+        421 => ("Misdirected Request", "Server is not able to produce a response"),
         414 => ("URI Too Long", "URI is too long."), // RFC 9110's name, Python 3.13+ (3.10: Request-URI Too Long)
         431 => ("Request Header Fields Too Large", "The server refused this request because the request header fields are too large."),
         500 => ("Internal Server Error", "Server got itself in trouble"),
@@ -160,10 +210,16 @@ impl Exchange<'_> {
     }
 
     fn reply(&mut self, path: &str, code: u16, body: &[u8], ctype: &str) -> std::io::Result<()> {
+        self.reply_with(path, code, body, ctype, &[])
+    }
+
+    /// reply with more headers after its own (the web page's files: PAGE_HEADERS).
+    fn reply_with(&mut self, path: &str, code: u16, body: &[u8], ctype: &str, more: &[(&'static str, &str)]) -> std::io::Result<()> {
         let mut headers = vec![("Content-Type", ctype.to_string()), ("Content-Length", body.len().to_string())];
         if LIVE.contains(&path) { // a cached answer would show old data as current
             headers.push(("Cache-Control", "no-store".into()));
         }
+        headers.extend(more.iter().map(|(k, v)| (*k, v.to_string())));
         self.head(code, phrase(code).0, &headers)?;
         self.body(body)
     }
@@ -214,7 +270,7 @@ impl Server {
     pub fn new(sampler: Arc<Sampler>, observations: Arc<Observations>, web: Option<String>, version: String, levels: Value) -> Server {
         Server { sampler, observations, web, version, levels, request_timeout: Duration::from_secs(10),
                  write_timeout: Duration::from_secs(10), max_connections: 32, first_wait: Duration::from_secs(5), clock: metadata::clock,
-                 active: AtomicUsize::new(0) }
+                 hosts: None, active: AtomicUsize::new(0) }
     }
 
     /// Accepts connections forever: one thread each, up to max_connections; an excess one is closed at once.
@@ -270,6 +326,7 @@ impl Server {
             path = format!("/{}", path.trim_start_matches('/'));
         }
         let mut lines = 0;
+        let mut host: Option<String> = None; // the first Host header's value, Latin-1
         loop { // as http.client._read_headers: the blank line (or the end) that ends them counts too
             let h = read_line(&mut r, MAX_LINE)?;
             if h.len() > MAX_LINE {
@@ -281,6 +338,16 @@ impl Server {
             }
             if h.is_empty() || h == b"\r\n" || h == b"\n" {
                 break;
+            }
+            if host.is_none() && h.len() >= 5 && h[..5].eq_ignore_ascii_case(b"host:") {
+                host = Some(h[5..].iter().map(|&b| b as char).collect::<String>().trim_end_matches(['\r', '\n']).to_string());
+            }
+        }
+        if let (Some(extra), Some(host)) = (&self.hosts, &host) {
+            if !host_allowed(host, &own_name(), extra) {
+                let shown: String = host.trim_matches([' ', '\t']).chars().take(80).collect();
+                return x.error(421, Some(&format!("Host {} is not this device's address or name; to accept it, list it in [http] hosts",
+                                                  py_repr(&shown))));
             }
         }
         if command != "GET" {
@@ -350,12 +417,12 @@ impl Server {
             "/" | "/index.html" if self.web.is_some() => {
                 let page = std::fs::read_to_string(format!("{}/index.html", self.web.as_ref().unwrap()))?;
                 let page = page.replace("@VERSION@", &self.version).replace("@LEVELS@", &self.levels.to_py());
-                x.reply(full, 200, page.as_bytes(), "text/html; charset=utf-8")
+                x.reply_with(full, 200, page.as_bytes(), "text/html; charset=utf-8", &PAGE_HEADERS)
             }
             _ => match WEB.iter().find(|(p, _, _)| *p == full).filter(|_| self.web.is_some()) {
                 Some((_, file, ctype)) => {
                     let body = std::fs::read(format!("{}/{}", self.web.as_ref().unwrap(), file))?;
-                    x.reply(full, 200, &body, ctype)
+                    x.reply_with(full, 200, &body, ctype, &PAGE_HEADERS)
                 }
                 None => x.error(404, None),
             },
@@ -507,6 +574,65 @@ mod tests {
         let mut out = String::new();
         let _ = s.read_to_string(&mut out);
         out
+    }
+
+    #[test]
+    fn host_allowed_addresses_own_names_and_the_listed() {
+        let listed = ["monitor.example".to_string()];
+        for host in ["", " ", "192.0.2.7", "192.0.2.7:9797", "127.0.0.1:80", "[::1]", "[2001:db8::1]:9797", "localhost", "LOCALHOST:9797",
+                     "localhost.", "orin", "Orin:9797", "orin:", "orin.local", "orin.local.:9797", "monitor.example", "MONITOR.example.:443"] {
+            assert!(host_allowed(host, "Orin", &listed), "{:?}", host);
+        }
+        for host in ["evil.example", "evil.example:9797", "orin.evil.example", "orin.local.evil.example", "localhost.evil.example",
+                     "192.0.2.7.evil.example", "192.0.2.7:x", "192.0.2.7:123456", "[::1", "[::1]x", "[orin]", "2001:db8::1",
+                     "monitor.example.org", "a b", "orin.lan"] {
+            assert!(!host_allowed(host, "Orin", &listed), "{:?}", host);
+        }
+        // a device whose name could not be read accepts no name for it, not the empty one or ".local"
+        assert!(!host_allowed(".local", "", &[]) && !host_allowed("local", "", &[]) && host_allowed("192.0.2.7", "", &[]));
+        // a fully qualified device name is compared whole
+        assert!(host_allowed("orin.lab.example", "orin.lab.example.", &[]) && !host_allowed("orin", "orin.lab.example", &[]));
+        assert!(host_allowed("evil.example", "orin", &["*".to_string()]));
+    }
+
+    #[test]
+    fn a_foreign_host_header_is_refused() {
+        let (addr, _) = server(|s| s.hosts = Some(vec!["monitor.example".into()]));
+        let ask = |host: &str| get(addr, &format!("GET /api/status HTTP/1.1\r\n{}\r\n", host));
+        for host in ["", "Host: 127.0.0.1\r\n", &format!("host: {}\r\n", addr), "HOST: localhost:9797\r\n", "Host: Monitor.Example\r\n",
+                     "Accept: */*\r\nHost:\r\n", "Host: 127.0.0.1\r\nHost: evil.example\r\n"] { // the first Host header is the one read
+            assert!(ask(host).starts_with("HTTP/1.0 200 OK\r\n"), "{:?}", host);
+        }
+        let r = ask("Host: evil.example:9797\r\n");
+        assert!(r.starts_with("HTTP/1.0 421 Host 'evil.example:9797' is not this device's address or name; to accept it, list it in [http] hosts\r\n"), "{}", r);
+        assert!(r.contains("\r\nConnection: close\r\n") && r.contains("<p>Error code: 421</p>") && !r.contains("instance_id"), "{}", r);
+        // every path and method is refused the same way, and what the page shows of the value is escaped and bounded
+        assert!(get(addr, "POST / HTTP/1.1\r\nHost: evil.example\r\n\r\n").starts_with("HTTP/1.0 421 "));
+        let r = ask(&format!("Host: <b>{}\r\n", "x".repeat(500)));
+        assert!(r.starts_with("HTTP/1.0 421 ") && r.contains("Host '&lt;b&gt;x") && !r.contains(&"x".repeat(81)), "{}", r);
+        // the runtime script's servers do not check; [http] hosts = * turns the check off for a service
+        let (unchecked, _) = server(|_| {});
+        assert!(get(unchecked, "GET /api/status HTTP/1.1\r\nHost: evil.example\r\n\r\n").starts_with("HTTP/1.0 200 OK\r\n"));
+        let (any, _) = server(|s| s.hosts = Some(vec!["*".into()]));
+        assert!(get(any, "GET /api/status HTTP/1.1\r\nHost: evil.example\r\n\r\n").starts_with("HTTP/1.0 200 OK\r\n"));
+    }
+
+    #[test]
+    fn the_page_and_its_files_say_what_a_browser_may_do_with_them() {
+        // its own copy of the page's files: native/build.sh's container has the crate, not frontends/
+        let web = web_dir("page-headers", &[("index.html", b"page"), ("app.js", b"js"), ("styles.css", b"css"),
+                                            ("assets/brand/favicon.svg", b"<svg/>")]);
+        let (addr, _) = server(|s| s.web = Some(web));
+        for path in ["/", "/index.html", "/app.js", "/styles.css", "/assets/brand/favicon.svg"] {
+            let r = get(addr, &format!("GET {} HTTP/1.0\r\n\r\n", path));
+            assert!(r.starts_with("HTTP/1.0 200 OK\r\n"), "{}: {}", path, &r[..r.len().min(200)]);
+            let head = r.split("\r\n\r\n").next().unwrap();
+            for (name, value) in PAGE_HEADERS {
+                assert!(head.contains(&format!("\r\n{}: {}", name, value)), "{}: {}", path, head);
+            }
+        }
+        let api = get(addr, "GET /api/status HTTP/1.0\r\n\r\n"); // the API's answers keep their headers
+        assert!(api.starts_with("HTTP/1.0 200 OK\r\n") && !api.contains("Content-Security-Policy") && !api.contains("X-Frame-Options"), "{}", api);
     }
 
     #[test]

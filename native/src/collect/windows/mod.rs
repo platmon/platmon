@@ -193,7 +193,8 @@ fn disk_usage() -> Result<(i64, i64), String> {
     Ok((total as i64, (total - free) as i64))
 }
 
-fn hostname() -> String {
+/// The computer's DNS host name ("" if it cannot be read): system.hostname, and http.rs's Host check.
+pub fn hostname() -> String {
     let mut buf = [0u16; 256];
     let mut len = buf.len() as u32;
     if unsafe { si::GetComputerNameExW(si::ComputerNamePhysicalDnsHostname, buf.as_mut_ptr(), &mut len) } == 0 {

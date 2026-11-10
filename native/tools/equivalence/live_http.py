@@ -271,6 +271,9 @@ RAW = {  # request -> what is compared of the answer: bare (no status line), sta
     "long request line": b"GET /" + b"a" * 70000 + b" HTTP/1.0\r\n\r\n",
     "empty line": b"\r\n",
     "//path": b"GET //api/status HTTP/1.0\r\n\r\n",
+    "Host by address": b"GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:9797\r\n\r\n",
+    "Host localhost": b"GET /api/status HTTP/1.1\r\nhost: LocalHost\r\n\r\n",
+    "foreign Host": b"GET /api/status HTTP/1.1\r\nHost: evil.example\r\n\r\n",
 }
 
 
@@ -291,6 +294,11 @@ RAW_EXPECTED = {  # the Python service's answers, but for HTTP/0.9 and the versi
     "long request line": {"bare": False, "status": "HTTP/1.0 414 URI Too Long", "headers": ERROR_HEADERS, "body": True},
     "empty line": {"bare": True, "body": False},
     "//path": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
+    # the Host check, which the Python service did not have (docs/reference/api.md, "Host header")
+    "Host by address": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
+    "Host localhost": {"bare": False, "status": "HTTP/1.0 200 OK", "headers": OK_HEADERS, "body": True},
+    "foreign Host": {"bare": False, "status": "HTTP/1.0 421 Host 'evil.example' is not this device's address or name; "
+                                              "to accept it, list it in [http] hosts", "headers": ERROR_HEADERS, "body": True},
 }
 
 

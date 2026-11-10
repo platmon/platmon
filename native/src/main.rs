@@ -213,7 +213,9 @@ fn serve(args: &[String]) {
         (None, true) => println!("platmon web page: off, no --web DIR given (API only)"),
         (None, false) => println!("platmon web page: off, web = no (API only)"),
     }
-    std::sync::Arc::new(http::Server::new(sampler, observations, web, version, levels)).serve(listener);
+    let mut server = http::Server::new(sampler, observations, web, version, levels);
+    server.hosts = Some(cfg.hosts.clone());
+    std::sync::Arc::new(server).serve(listener);
 }
 
 // tests/collector/test_storage.py test_slow_groups_and_history_follow_configuration, ported

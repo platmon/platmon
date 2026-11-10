@@ -16,7 +16,8 @@ const DEFAULTS: &[(&str, &[(&str, &str, Kind)])] = &[
     ("replay", &[("enabled", "yes", Kind::Bool), ("retention", "600.0", Kind::Float), ("max_bytes", "16777216", Kind::Int)]),
     ("pressure", &[("enabled", "yes", Kind::Bool)]),
     ("processes", &[("enabled", "no", Kind::Bool), ("interval", "5.0", Kind::Float), ("top", "10", Kind::Int)]),
-    ("http", &[("enabled", "yes", Kind::Bool), ("bind", "0.0.0.0", Kind::Str), ("port", "9797", Kind::Int), ("web", "yes", Kind::Bool)]),
+    ("http", &[("enabled", "yes", Kind::Bool), ("bind", "0.0.0.0", Kind::Str), ("port", "9797", Kind::Int), ("web", "yes", Kind::Bool),
+               ("hosts", "", Kind::Str)]),
     ("thresholds", &[("cpu", "80, 90", Kind::Str), ("gpu", "80, 90", Kind::Str), ("memory", "80, 90", Kind::Str),
                      ("filesystem", "80, 90", Kind::Str), ("temperature", "", Kind::Str), ("battery", "20, 10", Kind::Str),
                      ("wifi", "-70, -80", Kind::Str)]),
@@ -233,6 +234,8 @@ fn boolean(v: &str) -> Option<bool> {
 pub struct Config {
     ini: Ini,
     pub targets: Vec<(String, u16)>,
+    /// [http] hosts: the names a request's Host header may carry besides the device's own (parse_hosts)
+    pub hosts: Vec<String>,
 }
 
 impl Config {
@@ -381,6 +384,37 @@ pub fn parse_targets(text: &str) -> Result<Vec<(String, u16)>, String> {
     Ok(out)
 }
 
+/// [http] hosts: the extra names a request's Host header may carry, lowercase and without a final dot; "*"
+/// alone accepts every Host. Names only: an address is always accepted, and the port is not compared.
+pub fn parse_hosts(text: &str) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in text.split(',').map(|t| t.trim_matches(crate::pystr::py_space)).filter(|t| !t.is_empty()) {
+        if item == "*" {
+            out.push(item.to_string());
+            continue;
+        }
+        let name = item.strip_suffix('.').unwrap_or(item).to_ascii_lowercase();
+        if item.contains(':') || item.contains('/') {
+            return Err(format!("{}: give the name alone, without a scheme or a port", py_repr(item)));
+        }
+        let label_ok = |l: &str| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-')
+            && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        if name.len() > 253 || !name.split('.').all(label_ok) {
+            return Err(format!("{} is not a host name", py_repr(item)));
+        }
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    if out.len() > 16 {
+        return Err("at most 16 names".into());
+    }
+    if out.len() > 1 && out.iter().any(|h| h == "*") {
+        return Err("* accepts every Host, so it stands alone".into());
+    }
+    Ok(out)
+}
+
 /// The --frontends value as serve passes it on: None when not given or empty, else split at commas.
 pub fn frontends(value: Option<&str>) -> Option<Vec<&str>> {
     value.filter(|v| !v.is_empty()).map(|v| v.split(',').collect())
@@ -398,7 +432,8 @@ pub fn load(path: Option<&str>, frontends: Option<&[&str]>) -> Result<Config, St
     check(&ini)?;
     levels(&ini, None)?;
     let targets = parse_targets(ini.get("probe", "targets").unwrap_or_default()).map_err(|e| format!("[probe] targets: {}", e))?;
-    let cfg = Config { ini, targets };
+    let hosts = parse_hosts(ini.get("http", "hosts").unwrap_or_default()).map_err(|e| format!("[http] hosts: {}", e))?;
+    let cfg = Config { ini, targets, hosts };
     if !cfg.targets.is_empty() && cfg.targets.len() as f64 * cfg.float("probe", "timeout") >= cfg.float("probe", "interval") {
         return Err("[probe] interval must be longer than timeout × number of targets (they are probed one after another)".into());
     }
@@ -441,6 +476,24 @@ mod tests {
                      "192.0.2.1:1,192.0.2.1:1", &five] {
             assert!(parse_targets(text).is_err(), "{}", text); // names are never resolved; at most 4; no duplicates
         }
+    }
+
+    #[test]
+    fn parse_hosts_names_only() {
+        assert_eq!(parse_hosts("Robot1.Lab.Example., monitor.example ,robot1.lab.example,").unwrap(),
+                   ["robot1.lab.example".to_string(), "monitor.example".to_string()]); // lowercase, no final dot, once
+        assert_eq!(parse_hosts("*").unwrap(), ["*".to_string()]);
+        assert!(parse_hosts("").unwrap().is_empty());
+        let many = (0..17).map(|n| format!("h{}.example", n)).collect::<Vec<_>>().join(",");
+        for text in ["http://robot1", "robot1:9797", "[::1]", "robot 1", "-robot", "robot..example", "*, robot1", "*.example", &many] {
+            assert!(parse_hosts(text).is_err(), "{}", text);
+        }
+        let path = std::env::temp_dir().join(format!("platmon-server-hosts-{}.ini", std::process::id()));
+        std::fs::write(&path, "[http]\nhosts = robot1:9797\n").unwrap();
+        let e = load(Some(path.to_str().unwrap()), None).err().unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(e.starts_with("[http] hosts: 'robot1:9797': give the name alone"), "{}", e);
+        assert!(load(None, None).ok().unwrap().hosts.is_empty()); // by default only the device's own names
     }
 
     #[test]
