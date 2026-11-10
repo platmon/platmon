@@ -5,17 +5,76 @@
   <img src="frontends/web/assets/brand/platmon-logo-light.svg" alt="platmon" width="440">
 </picture>
 
-> **TL;DR**
-> - One background service collects Linux host metrics (CPU, GPU/NPU, memory, network, disk, sensors,
->   battery, Wi-Fi, pressure) and serves them to a terminal client, a web dashboard and an HTTP API on
->   port 9797.
-> - Install the `.deb` (amd64, arm64, armhf) from the APT repository or GitHub Releases; it runs one
->   static native server.
-> - No authentication: use it on trusted networks or restrict `[http] bind`.
+**A 1.5 MB monitor for Jetson, Raspberry Pi and other Linux boards.** One background service reads the
+device once a second and serves the same snapshot to a terminal client, a web dashboard and an HTTP API.
 
-Lightweight platform monitoring for Jetson, Raspberry Pi, PCs and other Linux hosts.
-A background service collects device metrics once and serves them to a terminal client,
-a browser dashboard and an HTTP API.
+| Web dashboard | Terminal client |
+| --- | --- |
+| ![The web dashboard's Overview on a Jetson Orin Nano](docs/assets/screenshot-web.png) | ![The terminal client's Overview](docs/assets/screenshot-cli.png) |
+
+- **Small enough to leave running.** One static binary of about 1.5 MB. On a Jetson Orin Nano over 24 h:
+  0.76 to 0.96 % of one core and 10.6 to 11.4 MiB of memory, while a Hub-like client polled it
+  ([release evidence](docs/releases/readiness.md), [budget](docs/performance/budget.md)).
+- **Nothing to install beside it.** The server depends on nothing on the device; the `platmon` command
+  needs only Python 3.9+ and its standard library. No pip, no Node, no database.
+- **Reads the board, not just the CPU.** CPU, GPU/NPU, memory and pressure (PSI), network, disk I/O,
+  storage, temperatures, power rails, fans, power mode, battery, Wi-Fi signal and TCP connect probes.
+- **Says what it does not know.** A reading the device does not have is `unavailable` with a reason, never
+  a zero; every answer carries its age, and stale data is refused rather than shown as current.
+- **One collection, any number of readers.** Requests never trigger a device read, so opening five
+  dashboards costs the device no more collections than opening none.
+
+> [!WARNING]
+> The service has **no authentication** and listens on all IPv4 interfaces (`0.0.0.0:9797`) by default.
+> Anyone who can reach the port can read the host name, kernel, interfaces and the other readings. Use it
+> on trusted networks, or [restrict it](docs/guides/deployment.md#choosing-what-is-served). See the
+> [security policy](SECURITY.md).
+
+## Install
+
+On Ubuntu or a Debian-derived system with systemd (amd64, arm64, armhf), from the signed APT repository:
+
+```sh
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://platmon.github.io/apt/platmon-archive-keyring.gpg \
+  | sudo tee /etc/apt/keyrings/platmon.gpg > /dev/null
+gpg --show-keys /etc/apt/keyrings/platmon.gpg   # 6D42 C14A BFB9 412F 34BA 4BEF F38B 9BB5 26A3 B0C6
+sudo tee /etc/apt/sources.list.d/platmon.sources > /dev/null <<EOT
+Types: deb
+URIs: https://platmon.github.io/apt
+Suites: stable
+Components: main
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/platmon.gpg
+EOT
+sudo apt update && sudo apt install platmon
+```
+
+The service starts with the install. Other ways in, all running the same server:
+
+| You have | Use |
+| --- | --- |
+| No APT repository access | the `.deb` files and `SHA256SUMS` from [GitHub Releases](https://github.com/platmon/platmon/releases) ([steps](docs/guides/getting-started.md#requirements-and-installation)) |
+| Fedora or Enterprise Linux 9+ | the `.rpm` packages ([RPM packages](docs/reference/packaging.md#rpm-packages)) <!-- TODO at the next release: built from a checkout until then --> |
+| Another Linux, or a change to try | a [source installation or a locally built container](docs/guides/deployment.md) |
+| A headless device without Python | `sudo apt install --no-install-recommends platmon`, then the web page or the API |
+| A PC that only watches other devices | the terminal client alone: `scripts/install-cli.sh --user` from a checkout |
+
+## Use
+
+```sh
+platmon                        # live terminal view of this device; 1-7 switch views, q quits
+platmon 192.168.55.53          # another device
+platmon --once                 # one plain snapshot, for scripts and logs
+curl -s localhost:9797/text    # the same screen without the client
+curl -s localhost:9797/api/stats
+```
+
+Open `http://<device>:9797` for the dashboard. Settings are in `/etc/platmon/platmon.ini`, where every
+key is listed with its default; restart the service after an edit (`sudo systemctl restart platmon`).
+
+To watch several devices in one place, run [platmon-hub](https://github.com/platmon/platmon-hub) on
+another computer: it reads each device's API and adds history, alerts and exports.
 
 ```mermaid
 flowchart LR
@@ -23,53 +82,48 @@ flowchart LR
     Service --> HTTP["HTTP server"]
     HTTP --> CLI["Terminal client"]
     HTTP --> Web["Browser dashboard"]
-    HTTP --> Consumers["API consumers"]
+    HTTP --> Consumers["API consumers<br/>platmon-hub, your scripts"]
 ```
 
-## Highlights
+## Where it has run
 
-- **Dependency-free runtime:** the Debian package's server is one static native binary (amd64, arm64, armhf);
-  the source installation and the container build and run the same server. The `platmon` command uses
-  the Python 3.9+ standard library only. No Python packages to install on the device.
-- **Hardware-aware monitoring:** CPU, available GPU/NPU, memory, network and disk I/O, storage,
-  temperatures, power, fans, battery, Wi-Fi and pressure. Unsupported sources remain unavailable.
-- **One collector, multiple views:** live terminal and web interfaces read the same published snapshots.
-- **History and integration:** recent in-memory trends plus
-  [bounded full-sample replay](docs/reference/replay.md) for external consumers.
-- **Deployment choices:** Debian package with systemd, source installation or a locally built Docker image,
-  all running the native server.
+| Device | System | Checked |
+| --- | --- | --- |
+| Jetson Orin Nano devkit | L4T R36.5.2, Ubuntu 22.04 | every release: package install and upgrade, 24 h soak, GPU, power rails, fans, power mode |
+| Raspberry Pi 4 Model B | Debian 13 | package install and upgrade (1.3.0), CPU and memory comparison (1.4.0) |
+| x86-64 PC | Ubuntu 24.04 | development baseline |
+| amd64 and arm64 containers | Ubuntu 22.04, 24.04, 26.04 | every commit: package lifecycle and the service under systemd |
+| armhf | Debian 13, Ubuntu 24.04 under QEMU | package lifecycle only; **not yet on a real 32-bit board** |
+| Windows 11 laptop | experimental build | not released |
 
-## Quick start
+Not on the list does not mean not working: unknown hardware gets the generic `/proc` and `/sys` readers.
+If you run platmon on another board, a
+[hardware report](https://github.com/platmon/platmon/issues/new?template=hardware_report.yml) is the most
+useful thing you can send.
 
-On Ubuntu/Debian-derived Linux (amd64, arm64 or armhf) with systemd (and Python 3.9+ for the `platmon`
-command, package `platmon-cli`), install from the signed
-[APT repository](https://platmon.github.io/apt/) (see [getting started](docs/guides/getting-started.md)),
-download a verified package from [GitHub Releases](https://github.com/platmon/platmon/releases),
-or build one from this checkout (Linux with `dpkg-deb` and Docker for the server's build required):
+## How it compares
 
-```sh
-native/build.sh
-platmon_version=$(python3 scripts/packaging/package.py --version)
-platmon_arch=$(dpkg --print-architecture)
-platmon_dist="dist/${platmon_version}-1"
-python3 scripts/packaging/package.py --output "$platmon_dist"
-python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_${platmon_arch}.deb"
-sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}.deb" \
-  "./${platmon_dist}/platmon-cli_${platmon_version}-1_all.deb"
-```
+platmon is for the device itself: something light enough to ship on every board, with a screen and an API
+built in. It is not a metrics platform.
 
-On Fedora or Enterprise Linux 9+ (x86_64, aarch64), build the `.rpm` packages from this checkout
-([RPM packages](docs/reference/packaging.md#rpm-packages); released files from the release after 1.7.0).
+| | platmon | jetson-stats (jtop) | Glances | Beszel | node_exporter |
+| --- | --- | --- | --- | --- | --- |
+| Shape | service + terminal + web + API | terminal + Python library | terminal + web + API | hub + agents | metrics endpoint |
+| Runs as | one static binary | Python | Python | Go binaries | Go binary |
+| Boards | Jetson, Raspberry Pi, any Linux | Jetson only | any | any | any |
+| Board power, fans, power mode | read | read and control | partly | partly | partly |
+| Long-term history, alerts | in platmon-hub | no | through exports | yes | through Prometheus |
+| License | Apache-2.0 | AGPL-3.0 | LGPL-3.0 | MIT | Apache-2.0 |
 
-```sh
-platmon --once           # one snapshot
-platmon                  # interactive terminal view
-curl -s localhost:9797/api/status
-```
+Pick something else when you need to **control** a Jetson (jtop), per-container statistics or accounts and
+alerts out of the box (Beszel), or you already run Prometheus and Grafana (node_exporter).
 
-Open `http://<device>:9797` in a browser to view the dashboard.
-The service is unauthenticated and listens on all IPv4 interfaces by default:
-**use it only on trusted networks**, or restrict the bind address in `platmon.ini`.
+## Compatibility
+
+From 1.0.0 the HTTP API's paths and fields, the `platmon.ini` keys and defaults, and the command options
+change only compatibly within a major version ([versioning](docs/reference/packaging.md)). Each API
+answer carries its own `schema_version`. History and replay are held in memory and cleared on restart;
+long-term storage belongs to the consumer.
 
 ## Documentation
 
@@ -79,15 +133,16 @@ The service is unauthenticated and listens on all IPv4 interfaces by default:
 - **[HTTP API reference](docs/reference/api.md):** endpoints, payloads, freshness and related metric contracts.
 - **[Documentation index](docs/README.md):** architecture, packaging, release readiness and performance evidence.
 
-## Development
+## Contributing
+
+Reports from real devices, bug reports and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+Report vulnerabilities privately: see [SECURITY.md](SECURITY.md).
 
 ```sh
-python3 -m pip install -r tests/requirements.txt  # tests only; runtime stays dependency-free
+native/build.sh                                    # the server and its unit tests, in a container
+python3 -m pip install -r tests/requirements.txt   # tests only; the runtime stays dependency-free
 pytest
 ```
-
-See the [architecture guide](docs/development/architecture.md) for source layout and module boundaries,
-and [performance reports](docs/performance/README.md) for measured overhead and its limits.
 
 ## License
 
