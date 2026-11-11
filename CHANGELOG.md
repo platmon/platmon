@@ -52,6 +52,9 @@ Draft for the next release; the version and date replace this heading when it is
 - Packaging: the first installation of the `.deb` or `.rpm`, and the first run of `deploy/systemd/install.sh`,
   say where the service listens and that it has no authentication, with how to restrict it when the bind is
   not a loopback address (#175). Upgrades say nothing new.
+- `config-check` refuses an `[http] bind` that is not an IPv4 address (`::`, `[::1]`, a host name, an empty
+  value, `999.1.1.1`), which `serve` could not listen on: before, the check passed and the service then
+  failed to start, which the package's install and upgrade and `deploy/systemd/install.sh` did not catch.
 - Internal: CI checks every build against the released platmon-hub (1.1.1, pinned by its PyPI hash): its
   validators, a raw-capture Hub through a server restart and its database (`hub_contract.py`).
 - Internal: the soak and deployment tools run the candidate in the login user's systemd without sudo
