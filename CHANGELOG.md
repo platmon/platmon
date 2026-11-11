@@ -4,9 +4,7 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
-
-Draft for the next release; the version and date replace this heading when it is tagged.
+## 1.8.0 — 2026-11-12
 
 - **Security, changes what is answered:** a request whose `Host` header is not an address, `localhost`,
   the device's host name or that name with `.local` now answers `421 Misdirected Request`. Before, any name
@@ -55,6 +53,12 @@ Draft for the next release; the version and date replace this heading when it is
 - `config-check` refuses an `[http] bind` that is not an IPv4 address (`::`, `[::1]`, a host name, an empty
   value, `999.1.1.1`), which `serve` could not listen on: before, the check passed and the service then
   failed to start, which the package's install and upgrade and `deploy/systemd/install.sh` did not catch.
+- When the local service does not answer, the `platmon` command's first hint is `systemctl status platmon`
+  (and `journalctl -u platmon`), which a package installation has, before the checkout's scripts (#178).
+- Documentation: a security policy (`SECURITY.md`: how to report, what is in scope, known limitations,
+  hardening), a contributing guide, issue and pull request templates, a README for a first-time visitor
+  with screenshots and where platmon has run, and one table of which platmon-hub release reads which
+  platmon release (docs/reference/hub-compatibility.md).
 - Internal: CI checks every build against the released platmon-hub (1.1.1, pinned by its PyPI hash): its
   validators, a raw-capture Hub through a server restart and its database (`hub_contract.py`).
 - Internal: the soak and deployment tools run the candidate in the login user's systemd without sudo
