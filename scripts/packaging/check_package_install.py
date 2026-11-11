@@ -11,6 +11,9 @@ from pathlib import Path
 import subprocess
 import uuid
 
+NOTICE = ("platmon serves http://0.0.0.0:9797 (every IPv4 interface) without authentication.\n"
+          "To restrict it, set [http] bind in /etc/platmon/platmon.ini and restart: systemctl restart platmon")
+
 
 def invoke(*args, success=True):
     result = subprocess.run(args, text=True, capture_output=True)
@@ -40,7 +43,8 @@ def inside(first, second):
     invoke("dpkg", "--compare-versions", first_version, "lt", second_version)
     first_cli, second_cli = cli_beside(first), cli_beside(second)
     # The server installs and runs without platmon-cli (only recommended), then the command comes with it.
-    invoke("dpkg", "-i", str(first))
+    out = invoke("dpkg", "-i", str(first))
+    assert NOTICE in out, out  # the first installation says where it listens, once
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == first_version
     assert not Path("/usr/bin/platmon").exists()
     # the server's name up to 1.6.0 still runs it
@@ -52,7 +56,8 @@ def inside(first, second):
     custom = "[http]\nbind = 127.0.0.1\nport = 19797\n[history]\nenabled = no\n"
     ini.write_text(custom)
     invoke("systemctl", "disable", "platmon.service")
-    invoke("dpkg", "--force-confold", "-i", str(second), str(second_cli))
+    out = invoke("dpkg", "--force-confold", "-i", str(second), str(second_cli))
+    assert "without authentication" not in out, out  # an upgrade does not repeat it
     assert ini.read_text() == custom
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == second_version
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon-cli") == second_version
@@ -89,8 +94,10 @@ def inside(first, second):
     local = Path("/usr/local/bin/platmon")
     local.parent.mkdir(parents=True, exist_ok=True)
     local.write_text("retained local command\n")
-    invoke("dpkg", "--force-confold", "-i", str(first), str(first_cli))
+    out = invoke("dpkg", "--force-confold", "-i", str(first), str(first_cli))
     assert ini.read_text() == custom and local.read_text() == "retained local command\n"
+    # a first installation again, of the kept INI: its address, and no advice for a loopback bind
+    assert "platmon serves http://127.0.0.1:19797 without authentication." in out and "To restrict" not in out, out
     # Invalid configuration fails configure instead of silently starting with defaults.
     ini.write_text("[http]\nprot = 9797\n")
     invoke("dpkg", "--force-confold", "-i", str(second), success=False)
@@ -103,7 +110,7 @@ def inside(first, second):
     assert not ini.exists() and extra.read_text() == "local backup\n"
     assert local.read_text() == "retained local command\n"
     print("dpkg lifecycle passed: the server without platmon-cli, then with it, config-preserving "
-          "upgrade/downgrade, platmon rolled back alone beside platmon-cli, disabled/masked state, remove/purge, migration refusal and invalid config recovery")
+          "upgrade/downgrade, platmon rolled back alone beside platmon-cli, disabled/masked state, the listen notice on first installs only, remove/purge, migration refusal and invalid config recovery")
 
 
 def check(first, second, image):

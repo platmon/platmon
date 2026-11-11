@@ -36,9 +36,27 @@ if command -v docker >/dev/null 2>&1 &&
 fi
 
 %post
-# Enabled on the first install, as the .deb does; an upgrade keeps the administrator's choice.
+# Where the service listens and that it has no authentication, from the checked configuration
+# (config-check's JSON, one line), said on the first installation only. Nothing when [http] is off.
+listen_notice() {
+    http=$(/usr/lib/platmon/platmon-server config-check /etc/platmon/platmon.ini 2>/dev/null | sed -n 's/.*"http":{\([^}]*\)}.*/\1/p')
+    case $http in *'"enabled":true'*) ;; *) return 0 ;; esac
+    bind=$(printf '%s\n' "$http" | sed -n 's/.*"bind":"\([^"]*\)".*/\1/p')
+    port=$(printf '%s\n' "$http" | sed -n 's/.*"port":\([0-9]*\).*/\1/p')
+    [ -n "$bind" ] && [ -n "$port" ] || return 0
+    where=""
+    [ "$bind" != 0.0.0.0 ] || where=" (every IPv4 interface)"
+    echo "platmon serves http://$bind:$port$where without authentication."
+    case $bind in
+        127.*) ;;
+        *) echo "To restrict it, set [http] bind in /etc/platmon/platmon.ini and restart: systemctl restart platmon" ;;
+    esac
+}
+# Enabled on the first install, as the .deb does; an upgrade keeps the administrator's choice. Only %post
+# can tell the two apart, so the notice is said here, before %posttrans starts the service.
 if [ "$1" -eq 1 ]; then
     systemctl --no-reload enable platmon.service >/dev/null 2>&1 || :
+    listen_notice
 fi
 
 %preun

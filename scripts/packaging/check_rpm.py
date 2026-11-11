@@ -27,6 +27,8 @@ INI = Path("/etc/platmon/platmon.ini")
 LOCAL_UNIT = Path("/etc/systemd/system/platmon.service")
 CUSTOM = "[http]\nport = 19797\n[history]\nretention = 300\n"
 PORT = 19797
+NOTICE = ("platmon serves http://0.0.0.0:9797 (every IPv4 interface) without authentication.\n"
+          "To restrict it, set [http] bind in /etc/platmon/platmon.ini and restart: systemctl restart platmon")
 
 
 def invoke(*args, success=True):
@@ -93,7 +95,8 @@ def lifecycle(first, second):
     assert not Path(SERVER).exists() and LOCAL_UNIT.read_text().endswith("serve\n")
     LOCAL_UNIT.unlink()  # Only the fixture created above is removed.
     # The first install enables and starts the service; the command comes with platmon-cli.
-    rpm("-i", str(first))
+    out = rpm("-i", str(first))
+    assert NOTICE in out, out  # the first installation says where it listens, once
     assert installed("platmon") == first_version
     assert invoke("systemctl", "is-enabled", "platmon.service") == "enabled"
     status, exe = ready(9797)
@@ -107,6 +110,7 @@ def lifecycle(first, second):
     # The upgrade keeps the INI and restarts the service.
     out = rpm("-U", str(second), str(second_cli))
     assert "health check skipped" not in out and "failed" not in out, out
+    assert "without authentication" not in out, out  # an upgrade does not repeat it
     assert installed("platmon") == second_version and installed("platmon-cli") == second_version
     after, exe = ready()
     assert exe == SERVER and after["instance_id"] != before["instance_id"]
@@ -150,7 +154,7 @@ def lifecycle(first, second):
     assert Path("/usr/bin/platmon").exists()
     rpm("-e", "platmon-cli")
     assert not Path("/usr/bin/platmon").exists()
-    print("rpm lifecycle passed: local unit refused, first install started without platmon-cli, then with it, "
+    print("rpm lifecycle passed: local unit refused, first install started (and its listen notice) without platmon-cli, then with it, "
           "upgrade with the INI kept, invalid INI, disabled service, failed start, downgrade, erase")
 
 
