@@ -415,6 +415,16 @@ pub fn parse_hosts(text: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// [http] bind: serve listens on IPv4 only and http::bind parses the value as an IPv4 address, so refuse here
+/// what it would refuse (an IPv6 address, a host name, an empty value) instead of letting the service fail.
+fn check_bind(text: &str) -> Result<(), String> {
+    if text.parse::<std::net::Ipv4Addr>().is_ok() {
+        return Ok(());
+    }
+    let why = if text.contains(':') { "IPv6 is not served" } else { "0.0.0.0 for every interface, or one of the device's addresses" };
+    Err(format!("[http] bind = {} is not an IPv4 address ({})", py_repr(text), why))
+}
+
 /// The --frontends value as serve passes it on: None when not given or empty, else split at commas.
 pub fn frontends(value: Option<&str>) -> Option<Vec<&str>> {
     value.filter(|v| !v.is_empty()).map(|v| v.split(',').collect())
@@ -433,6 +443,7 @@ pub fn load(path: Option<&str>, frontends: Option<&[&str]>) -> Result<Config, St
     levels(&ini, None)?;
     let targets = parse_targets(ini.get("probe", "targets").unwrap_or_default()).map_err(|e| format!("[probe] targets: {}", e))?;
     let hosts = parse_hosts(ini.get("http", "hosts").unwrap_or_default()).map_err(|e| format!("[http] hosts: {}", e))?;
+    check_bind(ini.get("http", "bind").unwrap_or_default())?;
     let cfg = Config { ini, targets, hosts };
     if !cfg.targets.is_empty() && cfg.targets.len() as f64 * cfg.float("probe", "timeout") >= cfg.float("probe", "interval") {
         return Err("[probe] interval must be longer than timeout × number of targets (they are probed one after another)".into());
@@ -630,7 +641,15 @@ mod tests {
             ("", Some(&[]), Some("nothing to run")), // --frontends with no name
             ("[core]\ninterval = -1\n", None, Some("out of range")),
             ("port = 1\n", None, Some("cannot parse config")), // no section header
-            ("[http]\nbind = 10%\n", Some(&["http"]), None), // % is literal, not interpolation
+            ("[http]\nbind = 10%\n", Some(&["http"]), Some("bind = '10%' is not")), // % is literal, not interpolation
+            ("[http]\nbind = ::\n", None, Some("[http] bind = '::' is not an IPv4 address (IPv6 is not served)")),
+            ("[http]\nbind = [::1]\n", None, Some("(IPv6 is not served)")),
+            ("[http]\nbind = 999.1.1.1\n", None, Some("[http] bind = '999.1.1.1' is not an IPv4 address (0.0.0.0 for every")),
+            ("[http]\nbind = robot1\n", None, Some("bind = 'robot1' is not an IPv4 address")),
+            ("[http]\nbind =\n", None, Some("bind = '' is not an IPv4 address")),
+            ("[http]\nbind = 0.0.0.0\n", None, None),
+            ("[http]\nbind = 127.0.0.1\n", None, None),
+            ("[http]\nbind = 192.168.18.18\n", None, None),
             ("[thresholds]\ncpu = 80\n", None, Some("[thresholds] cpu = '80': give two numbers")),
             ("[thresholds]\ncpu = 80, 90, 95\n", None, Some("give two numbers")),
             ("[thresholds]\nmemory = high, 90\n", None, Some("give two numbers")),

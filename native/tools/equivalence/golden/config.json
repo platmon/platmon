@@ -874,6 +874,129 @@
   }
  },
  {
+  "name": "bind IPv6 any",
+  "python": {
+   "error": "[http] bind = '::' is not an IPv4 address (IPv6 is not served)"
+  }
+ },
+ {
+  "name": "bind IPv6 in brackets",
+  "python": {
+   "error": "[http] bind = '[::1]' is not an IPv4 address (IPv6 is not served)"
+  }
+ },
+ {
+  "name": "bind a host name",
+  "python": {
+   "error": "[http] bind = 'robot1' is not an IPv4 address (0.0.0.0 for every interface, or one of the device's addresses)"
+  }
+ },
+ {
+  "name": "bind empty",
+  "python": {
+   "error": "[http] bind = '' is not an IPv4 address (0.0.0.0 for every interface, or one of the device's addresses)"
+  }
+ },
+ {
+  "name": "bind octet out of range",
+  "python": {
+   "error": "[http] bind = '999.1.1.1' is not an IPv4 address (0.0.0.0 for every interface, or one of the device's addresses)"
+  }
+ },
+ {
+  "name": "bind an interface address",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "processes": {
+    "enabled": false,
+    "interval": 5.0,
+    "top": 10
+   },
+   "http": {
+    "enabled": true,
+    "bind": "192.168.18.18",
+    "port": 9797,
+    "web": true,
+    "hosts": ""
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
   "name": "hosts",
   "python": {
    "core": {
