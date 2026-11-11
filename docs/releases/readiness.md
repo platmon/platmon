@@ -1,12 +1,58 @@
 # Release readiness
 
 > **TL;DR**
-> - Release gates and evidence per version, newest first (1.7.0 at the top).
+> - Release gates and evidence per version, newest first (1.8.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
+> - 1.8.0's release tree passed the local checks, the dpkg lifecycle and the Orin's package smoke and live
+>   HTTP (2026-11-12). Not verified for 1.8.0: the root unit's checks and soak, `hub_check.py`, the Windows zip
+>   on a real PC, armhf on a real device, an apt upgrade to it on a real device.
 > - 1.7.0's aarch64 binary passed its checks and a 24 h soak on the Orin as a user unit (2026-10-31, 11-01/02).
 >   After publishing, the Orin went from 1.6.0 to 1.7.0 with `apt install platmon` (2026-11-03).
 >   Not verified for 1.7.0: the root unit's soak and its sandbox, `hub_check.py`, armhf on a real device
 >   under systemd, `apt upgrade` to it on a real device.
+
+## 1.8.0 release gate (2026-11-12)
+
+Changes since 1.7.0: the `Host` header check against DNS rebinding with the `[http] hosts` key and the web
+page's security headers (#184), `config-check` refusing an `[http] bind` that is not an IPv4 address (#189),
+the listen notice after the first installation (#186), an opt-in `processes` observation (#171), a battery's
+`temp_c` (#161), one UI design for the web page and the `platmon` command with a space before units (#162,
+#163, #165), the command's `systemctl` hint (#185), the HTTP request timeout over the whole request (#169),
+`platmon-cli`'s bounded `Breaks` (#168), `.rpm` packages and the experimental Windows zip among the release
+files (#155, #160, #164), CI against the released platmon-hub (#170), the soak tools in the user's systemd
+(#150, #152, #153), and the launch documents (#183, #187, #188).
+
+A minor release by the owner's choice (2026-11-12): the HTTP API's paths and existing fields, the existing
+`platmon.ini` keys and their defaults, command options and schema versions are unchanged; `[http] hosts`
+and the `processes` observation are additions. Changed in what is answered: a request whose `Host` names
+another site gets 421 (`hosts = *` restores the old behavior), `config-check` exits 1 for a non-IPv4 bind,
+and `/text` and the command put a space before units. The server's bytes change (local `native/build.sh` /
+`build-armhf.sh` of the release tree): x86_64 `287e7970e4891040`, aarch64 `cfbef9e6091184d8`, armhf
+`4895bef45d9ea861`.
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| native equivalence on the release tree (x86_64): fake trees, configurations, runtime, live HTTP | `fixture.sh` 11/11, `config_fixture.py` 77/77, `runtime_fixture.py` 7/7 (`/text` and the CLI's screen the same), `live_http.py` no difference |
+| `hub_contract.py` with platmon-hub 1.1.1 against the release tree's x86_64 server | passed |
+| `pytest`, Rust unit tests | 276 passed, 2 skipped (the `.rpm` builds, without `rpmbuild` on the host); 277/277; `platmon-server --version` prints 1.8.0 |
+| `package.py` 1.8.0-1 and -2 (amd64, arm64, armhf, platmon-cli), `SHA256SUMS`, `check_package.py` (amd64, the PC), Lintian 2.117 (Ubuntu 24.04, `--pedantic --fail-on error,warning`) | built, `sha256sum -c` OK, smoke passed, clean |
+| `check_package_install.py` (amd64, Ubuntu 24.04 container): 1.8.0-1 and -2 | passed, including the listen notice on first installs only |
+| on the Jetson Orin Nano (Python 3.10), in a temporary directory beside the production 1.7.0 service | `check_package.py` on `platmon_1.8.0-1_arm64.deb` and platmon-cli: smoke passed; the aarch64 server's `live_http.py`: no difference |
+| the `Host` check on the Orin (#184, 2026-11-11): by address, host name and `.local` from another computer, Hub 1.1.1 registered by host name, Chrome | passed ([#184](https://github.com/platmon/platmon/pull/184)) |
+| CI on `main` (`046de48`): the dpkg lifecycle and the service under systemd upgraded from 1.3.0 (amd64, arm64 on Ubuntu 20.04, 22.04, 24.04, 26.04); armhf under QEMU (Debian 13, Ubuntu 24.04); the `.rpm` lifecycle (Fedora 44, AlmaLinux 9, CentOS Stream 10); the Windows build and its zip; `hub_contract.py` | passed |
+
+Not verified, and therefore open:
+
+- **No root candidate unit on the Orin:** `deploy_check.py checks`, a soak and `hub_check.py` of the release
+  binaries ([remaining work](../development/remaining-work.md#next-release-2026-11-03), item 4) need the
+  owner's sudo. The release binaries ran on the Orin as a user process only; the last soak is 1.7.0's.
+- **No `hub_check.py`** since 1.4.0 (`hub_contract.py` runs in CI instead).
+- **The Windows zip of this tree** is checked in CI only; the real-PC checks ran on 2026-11-01.
+- **armhf on a real device and its systemd service**, as at 1.7.0.
+- **No real device upgrade** from 1.7.0 to 1.8.0 under apt, and `apt install platmon` on a clean system
+  (after the release is published and the APT repository updated).
 
 ## 1.7.0 release gate (2026-10-31)
 

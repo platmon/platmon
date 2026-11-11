@@ -1,10 +1,11 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-11-03 (1.7.0 released); the evidence for
+> - What is still open, checked against the repository on 2026-11-12 (1.8.0 being prepared); the evidence for
 >   each release is in [release readiness](../releases/readiness.md).
-> - Next release (owner, 2026-11-03): the experimental Windows zip together with `.rpm` release files,
->   battery follow-ups and a root-unit soak with `hub_check.py` on the Orin, not the zip alone (below).
+> - Next release, 1.8.0 (owner, 2026-11-03 and 2026-11-12): the experimental Windows zip together with `.rpm`
+>   release files, battery follow-ups and a root-unit soak with `hub_check.py` on the Orin (below); the
+>   root unit's checks are still open.
 > - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, accepted as known
 >   gaps. Linux: armhf on a real device, `hub_check.py` since 1.4.0, the root unit's soak (1.7.0 soaked
 >   as a user unit), a whole-system `apt upgrade` on a real device, a remote probe target.
@@ -20,14 +21,15 @@ checkpoints are in this file as of `b96aba8`.
 ## Next release (2026-11-03)
 
 After 1.7.0 the owner chose not to release the Windows zip on its own but with the rest of this work, in
-this order; the version is chosen when it is tagged:
+this order; the version is 1.8.0 (owner, 2026-11-12):
 
-1. This file brought up to date with 1.7.0.
-2. `.rpm` packages among the release files (GitHub Release only: no DNF repository, no signing).
+1. This file brought up to date with 1.7.0. Done (#159).
+2. `.rpm` packages among the release files (GitHub Release only: no DNF repository, no signing). Done (#160).
 3. Battery follow-ups ([below](#deferred-after-the-battery-group-2026-10-11)), after a design decision.
+   Done: `temp_c` (#161), the rest closed or deferred by the owner on 2026-11-03.
 4. On the Orin, the release candidate as the root candidate unit: `deploy_check.py checks`, a soak and
-   `hub_check.py` (installing and removing the unit needs the owner's sudo).
-5. The release, with its gate in [release readiness](../releases/readiness.md).
+   `hub_check.py` (installing and removing the unit needs the owner's sudo). **Open.**
+5. The release, with its gate in [release readiness](../releases/readiness.md#180-release-gate-2026-11-12).
 
 ## Windows build (2026-10-26)
 
