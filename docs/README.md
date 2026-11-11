@@ -28,6 +28,8 @@ document for implementation and validation evidence.
   [storage](reference/storage.md), [pressure](reference/pressure.md),
   [Wi-Fi](reference/wifi.md), [battery](reference/battery.md),
   [TCP probes](reference/probe.md) and [processes](reference/processes.md).
+- [platmon-hub compatibility](reference/hub-compatibility.md) — which Hub release reads which
+  platmon release, and what checked each pairing.
 - [Packaging and releases](reference/packaging.md) — versioning, artifacts,
   migration, rollback and release workflow.
 - [Docker observation scope](reference/docker-scope.md) — verified host visibility,

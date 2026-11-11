@@ -334,7 +334,9 @@ directories are never automatically deleted by subsequent updates or uninstall.
 
 ## Release procedure
 
-1. Update `VERSION` (and its copy in `frontends/cli.py`) and the changelog. Review the scoped change and run
+1. Update `VERSION` (and its copy in `frontends/cli.py`), the changelog and the
+   [platmon-hub compatibility](hub-compatibility.md) table (the new release's row, with what checked it: CI's
+   `hub_contract.py` at least). Review the scoped change and run
    `git diff --check`, `pytest -v`, `native/build.sh`, `native/build-armhf.sh`, the build, package checker and Lintian.
 2. Test fresh install, upgrade with an edited INI, downgrade, remove/purge and existing
    installation migration. CI uses isolated containers for the dpkg lifecycle and, with systemd
