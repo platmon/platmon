@@ -369,8 +369,8 @@ def test_the_offline_banner_wraps_instead_of_losing_the_advice():
         assert all(vlen(line) <= width for line in lines)
         banner = " ".join(line.strip() for line in lines if "NOT CURRENT" in line
                           or line.startswith(" " * 17))
-        for word in ("[Errno 111] refused", "retrying every 1 s", "deploy/systemd/install.sh",
-                     "deploy/docker/start.sh"):
+        for word in ("[Errno 111] refused", "retrying every 1 s", "systemctl status platmon",
+                     "journalctl -u platmon", "deploy/systemd/start.sh", "deploy/docker/start.sh"):
             assert word in " ".join(banner.split()), (width, word, banner)
 
 

@@ -3,7 +3,8 @@
 Standalone (standard library only); scripts/install-cli.sh installs it as the `platmon` command.
 
 Usage: platmon [host[:port]] [interval_sec] [--once | --view VIEW]   (default localhost:9797, 1s)
-The service itself runs in the background: deploy/systemd/install.sh or deploy/docker/start.sh.
+The service itself runs in the background: `systemctl status platmon` checks it (from a checkout:
+deploy/systemd/install.sh or deploy/docker/start.sh).
 
 On an interactive terminal the live view is screen(): colored levels, a layout fitted to the terminal size,
 redrawn in place on the alternate screen. It shows one view at a time, as the web page's tabs do (VIEWS);
@@ -1292,14 +1293,17 @@ def explain(addr, e):
     reason = getattr(e, "reason", e)
     if addr.rsplit(":", 1)[0] in ("localhost", "127.0.0.1"):
         return (f"platmon is not running on {addr} ({reason})\n"
-                "  start the service from the platmon repo: deploy/systemd/install.sh or deploy/docker/start.sh")
-    return f"cannot reach platmon at {addr} ({reason})\n  check that its service runs there and the port is reachable"
+                "  check the service: systemctl status platmon    (log: journalctl -u platmon)\n"
+                "  from a checkout: deploy/systemd/start.sh or deploy/docker/start.sh")
+    return (f"cannot reach platmon at {addr} ({reason})\n"
+            "  check that its service runs there and the port is reachable (the device's [http] bind, a firewall)")
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="platmon", description="Live view of a platmon service (this device by default).",
-                                epilog="The service runs in the background: deploy/systemd/install.sh or "
-                                       "deploy/docker/start.sh in the platmon repo. In the live view 1-7, Tab "
+                                epilog="The service runs in the background: systemctl status platmon checks it "
+                                       "(from a checkout: deploy/systemd/install.sh or deploy/docker/start.sh). "
+                                       "In the live view 1-7, Tab "
                                        "or the arrow keys switch views and q quits. NO_COLOR=1 turns colors off; "
                                        "PLATMON_ASCII=1 draws with ASCII only.")
     p.add_argument("host", nargs="?", default="localhost", help=f"host[:port], default localhost:{PORT}")
