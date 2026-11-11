@@ -76,8 +76,6 @@ Restrict who can reach the port instead ([below](#hardening)).
 
 <!-- Keep this list current: remove an entry when the issue that fixes it is released. -->
 
-- The `Host` header is not checked, so a web page in a user's browser could read a device on that user's
-  network by DNS rebinding.
 - A client that holds 32 idle connections blocks other clients until the 10 s request limit ends them;
   collection is not affected.
 

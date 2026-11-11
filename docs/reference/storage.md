@@ -110,7 +110,7 @@ in the API.
 
 ## Windows
 
-The Windows build of the native server (not released; native/README.md, Windows) reads the same two lists
+The Windows build of the native server (experimental, from 1.8.0; native/README.md, Windows) reads the same two lists
 from Windows's own calls, with no access rights on any handle (nothing is read from or written to a disk):
 
 - `filesystems`: each volume Windows lists (`FindFirstVolumeW`) on a fixed or removable disk with at least one

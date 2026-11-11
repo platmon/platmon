@@ -60,7 +60,7 @@ unknown header is `invalid_data`; a row that does not match the format is left o
 
 ## Windows
 
-The Windows build of the native server (not released; native/README.md, Windows) asks the WLAN service
+The Windows build of the native server (experimental, from 1.8.0; native/README.md, Windows) asks the WLAN service
 (`wlanapi`) instead, for each wireless interface it lists. Provider `wlanapi`, `scope` `{"kind": "host",
 "id": null}` as for `network` on Windows. Passive as on Linux: no scan, no connection, and no SSID, BSSID
 or nearby network is read.

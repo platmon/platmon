@@ -9,7 +9,7 @@
 >   the recorded answers (`tools/equivalence/golden/`), regression data that `--bless` rewrites after an
 >   intended change ([ADR 0002](../docs/development/adr/0002-api-contract-not-python-answers.md)).
 > - The Windows build collects every group except pressure, NPU, power, fans, power mode and board info,
->   but is not released ([Windows](#windows-not-released)).
+>   and is released as an experimental zip from 1.8.0 ([Windows](#windows-experimental)).
 
 The platmon server the Debian package, the source installation and the container run. It was ported from the
 Python service (`platmon.py`, `collector/`, `runtime/`), keeping its contracts, so that the two gave the
@@ -131,7 +131,7 @@ service's answers on fixtures), **verified on hardware** (also run live on a hos
 
 | area | implemented and compared | verified on hardware | unverified / unsupported |
 | --- | --- | --- | --- |
-| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM (`arm-unknown-linux-musleabihf`, released as armhf) built by `build-armhf.sh`, checked on the Raspberry Pi 4 in 32-bit mode and its package under QEMU in CI ([below](#32-bit-arm)), no 32-bit kernel or ARMv6/ARMv7 board verified; `x86_64-pc-windows-msvc` builds, passes its unit tests and serves the required data in CI but is not released ([below](#windows-not-released)), so unsupported; other architectures unsupported |
+| targets | `x86_64` and `aarch64-unknown-linux-musl`, static, one binary per architecture | x86_64 PC (Ubuntu 26.04, kernel 7.0, i915 GPU, intel_vpu NPU, a battery); Jetson Orin Nano (Ubuntu 22.04 L4T, kernel 5.15); Raspberry Pi 4 (Debian 13, kernel 6.18) | other boards and distributions unverified; 32-bit ARM (`arm-unknown-linux-musleabihf`, released as armhf) built by `build-armhf.sh`, checked on the Raspberry Pi 4 in 32-bit mode and its package under QEMU in CI ([below](#32-bit-arm)), no 32-bit kernel or ARMv6/ARMv7 board verified; `x86_64-pc-windows-msvc` builds, passes its unit tests and serves the required data in CI but is released only as an experimental zip from 1.8.0 ([below](#windows-experimental)), so unsupported; other architectures unsupported |
 | core collection | every group of `collect_recorded` with the passive groups (fixtures, 8 scenarios) | the three hosts (`compare.py`, `live_http.py`, both servers at once, before the removal) | the fixtures' "not covered" lists below |
 | GPU | DRM: i915, amdgpu, other drivers by name; Jetson's own reader first; then the nvidia-smi fallback (3 scenarios, 32 collections, the Orin's real answer replayed) | i915 on the PC, the Jetson GPU on the Orin; the Orin's nvidia-smi (`nvidia-l4t-nvml`) answered the query once, read by hand: no `GPU-` UUID, every field `[N/A]` (both sides: `invalid_data`); it is not reached there, the Jetson reader answers first; **the fallback on a real NVIDIA GPU under WSL2** (GeForce RTX 4070 Ti, Windows driver 610.88, `/usr/lib/wsl/lib/nvidia-smi`; [results](#nvidia-smi-on-an-nvidia-gpu-wsl2)) | the nvidia-smi fallback with a native Linux NVIDIA driver on a PC or server: **not verified on such hardware** (WSL2 and the fixtures only; NVIDIA does not promise a stable nvidia-smi output); amdgpu fixture only; NVML unsupported; clocks of 2^128 Hz and more refused (below) |
 | slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
@@ -679,10 +679,10 @@ Raw: `~/.local/state/platmon-measure/native-20261023-armhf/` (binary `ce3307442d
 `bce4eb0a3e8886e8`; `sha256.txt`, `unit.txt`, ten `compare-*.json`, `config.txt`, `runtime.txt`, `live.json`,
 `smoke.txt`).
 
-### Windows (not released)
+### Windows (experimental)
 
-Not released and not in the support scope. The real-PC checks passed on 2026-11-01 but for two the owner
-accepted as known gaps, so the next release adds an experimental zip (the owner's decisions; the checks
+An experimental zip from 1.8.0, not in the support scope. The real-PC checks passed on 2026-11-01 but for two the owner
+accepted as known gaps, so 1.8.0 adds it as an experimental zip (the owner's decisions; the checks
 and their status: [remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26)).
 `scripts/packaging/package_windows.py` builds it from CI's binary into `package.py`'s output, adds it to
 `SHA256SUMS` and the binary's SHA-256 to `BUILD.json` (`windows_server_sha256`): `platmon-VERSION-windows-x86_64-experimental.zip` with `platmon-server.exe`, the web page,

@@ -115,7 +115,7 @@ the fallback.
 
 ## Windows
 
-The Windows build of the native server (not released; native/README.md, Windows) reads the counters
+The Windows build of the native server (experimental, from 1.8.0; native/README.md, Windows) reads the counters
 from `GetIfTable2` instead of `/proc/self/net/dev`, with the same fields, rates, reasons and baselines:
 
 - `scope` is `{"kind": "host", "id": null}`: Windows has no network namespace, so `namespace_changed`

@@ -100,7 +100,7 @@ wrap; a wrap shows as `counter_regressed` for one reading.
 
 ## Windows
 
-The Windows build of the native server (not released; native/README.md, Windows) reads each
+The Windows build of the native server (experimental, from 1.8.0; native/README.md, Windows) reads each
 `\\.\PhysicalDriveN` that Windows lists (`QueryDosDeviceW`) with `IOCTL_DISK_PERFORMANCE` instead of
 `/proc/diskstats`, with the same rates, reasons and baselines. Not every field has a Windows counter:
 

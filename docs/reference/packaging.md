@@ -4,7 +4,7 @@
 > - One `platmon` `.deb` per architecture (amd64, arm64, armhf) with the static native server and no Python;
 >   the `platmon` command is `platmon-cli` (`Architecture: all`, the host's Python 3.9+), which it recommends.
 > - `.rpm` packages of the same files (x86_64, aarch64; platmon-cli noarch) build too, for Fedora and
->   Enterprise Linux 9+ ([RPM packages](#rpm-packages)); checked in CI and, from the release after 1.7.0,
+>   Enterprise Linux 9+ ([RPM packages](#rpm-packages)); checked in CI and, from 1.8.0,
 >   among the GitHub Release files (no DNF repository).
 > - The `VERSION` file is the single version source; releases are built once in CI and
 >   published to GitHub Releases and the APT repository.
@@ -274,7 +274,7 @@ disabled service, a failed start, a downgrade and the erase. Their test image
 architecture, so the distributions' mirrors are used once a week rather than on every run (#166); the
 release workflow builds its own. SELinux is not enforcing in a container:
 the service under an enforcing policy on a real host is not verified, and neither is a real board.
-From the release after 1.7.0 the release workflow builds the `.rpm` files with the `.deb` ones (the RPM
+From 1.8.0 the release workflow builds the `.rpm` files with the `.deb` ones (the RPM
 release is the Debian revision, `-1` for `v<version>`), lists them in the same `SHA256SUMS`, runs
 `rpmlint` and the x86_64 lifecycle check on them and attaches them to the draft with a provenance
 attestation. There is no DNF repository: download the files from the release page and check them

@@ -80,7 +80,7 @@ and this does not establish a normal-path ARM performance result.
 
 ## Windows
 
-The Windows build of the native server (not released; native/README.md, Windows) has no `pressure`:
+The Windows build of the native server (experimental, from 1.8.0; native/README.md, Windows) has no `pressure`:
 it is left out, as when it is off, whatever `platmon.ini` says. Investigated 2026-10-25: Windows has no
 stall-time accounting, nothing that measures the share of time tasks waited on the CPU, memory or I/O.
 What it has are queue lengths and event rates:
