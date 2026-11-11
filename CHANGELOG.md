@@ -8,6 +8,15 @@ API schema versions are independent of release versions.
 
 Draft for the next release; the version and date replace this heading when it is tagged.
 
+- **Security, changes what is answered:** a request whose `Host` header is not an address, `localhost`,
+  the device's host name or that name with `.local` now answers `421 Misdirected Request`. Before, any name
+  was answered, so a web page on another site could read the API from a visitor's browser by pointing a
+  name of its own at the device (DNS rebinding). **If you reach a device under another DNS name or through
+  a reverse proxy, add that name to the new `[http] hosts` key** (`hosts = *` restores the old behavior).
+  Requests by address, the `platmon` command on the device and platmon-hub by address or host name are not
+  affected (docs/reference/api.md, "Host header").
+- **New:** the web page and its files are sent with `X-Content-Type-Options`, `X-Frame-Options: DENY` and a
+  `Content-Security-Policy` limited to this server. The API's answers are unchanged.
 - **New, off by default:** a `processes` observation (`[processes] enabled = yes`, Linux only): every 5 s the
   10 busiest processes by CPU and the 10 largest by memory (name, state, CPU in % of one core, resident
   memory, threads, cgroup unit) and the host's process counts, at `/api/observations` and in replay.

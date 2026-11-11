@@ -50,7 +50,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",
@@ -145,7 +146,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",
@@ -237,7 +239,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",
@@ -332,7 +335,8 @@
     "enabled": true,
     "bind": "127.0.0.1",
     "port": 80,
-    "web": false
+    "web": false,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "70,95",
@@ -440,7 +444,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80,\n90",
@@ -532,7 +537,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80,\n\n90",
@@ -630,7 +636,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",
@@ -782,7 +789,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",
@@ -863,6 +871,111 @@
   "name": "port zero",
   "python": {
    "error": "[http] port = 0 is out of range (1 to 65535)"
+  }
+ },
+ {
+  "name": "hosts",
+  "python": {
+   "core": {
+    "interval": 1.0
+   },
+   "network": {
+    "enabled": true
+   },
+   "disk_io": {
+    "enabled": true
+   },
+   "storage": {
+    "enabled": true,
+    "interval": 30.0
+   },
+   "wifi": {
+    "enabled": true,
+    "interval": 5.0
+   },
+   "battery": {
+    "enabled": true,
+    "interval": 60.0
+   },
+   "probe": {
+    "enabled": true,
+    "interval": 10.0,
+    "timeout": 2.0,
+    "targets": ""
+   },
+   "history": {
+    "enabled": true,
+    "retention": 600.0
+   },
+   "replay": {
+    "enabled": true,
+    "retention": 600.0,
+    "max_bytes": 16777216
+   },
+   "pressure": {
+    "enabled": true
+   },
+   "processes": {
+    "enabled": false,
+    "interval": 5.0,
+    "top": 10
+   },
+   "http": {
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 9797,
+    "web": true,
+    "hosts": "Robot1.Lab.Example., monitor.example"
+   },
+   "thresholds": {
+    "cpu": "80, 90",
+    "gpu": "80, 90",
+    "memory": "80, 90",
+    "filesystem": "80, 90",
+    "temperature": "",
+    "battery": "20, 10",
+    "wifi": "-70, -80"
+   },
+   "levels": {
+    "cpu": [
+     80.0,
+     90.0
+    ],
+    "gpu": [
+     80.0,
+     90.0
+    ],
+    "memory": [
+     80.0,
+     90.0
+    ],
+    "filesystem": [
+     80.0,
+     90.0
+    ],
+    "temperature": null,
+    "battery": [
+     20.0,
+     10.0
+    ],
+    "wifi": [
+     -70.0,
+     -80.0
+    ]
+   },
+   "targets": []
+  }
+ },
+ {
+  "name": "hosts with a port",
+  "python": {
+   "error": "[http] hosts: 'robot1:9797': give the name alone, without a scheme or a port"
+  }
+ },
+ {
+  "name": "hosts star and a name",
+  "python": {
+   "error": "[http] hosts: * accepts every Host, so it stands alone"
   }
  },
  {
@@ -1042,7 +1155,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",
@@ -1145,7 +1259,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",
@@ -1237,7 +1352,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",
@@ -1329,7 +1445,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 9797,
-    "web": true
+    "web": true,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",
@@ -1469,7 +1586,8 @@
     "enabled": true,
     "bind": "0.0.0.0",
     "port": 8080,
-    "web": false
+    "web": false,
+    "hosts": ""
    },
    "thresholds": {
     "cpu": "80, 90",

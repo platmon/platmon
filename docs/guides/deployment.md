@@ -164,6 +164,18 @@ an SSH tunnel (`ssh -L 9797:127.0.0.1:9797 user@device`, then `http://localhost:
 A loopback listener is still open to every local user and process, as `0.0.0.0` already is; there is no
 per-user access control.
 
+The service answers requests made to an address, to `localhost`, to the device's host name and to that name
+with `.local`. If you reach the device under another name (a DNS name such as `orin.lab.example`, or a
+reverse proxy that forwards its own name), list it, or the service answers 421:
+
+```ini
+[http]
+hosts = orin.lab.example
+```
+
+`hosts = *` accepts every name; use it only where a reverse proxy in front of a loopback listener already
+decides who gets through. See [Host header](../reference/api.md#host-header).
+
 ## Network troubleshooting
 
 The API has **no authentication**; expose it only to trusted networks.
@@ -183,6 +195,10 @@ check in this order:
 3. **Network isolation:** an access point or switch may isolate clients
    despite a permissive firewall. Check the Wi-Fi/VLAN policy and
    network reachability.
+
+If the device answers `421` with "Host ... is not this device's address or name", the connection works
+and the name does not: use the device's address or host name, or add the name to `[http] hosts`
+([Choosing what is served](#choosing-what-is-served)).
 
 When `[http] bind` is `127.0.0.1`, remote access is intentionally
 blocked. If using Docker's host-network mode, changing the INI affects

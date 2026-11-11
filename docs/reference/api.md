@@ -6,6 +6,8 @@
 >   rest.
 > - Requests never trigger a collection; at most 32 connections, 10 s to send the whole request (line and
 >   headers), 10 s without progress per response write, no authentication.
+> - A request whose `Host` header names neither an address nor the device answers 421
+>   ([Host header](#host-header)).
 > - Optional groups report their state and reason in `collectors`; sensor values carry their source and
 >   read time.
 
@@ -33,6 +35,29 @@ The HTTP server allows at most 32 active connections. Excess connections are clo
 thread is created; clients can retry after an active connection finishes. Request reads time out after
 10 s without input. Response writes time out after 10 s without send progress; a steadily transferring
 response may take longer overall. Disconnected or stalled clients release their connection slots.
+
+### Host header
+
+Every request's `Host` header must name this device. Accepted, whatever the port:
+
+| `Host` | Example |
+| --- | --- |
+| none, or empty | an HTTP/1.0 client |
+| an IPv4 address, or an IPv6 address in brackets | `192.168.55.53:9797` |
+| `localhost` | `localhost:9797` |
+| the device's host name, and that name with `.local` | `orin`, `orin.local` |
+| a name listed in `[http] hosts` | `orin.lab.example` |
+
+Any other name answers `421 Misdirected Request` on every path, with the refused value in the message.
+Names compare without case and without a final dot; the host name is the one `system.hostname` reports,
+compared whole (a device named `orin` does not answer to `orin.lan` unless it is listed). `hosts = *`
+accepts every name.
+
+The check exists because the API has no authentication: without it, a web page on another site could
+point a name of its own at the device's address and read the API from a visitor's browser (DNS rebinding).
+A browser sends the name it was given, so a name nobody configured cannot be used for that. Requests by
+address are not affected, and neither are the `platmon` command and platmon-hub when they are given an
+address or the device's host name.
 
 ## `/api/stats`
 
@@ -407,6 +432,10 @@ falls back to the monotonic clock (`"source": "monotonic", "suspend_aware": fals
 suspended time, so ages can read too low right after a resume. Changes to the wall clock never affect them.
 
 ## Web page
+
+The page and its files are sent with `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and a
+`Content-Security-Policy` that lets the page load scripts, styles and data from this server only and
+forbids framing it. The API's answers carry none of these.
 
 The page shows `sample #N · data age S` (in the status tooltip): the server's `data_age_ms` plus browser time since that answer
 arrived (transfer time is not included). Polling the same sample again does not reset it. On a failed
