@@ -56,7 +56,7 @@ time never mixes in.
 
 ## Windows
 
-The Windows build of the native server (not released; native/README.md, Windows) probes the same way,
+The Windows build of the native server (experimental, from 1.8.0; native/README.md, Windows) probes the same way,
 with the same output. Windows retries a connection attempt the target refused before it reports it, so a
 closed port takes longer to answer than on Linux, and with a `timeout` shorter than those retries it reads
 as `timeout`, not `refused`. Probe is its only slow group: storage, Wi-Fi and battery are left out.

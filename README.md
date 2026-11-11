@@ -55,7 +55,7 @@ The service starts with the install. Other ways in, all running the same server:
 | You have | Use |
 | --- | --- |
 | No APT repository access | the `.deb` files and `SHA256SUMS` from [GitHub Releases](https://github.com/platmon/platmon/releases) ([steps](docs/guides/getting-started.md#requirements-and-installation)) |
-| Fedora or Enterprise Linux 9+ | the `.rpm` packages ([RPM packages](docs/reference/packaging.md#rpm-packages)) <!-- TODO at the next release: built from a checkout until then --> |
+| Fedora or Enterprise Linux 9+ | the `.rpm` packages ([RPM packages](docs/reference/packaging.md#rpm-packages)) |
 | Another Linux, or a change to try | a [source installation or a locally built container](docs/guides/deployment.md) |
 | A headless device without Python | `sudo apt install --no-install-recommends platmon`, then the web page or the API |
 | A PC that only watches other devices | the terminal client alone: `scripts/install-cli.sh --user` from a checkout |
@@ -74,7 +74,8 @@ Open `http://<device>:9797` for the dashboard. Settings are in `/etc/platmon/pla
 key is listed with its default; restart the service after an edit (`sudo systemctl restart platmon`).
 
 To watch several devices in one place, run [platmon-hub](https://github.com/platmon/platmon-hub) on
-another computer: it reads each device's API and adds history, alerts and exports.
+another computer: it reads each device's API and adds history, alerts and exports. Which Hub release
+reads which platmon release: [platmon-hub compatibility](docs/reference/hub-compatibility.md).
 
 ```mermaid
 flowchart LR
@@ -94,7 +95,7 @@ flowchart LR
 | x86-64 PC | Ubuntu 24.04 | development baseline |
 | amd64 and arm64 containers | Ubuntu 22.04, 24.04, 26.04 | every commit: package lifecycle and the service under systemd |
 | armhf | Debian 13, Ubuntu 24.04 under QEMU | package lifecycle only; **not yet on a real 32-bit board** |
-| Windows 11 laptop | experimental build | not released |
+| Windows 11 laptop | experimental zip, from 1.8.0 | the real-PC checks (2026-11-01); not supported |
 
 Not on the list does not mean not working: unknown hardware gets the generic `/proc` and `/sys` readers.
 If you run platmon on another board, a
