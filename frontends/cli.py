@@ -33,7 +33,7 @@ try:  # keys without Enter; not on Windows, where the live view stays the plain 
 except ImportError:
     termios = tty = None
 
-VERSION = "1.8.0"  # copy of VERSION, so this file stays standalone
+VERSION = "1.8.1"  # copy of VERSION, so this file stays standalone
 PORT = 9797
 
 

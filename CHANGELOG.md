@@ -4,7 +4,11 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.8.1 — 2026-11-13
+
+A patch release of the two frontends' design (the owner's choice): the server, the HTTP API and its answers,
+`/text`, `platmon --once`, the `platmon.ini` keys and defaults and the command's options are unchanged from
+1.8.0. The web page and the `platmon` live view look and arrange things differently:
 
 - The web page follows the same design: a status slot under the tabs on every view holds the not-current
   banner, a partial collection's banner (with the warnings in it) or Needs attention, and keeps its height
@@ -40,6 +44,9 @@ API schema versions are independent of release versions.
 - Fixed: on a phone-width web page the bottom tab bar had six columns for seven views, so System wrapped onto
   a second row behind the bar; it now has one column per view. The `platmon` live view below 100 columns cut
   the last core of each row of its Overview core grid.
+
+- **Experimental:** the Windows x86_64 zip, `platmon-VERSION-windows-x86_64-experimental.zip`, is built from
+  this release as for 1.8.0 and carries the new web page; it is still not supported.
 
 ## 1.8.0 — 2026-11-12
 
