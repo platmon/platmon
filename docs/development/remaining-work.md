@@ -1,11 +1,11 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-11-12 (1.8.0 being prepared); the evidence for
+> - What is still open, checked against the repository on 2026-11-12 (1.8.0 released); the evidence for
 >   each release is in [release readiness](../releases/readiness.md).
-> - Next release, 1.8.0 (owner, 2026-11-03 and 2026-11-12): the experimental Windows zip together with `.rpm`
->   release files, battery follow-ups and a root-unit soak with `hub_check.py` on the Orin (below); the
->   root unit's checks are still open.
+> - 1.8.0 (owner, 2026-11-03 and 2026-11-12), released 2026-11-12: the experimental Windows zip together with
+>   `.rpm` release files and battery follow-ups; the root-unit checks and soak with `hub_check.py` on the Orin
+>   (below) are still open.
 > - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, accepted as known
 >   gaps. Linux: armhf on a real device, `hub_check.py` since 1.4.0, the root unit's soak (1.7.0 soaked
 >   as a user unit), a whole-system `apt upgrade` on a real device, a remote probe target.
@@ -30,6 +30,7 @@ this order; the version is 1.8.0 (owner, 2026-11-12):
 4. On the Orin, the release candidate as the root candidate unit: `deploy_check.py checks`, a soak and
    `hub_check.py` (installing and removing the unit needs the owner's sudo). **Open.**
 5. The release, with its gate in [release readiness](../releases/readiness.md#180-release-gate-2026-11-12).
+   Done: published 2026-11-12, in the APT repository, the Orin upgraded with `apt install`.
 
 ## Windows build (2026-10-26)
 
@@ -94,9 +95,10 @@ Open since the gates in [release readiness](../releases/readiness.md):
 - **apt upgrade on a real device:** the Orin Nano upgraded from 1.4.0 to 1.6.0 under apt and rebooted
   (2026-10-28, [release readiness](../releases/readiness.md#160-release-gate-2026-10-25)), and from 1.6.0
   to 1.7.0 with `apt install platmon`, which also installed platmon-cli (2026-11-03,
-  [its gate](../releases/readiness.md#170-release-gate-2026-10-31)); the upgrade from 1.5.0, a
-  whole-system `apt upgrade` to 1.7.0 and the Hub reconnecting after it were checked only in CI's
-  containers or not at all.
+  [its gate](../releases/readiness.md#170-release-gate-2026-10-31)), and from 1.7.0 to 1.8.0 with
+  `apt install platmon platmon-cli` (2026-11-12, [its gate](../releases/readiness.md#180-release-gate-2026-11-12));
+  the upgrade from 1.5.0, a whole-system `apt upgrade` and the Hub reconnecting after it were checked only
+  in CI's containers or not at all.
 - **Probe against a remote target:** checked on loopback and with fakes only; no remote target has been
   approved ([probe.md](../reference/probe.md#verification)).
 - **Orin candidate units:** the 1.7.0 soak's user units (`bash native/tools/deploy/uninstall_user.sh` as
