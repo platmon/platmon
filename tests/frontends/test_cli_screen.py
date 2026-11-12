@@ -1,6 +1,5 @@
 """The live terminal view (screen()): fits the terminal, levels like the web page, plain without color."""
 import re
-from collections import deque
 
 import pytest
 
@@ -21,40 +20,50 @@ def plain(lines):
 # the last four are shorter than the header, a line and the footer together
 @pytest.mark.parametrize("width,height", [(119, 40), (79, 24), (60, 20), (40, 12), (20, 6), (80, 5), (12, 3), (10, 1)])
 def test_fits_the_terminal(width, height):
-    lines = screen(HOT, None, width, height, Style(), LIVE, {})
+    lines = screen(HOT, None, width, height, Style(), LIVE)
     assert len(lines) <= height
     assert all(vlen(line) <= width for line in lines)
 
 
+def test_narrow_core_grid_keeps_every_core_whole():
+    """The cores wrap into as many cells as fit, each cell whole: the column count was once worked out for
+    a narrower cell than the one drawn, so the last cell of a row was cut ("  5 " at 79). The Overview
+    names only the busiest core now; the grid is the Resources view's."""
+    cores = [{"id": n, "usage": 10.0 + n, "freq": None} for n in range(12)]
+    for width in (119, 79, 60, 44):
+        out = "\n".join(plain(screen(dict(FULL, cpu=cores), None, width, 60, Style(), LIVE, "resources")))
+        assert all(re.search(rf"\b{n} \S+ +{10 + n}\.0 %", out) for n in range(12)), (width, out)
+
+
 def test_no_color_means_no_escapes():
-    lines = screen(HOT, None, 119, 40, Style(color=False), LIVE, {})
+    lines = screen(HOT, None, 119, 40, Style(color=False), LIVE)
     assert not any("\033" in line for line in lines)
 
 
 def test_ascii_without_utf8():
-    text = "\n".join(screen(HOT, None, 119, 40, Style(color=False, utf8=False), LIVE, {"CPU": deque([10, None, 90])}))
+    text = "\n".join(screen(HOT, None, 119, 40, Style(color=False, utf8=False), LIVE))
     assert not re.search(r"[^\x00-\x7f°·↓↑]", text)  # labels and units only; bars, rules and sparks are ASCII
 
 
 def test_attention_follows_the_web_levels():
     # CPU mean 52 % is fine; tj 86.2 °C is a warning on Jetson Orin (85/95), not critical
     assert attention(HOT, None) == [("tj", "86.2 °C", "warn")]
-    assert "NEEDS ATTENTION" in "\n".join(plain(screen(HOT, None, 119, 40, Style(), LIVE, {})))
-    assert "NEEDS ATTENTION" not in "\n".join(plain(screen(FULL, None, 119, 40, Style(), LIVE, {})))
+    assert "NEEDS ATTENTION" in "\n".join(plain(screen(HOT, None, 119, 40, Style(), LIVE)))
+    assert "NEEDS ATTENTION" not in "\n".join(plain(screen(FULL, None, 119, 40, Style(), LIVE)))
 
 
 def test_offline_keeps_the_last_data():
     down = dict(LIVE, state="offline", age=47, error="cannot reach platmon at x:9797 (timed out)\n  check that its service runs")
-    out = plain(screen(FULL, None, 119, 40, Style(), down, {}))
+    out = plain(screen(FULL, None, 119, 40, Style(), down))
     assert "OFFLINE" in out[0] and "data 47 s old" in out[0]
     assert any("NOT CURRENT" in line for line in out)
     assert any(line.lstrip().startswith("RAM") for line in out)  # still there, dimmed
 
 
 def test_too_short_says_what_was_left_out_and_how_to_reach_it():
-    out = plain(screen(HOT, None, 119, 14, Style(), LIVE, {}))
+    out = plain(screen(RICH, OBSERVED, 119, 14, Style(), LIVE, "resources"))
     assert len(out) == 14
-    assert "6 below" in out[-3] and "PgUp/PgDn" in out[-3]  # what is out of sight, and the keys for it
+    assert re.search(r"\d+ below", out[-3]) and "PgUp/PgDn" in out[-3]  # what is out of sight, and the keys for it
 
 
 def test_fit_keeps_escapes_and_resets():
@@ -83,11 +92,11 @@ def test_wifi_signal_bar_uses_the_web_scale():
     wlan = obs["groups"]["wifi"]["data"]["interfaces"][0]
     for dbm, full in ((-60, 10), (-30, 20), (-95, 0)):
         wlan["signal_dbm"] = dbm
-        row = next(line for line in plain(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "network"))
+        row = next(line for line in plain(screen(RICH, obs, 119, 90, Style(), LIVE, "network"))
                    if line.startswith("    wlan0"))
         assert f"{dbm} dBm" in row and row.count("█") == full and "╎" not in row, row
     wlan["signal_dbm"], wlan["signal_raw"] = None, 40
-    row = next(line for line in plain(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "network")) if "wlan0" in line)
+    row = next(line for line in plain(screen(RICH, obs, 119, 90, Style(), LIVE, "network")) if "wlan0" in line)
     assert "unit not reported" in row and "█" not in row and "░" not in row  # no dBm: no bar
 
 
@@ -105,11 +114,11 @@ def test_low_levels_attention_and_colors(monkeypatch):
     assert attention(FULL, obs) == [("BAT1", "20 %", "warn"), ("wlan0", "-70 dBm", "warn")]
     bat["percent"], wlan["signal_dbm"] = 10, -81
     assert attention(FULL, obs) == [("BAT1", "10 %", "crit"), ("wlan0", "-81 dBm", "crit")]
-    power = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "power"))
-    network = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, {}, "network"))
+    power = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, "power"))
+    network = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, "network"))
     crit = r"\033\[31(;1)?m"  # the critical color, bold or not
     assert re.search(crit + "10 %", power) and re.search(crit + "-81 dBm", network)
-    assert "NEEDS ATTENTION" in "\n".join(plain(screen(FULL, obs, 119, 40, Style(), LIVE, {})))
+    assert "NEEDS ATTENTION" in "\n".join(plain(screen(FULL, obs, 119, 40, Style(), LIVE)))
     obs["groups"]["battery"]["observation"]["stale"] = True
     obs["groups"]["wifi"]["observation"]["stale"] = True
     assert attention(FULL, obs) == []  # not a current reading
@@ -130,8 +139,8 @@ def test_busiest_interfaces_first():
                                              "rx_packets_per_s": 0, "tx_packets_per_s": 0}}
     items = [rate("br0", 0), {"name": "wlan1", "rates": None, "reason": "warmup"}, rate("eth0", 10, 5), rate("can0", 0)]
     assert [i["name"] for i in busiest_first(items)] == ["eth0", "br0", "can0", "wlan1"]
-    narrow = plain(screen(dict(FULL, network={"interfaces": items}), None, 70, 40, Style(), LIVE, {}))
-    assert any(line.strip().startswith("eth0") for line in narrow)  # two rows on a narrow screen: the busy one shown
+    narrow = plain(screen(dict(FULL, network={"interfaces": items}), None, 70, 40, Style(), LIVE))
+    assert any(line.strip().startswith("NET") and "eth0" in line for line in narrow)  # the busy one comes first
 
 
 def test_ascii_on_request():
@@ -187,14 +196,14 @@ OBSERVED = {"groups": {
 @pytest.mark.parametrize("view", VIEWS)
 @pytest.mark.parametrize("width,height", [(119, 40), (79, 24), (60, 20), (44, 22), (40, 12), (20, 6), (12, 3)])
 def test_every_view_fits_the_terminal(view, width, height):
-    lines = screen(RICH, OBSERVED, width, height, Style(), LIVE, {}, view)
+    lines = screen(RICH, OBSERVED, width, height, Style(), LIVE, view)
     assert len(lines) <= height
     assert all(vlen(line) <= width for line in lines)
 
 
 @pytest.mark.parametrize("view", VIEWS)
 def test_every_view_is_ascii_without_utf8(view):
-    text = "\n".join(screen(RICH, OBSERVED, 119, 40, Style(color=False, utf8=False), LIVE, {}, view))
+    text = "\n".join(screen(RICH, OBSERVED, 119, 40, Style(color=False, utf8=False), LIVE, view))
     assert not re.search(r"[^\x00-\x7f°·↓↑]", text)  # labels and units only; bars, rules and arrows are ASCII
 
 
@@ -203,11 +212,11 @@ def test_the_battery_keeps_every_reading_at_any_width(width):
     """Power & battery carries it, as the web page's Battery card does. A narrow terminal gives up the
     bar and then wraps the readings onto their own lines; it never drops one. The height is generous on
     purpose: what a view does when it is taller than the terminal is scrolling, tested separately."""
-    lines = plain(screen(RICH, OBSERVED, width, 90, Style(), LIVE, {}, "power"))
+    lines = plain(screen(RICH, OBSERVED, width, 90, Style(), LIVE, "power"))
     start = next(n for n, line in enumerate(lines) if "BATTERY" in line)
     # wrapping splits a reading across lines, so the section is compared as one run of words
     section = re.sub(r"\s+", " ", " ".join(lines[start:]))
-    assert "observed 4 s ago" in section and "BAT1" in section and "89 %" in section
+    assert "observed" not in section and "BAT1" in section and "89 %" in section  # current: no age to read
     for reading in ("Not charging", "16.44 V", "-1.20 A", "237 cycles", "31.2 °C", "85 % of design"):
         assert reading in section, f"{reading} lost at {width} columns"
     assert "ADP1 on" in section and "ucsi-source-psy-USBC000:001 off" in section  # no supply cut off
@@ -215,8 +224,8 @@ def test_the_battery_keeps_every_reading_at_any_width(width):
 
 def test_the_battery_section_is_absent_without_the_observation():
     """A host with no supply, or a server without the endpoint: the section is simply not there."""
-    text = "\n".join(plain(screen(RICH, {"groups": {}}, 119, 40, Style(), LIVE, {}, "power")))
-    assert "BATTERY" not in text and "POWER & FANS" in text
+    text = "\n".join(plain(screen(RICH, {"groups": {}}, 119, 40, Style(), LIVE, "power")))
+    assert "BATTERY" not in text and "POWER RAILS" in text and "FANS" in text
 
 
 def test_the_tab_bar_names_every_view_and_marks_the_active_one():
@@ -241,36 +250,38 @@ def test_keys_switch_views():
 
 
 def test_the_active_view_is_the_one_drawn():
-    system = plain(screen(RICH, OBSERVED, 79, 24, Style(), LIVE, {}, "system"))
-    assert any("Kernel" in line for line in system) and not any("NEEDS ATTENTION" in line for line in system)
-    overview = plain(screen(RICH, OBSERVED, 79, 24, Style(), LIVE, {}, "overview"))
-    assert any("NEEDS ATTENTION" in line for line in overview) and not any("Kernel" in line for line in overview)
+    """The body is the active view's; the status slot above it is every view's, so a warning raised while
+    another view is open is seen there too."""
+    system = plain(screen(RICH, OBSERVED, 79, 24, Style(), LIVE, "system"))
+    overview = plain(screen(RICH, OBSERVED, 79, 24, Style(), LIVE, "overview"))
+    assert any("Kernel" in line for line in system) and not any("Kernel" in line for line in overview)
+    assert system[3] == overview[3] and "NEEDS ATTENTION" in system[3]
 
 
 def test_detail_views_keep_what_the_narrow_overview_drops():
     """At 79 columns the Overview has no room for disk I/O, power, Wi-Fi or TCP; its views do."""
-    overview = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "overview")))
+    overview = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, "overview")))
     assert "I/O TIME" not in overview and "VDD_IN" not in overview and "wlan0" not in overview
-    storage = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "storage")))
+    storage = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, "storage")))
     assert "I/O TIME" in storage and "nvme0n1" in storage and "1 partition, 1 mounted" in storage
-    thermal = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "thermal")))
+    thermal = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, "thermal")))
     assert "tj" in thermal and "VDD_IN" not in thermal  # temperatures alone
-    power = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "power")))
-    assert "VDD_IN" in power and "fan pwmfan" in power and "BATTERY" in power
-    network = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "network")))
+    power = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, "power")))
+    assert "VDD_IN" in power and "FANS" in power and "pwmfan" in power and "BATTERY" in power
+    network = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, "network")))
     assert "wlan0" in network and "-47 dBm" in network and "192.168.1.1:53" in network
 
 
 def test_resources_shows_the_swap_the_live_overview_never_had():
-    text = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, {}, "resources")))
+    text = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, "resources")))
     assert "SWAP" in text and "4.0G" in text  # FULL has 4 GiB of swap, none of it used
-    assert "max 1300 MHz" in text and "NPU" in text and "RESOURCE PRESSURE" in text
+    assert "73.0 %" in text and "918 / 1300 MHz" in text and "NPU" in text and "RESOURCE PRESSURE" in text
     assert "CPU0" not in text and " 0 " in text  # the core grid, as the Overview numbers them
 
 
 def test_system_lists_the_boards_own_fields():
     board = dict(RICH, system=dict(RICH["system"], firmware="1.2"))
-    text = "\n".join(plain(screen(board, None, 79, 24, Style(), LIVE, {}, "system")))
+    text = "\n".join(plain(screen(board, None, 79, 24, Style(), LIVE, "system")))
     assert "Architecture   aarch64" in text and "L4T            R36.5.2" in text
     assert "firmware       1.2" in text  # an unknown key keeps its own name, as the web page adds it
     assert "Power mode" not in text  # it stays in Power & battery, as on the web page
@@ -283,7 +294,7 @@ def test_system_lists_the_boards_own_fields():
     ("power", "No power rail, fan or battery readings")])
 def test_a_view_with_nothing_to_show_says_so(view, text):
     bare = dict(FULL, temperature={}, power={}, fans=[], network=None, disk_io=None)
-    lines = plain(screen(bare, None, 79, 24, Style(), LIVE, {}, view))
+    lines = plain(screen(bare, None, 79, 24, Style(), LIVE, view))
     assert any(text in line for line in lines)
 
 
@@ -294,7 +305,7 @@ def test_a_long_name_never_cuts_a_value_off_a_table(width):
     what gets cut, and a value column drops whole before that."""
     items = [dict(RICH["network"]["interfaces"][0], name=name) for name in ("lo", "enx80691aa55882")]
     lines = plain(screen(dict(RICH, network={"interfaces": items}), OBSERVED, width, 30, Style(), LIVE,
-                         {}, "network"))
+                         "network"))
     rows = [line for line in lines if line.strip().startswith(("lo", "enx"))]
     assert len(rows) == 2
     values = ["2.0 KiB/s", "1.0 KiB/s", "8 · 4", "0 · 3"]  # rx, tx, packets, errors · dropped of RATES
@@ -315,18 +326,18 @@ def test_a_view_longer_than_the_terminal_scrolls():
         if keys is not None:
             offset = next_offset(keys, offset, page)
         status = dict(LIVE)
-        lines = plain(screen(many, None, 79, 18, Style(), status, {}, "thermal", offset))
+        lines = plain(screen(many, None, 79, 18, Style(), status, "thermal", offset))
         offset, page = status["scroll"]
         assert len(lines) <= 18 and all(vlen(line) <= 79 for line in lines)
         seen.add(offset)
         body = "\n".join(lines)
         if offset:
             assert f"{offset} above" in body
-    assert seen == {0, 1, 13, 27}  # top, a line, a page, the end, back to the top
-    # the end shows the last sensors, which "+N more lines" never reached
+    assert seen == {0, 1, 11, 29}  # top, a line, a page, the end, back to the top
+    # the end shows the last sensors, which "+N more lines" never reached (the server's order: sensor37 last)
     status = dict(LIVE)
-    end = "\n".join(plain(screen(many, None, 79, 18, Style(), status, {}, "thermal", BOTTOM)))
-    assert "sensor00" in end and "27 above" in end
+    end = "\n".join(plain(screen(many, None, 79, 18, Style(), status, "thermal", BOTTOM)))
+    assert "sensor37" in end and "sensor00" not in end and "29 above" in end
 
 
 def test_scroll_keys_and_clamping():
@@ -337,26 +348,97 @@ def test_scroll_keys_and_clamping():
     assert next_offset("x", 4, 10) == 4 and next_offset("3", 4, 10) == 4  # a view key does not scroll
     # a view that fits is never scrolled, and switching views starts at the top again
     status = dict(LIVE)
-    screen(HOT, None, 119, 40, Style(), status, {}, "system", 7)
+    screen(HOT, None, 119, 40, Style(), status, "system", 7)
     assert status["scroll"][0] == 0
 
 
-def test_the_overview_detail_takes_the_width_that_is_free():
-    """"x86_pkg_temp · hottest of 38" was cut to "x86_pkg_temp · h" at 16 columns while 22 columns of an
-    80-column terminal went unused. The column grows to what the details need, and no further, so a
-    board with short ones keeps the layout it had."""
+def test_the_overview_detail_is_never_cut_for_room_it_has():
+    """"x86_pkg_temp · hottest of 38" was cut to "x86_pkg_temp · h" while columns went unused. The detail is
+    the last thing on a reading's line now (no graph after it), so it runs to the edge, and only a terminal
+    too narrow for it cuts it, marked with an ellipsis."""
     many = dict(HOT, temperature={**{f"coretemp Core {i}": 40.0 + i for i in range(37)}, "x86_pkg_temp": 88.0})
-    history = {"CPU": [10] * 24, "TEMP": [88] * 24}
-    for width in (119, 100, 78, 70):
-        row = [line for line in plain(screen(many, None, width, 40, Style(), LIVE, history, "overview"))
+    for width in (119, 100, 78, 60):
+        row = [line for line in plain(screen(many, None, width, 40, Style(), LIVE, "overview"))
                if line.lstrip().startswith("TEMP")][0]
-        assert "x86_pkg_temp · hottest of 38" in row, (width, row)
-        assert vlen(row) <= width
-    # a short detail leaves the column where it was: the spark still starts at the same place
-    short = plain(screen(HOT, None, 119, 40, Style(), LIVE, history, "overview"))
-    cpu = [line for line in short if line.lstrip().startswith("CPU ")][0]
-    assert cpu.index("mean of") == 2 + 6 + 7 + 1 + 20 + 2  # label, value, bar, gap: where it always was
-    assert cpu.rstrip().endswith("▁" * 24) and vlen(cpu) <= 119
+        assert row.rstrip().endswith("x86_pkg_temp · hottest of 38"), (width, row)
+    row = [line for line in plain(screen(many, None, 44, 40, Style(), LIVE, "overview")) if line.lstrip().startswith("TEMP")][0]
+    assert row.endswith("…") and vlen(row) == 44
+
+
+def test_the_overview_is_the_web_overview():
+    """The five readings in the web page's order, the busiest core in the CPU line and the busiest
+    interfaces: no graphs, cores, disk I/O, temperatures list, power, pressure or storage, which are their
+    views' (the tabs mark the one that needs attention)."""
+    lines = plain(screen(RICH, OBSERVED, 119, 40, Style(), LIVE, "overview"))
+    labels = [line.split()[0] for line in lines[5:] if line.strip() and line.startswith("  ") and not line.startswith("   ")]
+    assert labels[:5] == ["CPU", "RAM", "GPU", "DISK", "TEMP"] and "NET" in labels and "NPU" not in labels
+    text = "\n".join(lines)
+    assert "max CPU7 91.4 %" in text and "▁" not in text and "VDD_IN" not in text and "I/O TIME" not in text
+    assert "▲5 Temperature" in lines[2]  # tj 86.2 °C: the view that shows it
+    busy = dict(RICH, cpu=[{"id": n, "usage": u, "freq": None} for n, u in enumerate((95.0, 85.0, 81.0, 10.0))])
+    cpu = [line for line in plain(screen(busy, None, 119, 40, Style(), LIVE)) if line.lstrip().startswith("CPU")][0]
+    assert "max CPU0 95.0 %  +2 ≥80 %" in cpu
+
+
+@pytest.mark.parametrize("width", [119, 79, 45])
+def test_rows_stay_where_they_are_whatever_the_status(width):
+    """The status slot is always two lines: a warning appearing or going, or a collection reading only part,
+    moves nothing below it."""
+    calm = dict(RICH, cpu=[{"id": 0, "usage": 12.5, "freq": None}], temperature={"cpu": 51.2}, gpu=None)
+    partial = dict(RICH, collectors={"core": {"state": "ok"}, "gpu": {"state": "error"}})
+    rows = lambda s: [n for n, line in enumerate(plain(screen(s, OBSERVED, width, 40, Style(), LIVE))) if line.lstrip().startswith("CPU")]
+    assert rows(calm) == rows(RICH) == rows(partial) == [5]
+    slot = plain(screen(partial, OBSERVED, width, 40, Style(), LIVE))[3:5]
+    assert "PARTIAL" in slot[0] and "gpu error" in slot[0] and "NEEDS ATTENTION" in slot[1]
+
+
+def test_the_quiet_screen_colors_only_what_needs_attention():
+    """A bar is grey while its reading is fine: green bars everywhere would make the one yellow bar one
+    color among many. The status, the logo and the active tab keep their color."""
+    calm = dict(FULL, temperature={"cpu": 51.2})
+    lines = screen(calm, None, 119, 40, Style(), LIVE)
+    body = "\n".join(lines[3:-2])
+    assert "\033[32m" not in body  # no ok-green below the tabs
+    assert "\033[33" in "\n".join(screen(HOT, None, 119, 40, Style(), LIVE)[3:-2])  # tj 86.2 °C: warning
+
+
+def test_header_and_footer_say_only_what_is_not_said_elsewhere():
+    """The age only when the data is late, the address only when it is not this device, no version (System
+    has it); below 60 columns the name beside the logo and the indent go first."""
+    wide = plain(screen(RICH, OBSERVED, 119, 40, Style(), LIVE))
+    assert wide[0].rstrip().endswith("● LIVE") and "s ago" not in wide[0]
+    assert "orin · MAXN_SUPER · up 1d 01:01" in wide[1] and "Ubuntu" not in wide[1]
+    assert wide[-1].rstrip().endswith("every 1 s") and "localhost" not in wide[-1] and cli.VERSION not in wide[-1]
+    late = plain(screen(RICH, OBSERVED, 119, 40, Style(), dict(LIVE, age=3.4)))
+    assert "data 3 s old" in late[0]
+    remote = plain(screen(RICH, OBSERVED, 119, 40, Style(), dict(LIVE, addr="192.168.55.53:9797")))
+    assert "192.168.55.53:9797 · every 1 s" in remote[-1]
+    phone = plain(screen(RICH, OBSERVED, 45, 30, Style(), LIVE))
+    assert phone[0].startswith(" p_  orin") and "platmon" not in phone[0] and phone[1].startswith("    Jetson Orin")
+    system = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, "system")))
+    assert f"Version        {cli.VERSION}" in system and "localhost:9797 · every 1 s" in system
+
+
+def test_detail_views_keep_their_order_and_say_a_shared_clock_once():
+    """Temperatures in the server's order, not hottest first, so a sensor keeps its line as temperatures
+    cross; interfaces in the server's order with loopback last; twelve cores at one clock say it once."""
+    thermal = [line.split()[0] for line in plain(screen(HOT, None, 79, 40, Style(), LIVE, "thermal"))[6:] if "°C" in line]
+    assert thermal == list(HOT["temperature"])
+    items = [dict(RICH["network"]["interfaces"][0], name=n) for n in ("lo", "eth0", "wlan0")]
+    network = [line.split()[0] for line in plain(screen(dict(RICH, network={"interfaces": items}), None, 119, 40, Style(),
+                                                        LIVE, "network"))[5:] if line.startswith("    ")]
+    assert network[:3] == ["eth0", "wlan0", "lo"]
+    resources = "\n".join(plain(screen(HOT, None, 119, 40, Style(), LIVE, "resources")))
+    assert "2 measured · all at 1728 MHz" in resources and " 1728" not in resources.split("CPU CORES")[1].split("\n", 2)[1]
+
+
+def test_power_sums_the_rails_and_draws_the_fans():
+    rails = dict(FULL, power={"VDD_GPU_SOC": 4.21, "VDD_CPU_CV": 2.87, "VIN_SYS_5V0": 6.10})
+    text = "\n".join(plain(screen(rails, None, 79, 40, Style(), LIVE, "power")))
+    assert re.search(r"sum of rails +13\.18 W", text) and "FANS" in text
+    assert re.search(r"pwmfan +31 %", text) and re.search(r"pwm_tach +1741 rpm", text)
+    one = "\n".join(plain(screen(FULL, None, 79, 40, Style(), LIVE, "power")))
+    assert "sum of rails" not in one  # one rail is its own total
 
 
 def test_the_offline_banner_wraps_instead_of_losing_the_advice():
@@ -365,7 +447,7 @@ def test_the_offline_banner_wraps_instead_of_losing_the_advice():
     error = cli.explain("localhost:9797", type("E", (OSError,), {"reason": "[Errno 111] refused"})())
     down = dict(LIVE, state="offline", age=47, error=error)
     for width in (119, 79, 60, 44):
-        lines = plain(screen(FULL, None, width, 24, Style(), down, {}, "system"))
+        lines = plain(screen(FULL, None, width, 24, Style(), down, "system"))
         assert all(vlen(line) <= width for line in lines)
         banner = " ".join(line.strip() for line in lines if "NOT CURRENT" in line
                           or line.startswith(" " * 17))
@@ -376,6 +458,6 @@ def test_the_offline_banner_wraps_instead_of_losing_the_advice():
 
 def test_offline_dims_every_view():
     down = dict(LIVE, state="offline", age=47, error="cannot reach platmon at x:9797 (timed out)")
-    lines = screen(RICH, OBSERVED, 119, 40, Style(), down, {}, "power")
+    lines = screen(RICH, OBSERVED, 119, 40, Style(), down, "power")
     assert any("NOT CURRENT" in ANSI.sub("", line) for line in lines)
     assert any("VDD_IN" in ANSI.sub("", line) for line in lines)  # still there, dimmed

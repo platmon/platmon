@@ -4,6 +4,43 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+- The web page follows the same design: a status slot under the tabs on every view holds the not-current
+  banner, a partial collection's banner (with the warnings in it) or Needs attention, and keeps its height
+  when empty; a view's tab carries a dot in its worst warning's color. Bars are grey until a warning level.
+  The Overview's five readings sit in one row on a wide screen and as rows of one card on a phone; CPU names
+  its busiest core; Network ranks interfaces over the last ~10 answers. The data's age shows beside the status
+  only when late; the subtitle reads host · power mode · uptime (on a phone the title is the host). History
+  charts of percentages and temperatures use the 0–100 scale of their bars; more than eight cores are one
+  chart of their mean and busiest core, each core's on request. Temperatures, interfaces (loopback last) and
+  filesystems keep the server's order; partitions are folded under one line a disk; Power & battery sums the
+  rails and draws fan duty; System lists the model, the version (the footer is gone) and the service; a
+  phone's tab bar uses the short labels.
+- **Changed live view:** the `platmon` live view is quieter and keeps its rows in place. Its Overview is the web
+  Overview: CPU with its busiest core (`max CPU7 91.4 %`, `+N` more at the warning level), RAM, GPU, root
+  filesystem, the hottest temperature and the busiest interfaces in fixed columns, ranked over the last
+  ~10 s; the core grid, disk I/O, temperatures, power, pressure, storage and Wi-Fi lines and the sparklines
+  are gone from it (each is in its view). Two lines under the tabs are kept on every view for Needs
+  attention, a partial collection's reason or the not-current banner, and the tab of a view with a warning
+  is marked ▲. Bars are grey until their reading reaches the warning level. The header gives the data's age
+  only when it is late and no longer the OS, L4T or sample number; the footer gives the address only for a
+  remote service and no longer the version, which System now lists with the service it reads.
+  Temperatures and interfaces keep the server's order (loopback last) instead of being re-sorted every
+  second; cores at one shared clock say it once; Power & battery sums the rails and draws the fans' duty
+  as a bar; an observation's age shows only when it is no longer current. Below 60 columns (a phone's SSH
+  window) the name beside the logo, the indents and the bars shrink before any reading is cut.
+- The web page and the `platmon` live view name things alike: the Overview readings and the network and disk
+  table columns are defined once in `frontends/ui-spec.json`, long on the web page (Root filesystem,
+  ↓ Receive), short in the terminal (DISK, ↓ RX). Both write sizes in the unit that fits them (`14M / 102M`,
+  not `0.0G / 0.1G`) and packets and operations per second as whole numbers, rounded the same way. The web
+  Overview's RAM and root filesystem read `used / total`, as the terminal: its "free" for the root filesystem
+  was the total minus used, not the space available, which the Storage view shows. `/text` and `--once` do
+  not change.
+- Fixed: on a phone-width web page the bottom tab bar had six columns for seven views, so System wrapped onto
+  a second row behind the bar; it now has one column per view. The `platmon` live view below 100 columns cut
+  the last core of each row of its Overview core grid.
+
 ## 1.8.0 — 2026-11-12
 
 - **Security, changes what is answered:** a request whose `Host` header is not an address, `localhost`,

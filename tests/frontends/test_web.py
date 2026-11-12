@@ -150,10 +150,10 @@ def test_network_and_disk_rows(steps):
     assert "eth0</span><span>1.5 KiB/s</span><span>0 B/s</span>" in net and '<span class="t-warn">3 · 0</span>' in net
     assert steps["counters"]["net_cap"] == "This process's network namespace · window 1.000 s · errors and drops are totals"
     assert "&#60;img src=x onerror=alert(1)&#62;" in net and "<img" not in net  # a name is text, never HTML
-    assert '<span class="muted">2.0 · 0.0</span>' in net
+    assert '<span class="muted">2 · 0</span>' in net  # per second: ui-spec formats, as the terminal
     assert "warming up" in net and "some_new_reason" in net  # no rate: the reason, not 0
     assert '<div class="tr idle">' not in net.split("eth0")[0].rsplit("</div>", 1)[-1]  # eth0 receives: not dimmed
-    assert "nvme0n1</span><span>3.0 MiB/s</span><span>512 B/s</span>" in dio and "4.0 · 0.5" in dio and "3.4 %" in dio
+    assert "nvme0n1</span><span>3.0 MiB/s</span><span>512 B/s</span>" in dio and "4 · 1" in dio and "3.4 %" in dio
     assert "counter went backwards" in dio and "saturat" not in dio
 
 
@@ -167,7 +167,8 @@ def test_storage_from_observations(steps):
     assert steps["ok"]["obs_age"]["storage"] == "observed 95 s ago (not current)"  # the server's age, and stale says so
     assert "1.0G / 4.0G · 25 %" in sto and "3.0G free" in sto and "<b>" not in sto
     assert '/mnt/&#60;b&#62;x&#60;/b&#62;</span><span class="badge">ro</span><span class="muted">+60 more' in sto
-    assert sto.index("/mnt/") < sto.index("/data")  # by usage, unknown capacity last
+    assert sto.index("/mnt/") < sto.index("/data")  # the server's order: a filesystem keeps its place as usage changes
+    assert "<details><summary>" in sto and "2 partitions · 1 mounted</summary>" in sto  # folded under one line a disk
     assert "/bind/" not in sto  # dozens of bind mounts: counted, not listed
     assert "capacity unknown" in sto and "0:40" in sto  # no numbers made up when statvfs gave none
     assert "nvme0n1p2" in sto and "not mounted" in sto

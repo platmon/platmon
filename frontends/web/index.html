@@ -18,22 +18,27 @@
         </picture>
         <div><h1 id="model">Platform status</h1><div id="subtitle"></div></div>
       </div>
-      <span id="status" class="pill" role="status" data-state="idle">Connecting</span>
+      <div class="state"><span id="stale" class="cap t-warn" hidden></span><span id="status" class="pill" role="status" data-state="idle">Connecting</span></div>
     </div>
     <nav class="tabs" role="tablist" aria-label="Monitoring views">
-      <button id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true">Overview</button>
-      <button id="tab-resources" role="tab" aria-controls="panel-resources" aria-selected="false" tabindex="-1">Resources</button>
-      <button id="tab-network" role="tab" aria-controls="panel-network" aria-selected="false" tabindex="-1">Network</button>
-      <button id="tab-storage" role="tab" aria-controls="panel-storage" aria-selected="false" tabindex="-1">Storage</button>
-      <button id="tab-thermal" role="tab" aria-controls="panel-thermal" aria-selected="false" tabindex="-1">Temp<span class="wide">erature</span></button>
-      <button id="tab-power" role="tab" aria-controls="panel-power" aria-selected="false" tabindex="-1" aria-label="Power &amp; battery">Power<span class="wide"> &amp; battery</span></button>
-      <button id="tab-system" role="tab" aria-controls="panel-system" aria-selected="false" tabindex="-1">System</button>
+      <button id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true" aria-label="Overview"><span class="wide">Overview</span><span class="narrow">Over</span></button>
+      <button id="tab-resources" role="tab" aria-controls="panel-resources" aria-selected="false" tabindex="-1" aria-label="Resources"><span class="wide">Resources</span><span class="narrow">Res</span></button>
+      <button id="tab-network" role="tab" aria-controls="panel-network" aria-selected="false" tabindex="-1" aria-label="Network"><span class="wide">Network</span><span class="narrow">Net</span></button>
+      <button id="tab-storage" role="tab" aria-controls="panel-storage" aria-selected="false" tabindex="-1" aria-label="Storage"><span class="wide">Storage</span><span class="narrow">Store</span></button>
+      <button id="tab-thermal" role="tab" aria-controls="panel-thermal" aria-selected="false" tabindex="-1" aria-label="Temperature"><span class="wide">Temperature</span><span class="narrow">Temp</span></button>
+      <button id="tab-power" role="tab" aria-controls="panel-power" aria-selected="false" tabindex="-1" aria-label="Power &amp; battery"><span class="wide">Power &amp; battery</span><span class="narrow">Power</span></button>
+      <button id="tab-system" role="tab" aria-controls="panel-system" aria-selected="false" tabindex="-1" aria-label="System"><span class="wide">System</span><span class="narrow">Sys</span></button>
     </nav>
   </div>
 </header>
 <main id="main" data-offline="false">
-  <p id="err-banner" class="banner crit" hidden><strong>Not current</strong><span id="err"></span><span id="err-age"></span></p>
-  <p id="coll-banner" class="banner warn" hidden><strong>Collection</strong><span id="coll"></span></p>
+  <!-- the status slot: always there on every view, so nothing below it moves when a banner or a warning
+       comes or goes; a lost service, else a partial collection (with the warnings in it), else the warnings -->
+  <div id="slot">
+    <p id="err-banner" class="banner crit" hidden><strong>Not current</strong><span id="err"></span><span id="err-age"></span></p>
+    <p id="coll-banner" class="banner warn" hidden><strong>Collection</strong><span id="coll"></span><span id="coll-attention"></span></p>
+    <div id="attention" class="card attention" hidden></div>
+  </div>
   <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
     <div id="overview"><p class="muted">Waiting for data…</p></div>
   </div>
@@ -60,7 +65,7 @@
   <div id="panel-thermal" role="tabpanel" aria-labelledby="tab-thermal" tabindex="0" hidden>
     <section id="thermal-empty" class="card empty-card"><h2>No temperature data</h2>
       <p>This board reports no thermal zones or hwmon temperature channels. Readings appear here automatically when the hardware exposes them.</p></section>
-    <section class="card" data-card hidden><div class="card-head"><h2>Temperature</h2><span class="cap">Bar scale 0–100 °C</span></div><div id="temp"></div></section>
+    <section class="card" data-card hidden><div class="card-head"><h2>Temperature</h2><span class="cap" id="temp-cap">Bar scale 0–100 °C</span></div><div id="temp"></div></section>
   </div>
   <div id="panel-power" role="tabpanel" aria-labelledby="tab-power" tabindex="0" hidden>
     <section id="power-empty" class="card empty-card"><h2>No power rail, fan or battery data</h2>
@@ -72,6 +77,7 @@
   </div>
   <div id="panel-system" role="tabpanel" aria-labelledby="tab-system" tabindex="0" hidden>
     <section class="card system-card" aria-label="System information">
+      <div class="sys" id="system-model-row" hidden><span>Model</span><span id="system-model"></span></div>
       <div class="sys" id="system-platform-row" hidden><span>Platform</span><span id="system-platform"></span></div>
       <div class="sys" id="system-uptime-row" hidden><span>Uptime</span><span id="system-uptime"></span></div>
       <div class="sys" id="system-os-row" hidden><span>OS</span><span id="system-os"></span></div>
@@ -80,6 +86,9 @@
       <div class="sys" id="system-hostname-row" hidden><span>Hostname</span><span id="system-hostname"></span></div>
       <div class="sys" id="system-l4t-row" hidden><span>L4T</span><span id="system-l4t"></span></div>
       <div id="system-extra"></div>
+      <h3>platmon</h3>
+      <div class="sys" id="system-version-row"><span>Version</span><span id="system-version">platmon v@VERSION@</span></div>
+      <div class="sys" id="system-service-row"><span>Service</span><span id="system-service"></span></div>
     </section>
   </div>
   <section id="history-panel" aria-labelledby="history-title" hidden>
@@ -90,7 +99,6 @@
     <div id="hist"></div>
   </section>
 </main>
-<footer>platmon v@VERSION@</footer>
 <script type="application/json" id="levels">@LEVELS@</script>
 <script src="/app.js"></script>
 </body>

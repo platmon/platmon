@@ -34,7 +34,11 @@ def test_views_are_the_web_tabs_and_the_terminal_views():
     page = (WEB / "index.html").read_text(encoding="utf-8")
     tabs = re.findall(r'<button id="tab-(\w+)" role="tab"[^>]*>(.*?)</button>', page)
     labels = [(v["id"], v["labels"][0]) for v in SPEC["views"]]
-    assert [(name, html.unescape(re.sub(r"<[^>]+>", "", text))) for name, text in tabs] == labels
+    # the long label, and on a phone's bottom bar the spec's short one, as the terminal's narrow tab bar
+    text = lambda part: html.unescape(re.sub(r"<[^>]+>", "", part))
+    assert [(name, text(re.sub(r'<span class="narrow">.*?</span>', "", label))) for name, label in tabs] == labels
+    assert [text(re.search(r'<span class="narrow">(.*?)</span>', label).group(1)) for _, label in tabs] == \
+        [v["labels"][1] for v in SPEC["views"]]
     assert list(cli.VIEWS) == [v["id"] for v in SPEC["views"]]
     assert {name: list(texts) for name, texts in cli.VIEW_LABELS.items()} == {v["id"]: v["labels"] for v in SPEC["views"]}
 
@@ -43,7 +47,8 @@ def test_system_fields_are_the_web_rows_and_the_terminal_labels():
     """The system entries the frontends know by name; any other one is shown as "key value" on both."""
     fields = SPEC["system_fields"]
     rows = re.findall(r'id="system-(\w+)-row"', (WEB / "index.html").read_text(encoding="utf-8"))
-    assert rows == ["platform", "uptime"] + fields  # platform and uptime are not system entries
+    # model, platform and uptime are not system entries; version and service are the page's own (the terminal's System view too)
+    assert rows == ["model", "platform", "uptime"] + fields + ["version", "service"]
     app = (WEB / "app.js").read_text(encoding="utf-8")
     assert json.loads(re.search(r"const SYSTEM_FIELDS = (\[.*?\]);", app).group(1).replace("'", '"')) == fields
     assert list(cli.SYSTEM_LABELS) == fields
@@ -168,3 +173,53 @@ def test_needs_attention_is_the_same_on_both(stats, obs, monkeypatch, tmp_path):
     cli.use_levels(levels)
     terminal = [list(entry) for entry in cli.attention(stats, obs)]
     assert [[html.unescape(name), value, lv] for name, value, lv in web] == terminal
+
+
+def test_the_narrow_tab_bar_has_a_column_per_view():
+    """On a phone the tab list is a fixed bottom bar: one column per view, or the last view wraps onto a
+    second row under the bar (a 6-column grid held 7 views)."""
+    css = (WEB / "styles.css").read_text(encoding="utf-8")
+    narrow = css[css.index("@media (max-width: 639px)"):]
+    tabs = narrow[narrow.index(".tabs {"):narrow.index("}", narrow.index(".tabs {"))]
+    assert int(re.search(r"grid-template-columns: repeat\((\d+),", tabs).group(1)) == len(SPEC["views"])
+
+
+def js_object(app, name):
+    """A constant object literal of app.js (keys bare, strings in single quotes) as Python data."""
+    text = re.search(rf"const {name} = (\{{.*?\}});\n", app, re.S).group(1)
+    return json.loads(re.sub(r"([{,]\s*)(\w+):", r'\1"\2":', text.replace("'", '"')))
+
+
+def test_metric_and_column_labels_are_the_spec_on_both():
+    """The Overview readings and the table columns are named once: the web page takes the long label, the
+    terminal the short one, and neither writes a label of its own."""
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    assert js_object(app, "METRICS") == {m["id"]: m["labels"] for m in SPEC["metrics"]}
+    assert js_object(app, "COLUMNS") == SPEC["columns"]
+    assert js_object(app, "FORMATS") == SPEC["formats"]
+    for long, _ in SPEC["columns"].values():
+        assert app.count(f"'{long}'") == 1, long  # in COLUMNS only
+    terminal = Path(cli.__file__).read_text(encoding="utf-8")
+    body = terminal[terminal.index("# The shared defaults"):]  # after the UI_SPEC copy
+    for _, short in SPEC["columns"].values():
+        assert f'"{short}"' not in body, short
+    labels = [label for label, *_ in cli.metrics(FULL)]
+    assert [label for label in labels if label != "NPU"] == [m["labels"][1] for m in SPEC["metrics"]]
+
+
+@pytest.mark.parametrize("fn, values", [
+    ("size", [0, 1023, 1024, 512 * 1024, 14.3 * 2**20, 102.4 * 2**20, 2**30, 45.1 * 2**30, 57 * 2**30]),
+    ("per_sec", [0, 0.4, 0.5, 1.5, 2.5, 912.4, 301.0])])
+def test_numbers_read_the_same_on_both(fn, values):
+    """Sizes in the unit that fits them and per-second counts rounded the same way: 14M on both, never
+    0.0G, and 0.5 packets/s is 1 on both (Python formats half to even, JavaScript half up)."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    js = (re.search(r"const FORMATS = .*?;\n", app).group(0) + re.search(r"const size = .*?\n\};\n", app, re.S).group(0)
+          + "const per_sec = v => v.toFixed(FORMATS.per_s_decimals);\n"
+          + f"console.log(JSON.stringify({json.dumps(values)}.map({fn})));")
+    web = json.loads(subprocess.run([node, "-e", js], check=True, capture_output=True, text=True).stdout)
+    assert web == [getattr(cli, fn)(v) for v in values]
+    assert "toFixed(FORMATS.per_s_decimals)" in app

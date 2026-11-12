@@ -60,7 +60,7 @@ const history = {retention_s: 600, series: {
       assert.equal(await page.locator('#overview img').count(), 0);
       assert.equal(await page.locator('.tabs').evaluate(e => getComputedStyle(e).position), width < 640 ? 'fixed' : 'static');
       assert(!(await page.locator('header').innerText()).includes('Ubuntu 22.04.5 LTS'));
-      assert(!(await page.locator('header').innerText()).includes('MAXN_SUPER'));
+      assert((await page.locator('header').innerText()).includes('MAXN_SUPER'), 'the power mode in the subtitle, as the terminal header');
       assert.equal(await page.locator('#history-panel').isVisible(), false);
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'overview fits long interface names');
       await page.screenshot({path: path.join(output, `overview-${width}.png`), fullPage: true});
@@ -85,7 +85,10 @@ const history = {retention_s: 600, series: {
       await page.screenshot({path: path.join(output, `network-${width}.png`), fullPage: true});
       const requestsBefore = counts['/api/history'];
       await page.locator('#tab-resources').click();
-      assert.equal(await page.locator('#hist svg').count(), 60);  // 59 cores and RAM, every series of both kinds
+      assert.equal(await page.locator('#hist svg').count(), 2);  // 59 cores folded into their mean and busiest, and RAM
+      assert((await page.locator('#hist').innerText()).includes('busiest of 59'));
+      await page.locator('#hist button[data-cores]').click();
+      assert.equal(await page.locator('#hist svg').count(), 61);  // unfolded: every series of both kinds
       assert((await page.locator('#hist').innerText()).includes('CPU58'));
       const graph = await page.locator('#hist svg path.line').first().getAttribute('d');
       assert(graph.split('M').length > 2, 'missing buckets break paths');
@@ -95,7 +98,7 @@ const history = {retention_s: 600, series: {
       assert.equal(await page.locator('#hist svg').count(), 1);
       assert((await page.locator('#hist').innerText()).includes('RAM used'));
       await page.locator('#history-groups button[data-group="cpu/"]').click();
-      assert.equal(await page.locator('#hist svg').count(), 60);
+      assert.equal(await page.locator('#hist svg').count(), 61);
       assert.equal(counts['/api/history'], requestsBefore, 'cached tab and group buttons do not fetch');
       await page.evaluate(() => { globalThis.savedGraph = document.querySelector('#hist svg'); });
       await page.waitForTimeout(1100);
@@ -139,7 +142,7 @@ const history = {retention_s: 600, series: {
       }
     }
     await page.locator('#tab-resources').click();
-    await page.waitForFunction(() => document.querySelectorAll('#hist svg').length === 60);
+    await page.waitForFunction(() => document.querySelectorAll('#hist svg').length === 2);  // reloaded: cores folded again
     const before = await page.locator('*').count();
     for (let n = 0; n < 120; n++) await page.evaluate(() => tick());
     assert.equal(await page.locator('*').count(), before, 'repeated rendering does not append DOM nodes');

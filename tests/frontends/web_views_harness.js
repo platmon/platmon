@@ -47,10 +47,10 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   assert.equal(count('api/history'), 0, 'overview does not request graphs');
   assert.equal(count('api/observations'), 0);
   assert(el('overview').innerHTML.includes('30.0<span class="unit">%'));
-  assert(el('overview').innerHTML.includes('Mean of 2 measured cores'));
+  assert(el('overview').innerHTML.includes('Busiest <span class="">CPU'), 'CPU names its busiest core');
   assert(el('overview').innerHTML.includes('60.0<span class="unit">°C') && el('overview').innerHTML.includes('&#60;b&#62;hot'));
-  assert(!el('overview').innerHTML.includes('Needs attention'), 'nothing above its warning level');
-  const attention = patch => run('overviewRows({...latestStats, ...' + JSON.stringify(patch) + '})');
+  assert(!el('attention').innerHTML.includes('Needs attention') && el('attention').hidden, 'nothing above its warning level: an empty slot');
+  const attention = patch => run('attentionHtml({...latestStats, ...' + JSON.stringify(patch) + '})');
   const full = attention({memory: {used: 7.6e9, total: 8e9, swap_total: 0}});
   assert(full.includes('Needs attention') && full.includes('<a class="pill crit" href="#resources">RAM'), 'memory 95% is critical');
   assert(attention({temperature: {cpu: 82}}).includes('pill warn'), 'not served by platmon: generic 80/90 °C');
@@ -101,11 +101,17 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   assert(el('overview').innerHTML.includes('eth0') && !el('overview').innerHTML.includes('999999'));
   const networkOverview = interfaces => run('overviewRows({...latestStats, network: ' + JSON.stringify({interfaces}) + '})');
   const rate = (name, rx) => ({name, rates: {rx_bytes_per_s: rx, tx_bytes_per_s: 0}});
+  run('for (const name in traffic) delete traffic[name]');  // no earlier answers: ranked by these rates
   const mixed = networkOverview([rate('br-example', 0), rate('eth0', 1024), rate('lo', 999999), rate('wlan0', 2048)]);
   assert(mixed.includes('br-example') && mixed.includes('eth0') && mixed.includes('wlan0'), 'bridge does not hide physical interface readings');
   assert(mixed.includes('1.0 KiB/s') && mixed.includes('2.0 KiB/s') && mixed.includes('0 B/s'));
   assert(mixed.includes('<div class="tr idle"><span>br-example') && !mixed.includes('first non-loopback'), 'idle interfaces are dimmed');
   assert(mixed.indexOf('wlan0') < mixed.indexOf('eth0') && mixed.indexOf('eth0') < mixed.indexOf('br-example'), 'busiest interfaces first');
+  // ranked over the last answers: a one-second burst does not swap two interfaces
+  run(`for (let n = 0; n < 9; n++) remember({network: {interfaces: [${JSON.stringify(rate('eth0', 1024))}, ${JSON.stringify(rate('wlan0', 2048))}]}})`);
+  run(`remember({network: {interfaces: [${JSON.stringify(rate('eth0', 4096))}, ${JSON.stringify(rate('wlan0', 2048))}]}})`);
+  const burst = networkOverview([rate('eth0', 4096), rate('wlan0', 2048)]);
+  assert(burst.indexOf('wlan0') < burst.indexOf('eth0'), 'busiest over the last answers, not this one');
   assert(mixed.includes('href="#network">All interfaces'));
   const many = networkOverview(Array.from({length: 20}, (_, n) => rate('iface-' + n, n)));
   assert(many.includes('Showing 4 of 20') && !many.includes('iface-4<'), 'overview rows stay bounded');
@@ -223,7 +229,12 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
     (_, i) => ['cpu/' + i + '/usage', [[1, 1000, i]]]), ['memory/used_bytes', [[1, 1000, 2e9]]]])}`);
   run('renderHistory()');
   const drawn = () => (el('hist').innerHTML.match(/data-series=/g) || []).length;
-  assert.equal(drawn(), 21, 'every series of every kind on, with no cap');
+  // more than 8 cores: one chart of their mean and busiest core, each core's own chart when asked for
+  assert.equal(drawn(), 1, 'cores folded into one chart, RAM drawn');
+  assert(el('hist').innerHTML.includes('CPU mean · busiest core') && el('hist').innerHTML.includes('busiest of 20'));
+  el('hist').handlers.click({target: {closest: sel => sel === '[data-cores]' ? {} : null}});
+  assert.equal(drawn(), 21, 'unfolded: every series of every kind, with no cap');
+  assert(el('hist').innerHTML.includes('Hide each core'));
   assert.deepEqual(el('hist').innerHTML.match(/<h3>[^<]+<\/h3>/g), ['<h3>CPU cores</h3>', '<h3>RAM</h3>'],
     'one section per kind, cores and RAM apart, in the button row order');
   assert(el('history-groups').innerHTML.includes('CPU cores 20') && el('history-groups').innerHTML.includes('RAM 1'));
@@ -240,5 +251,32 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   assert.equal(drawn(), 21);
   await switchTo('thermal'); await flush();
   assert.equal(el('history-groups').innerHTML, '', 'a view with one kind of series offers no buttons');
+
+  // the design policy: one status slot on every view, the tab of a view with a warning marked, the order of
+  // readings kept, the shared levels on the charts' scale, the rails summed, this page's own facts in System
+  run('LIMITS.temperature = [85, 95]; obs = null');
+  run("latestStats = {...latestStats, temperature: {cpu: 90, gpu: 40}}; $('coll').textContent = ''; failing = false; renderSlot()");
+  assert(el('attention').innerHTML.includes('pill warn" href="#thermal">cpu') && !el('attention').hidden, 'the warning in the slot');
+  assert.equal(el('tab-thermal').attrs['data-attention'], 'warn', "the view's tab is marked");
+  assert.equal(el('tab-network').attrs['data-attention'], '', 'the others are not');
+  run("$('coll').textContent = 'gpu error'; renderSlot()");
+  assert(el('coll-attention').innerHTML.includes('href="#thermal">cpu') && el('attention').innerHTML === '' && !el('coll-banner').hidden,
+    'a partial collection: the warnings go into its banner, the slot keeps one line');
+  run('failing = true; renderSlot()');
+  assert(!el('err-banner').hidden && el('coll-attention').innerHTML === '' && el('attention').innerHTML === '', 'offline: the banner alone');
+  run("failing = false; $('coll').textContent = ''; renderSlot()");
+  run("renderThermal({temperature: {soc: 50, tj: 90, cpu: 61}})");
+  const temp = el('temp').innerHTML;
+  assert(temp.indexOf('>soc<') < temp.indexOf('>tj<') && temp.indexOf('>tj<') < temp.indexOf('>cpu<'), "the server's order, not hottest first");
+  assert.equal(el('temp-cap').textContent, 'Bar scale 0–100 °C · warning 85 · critical 95');
+  run("renderPower({power: {VDD_A: 1, VDD_B: 2.5}, fans: [{name: 'pwmfan', rpm: 2840, percent: 42}], power_mode: null})");
+  assert(el('pwr').innerHTML.includes('Sum of rails</span><span><b>3.50 W') && el('pwr').innerHTML.includes('class="bar"'), 'rails summed, fan duty drawn');
+  run("renderPower({power: {VDD_IN: 5}, fans: [], power_mode: null})");
+  assert(!el('pwr').innerHTML.includes('Sum of rails'), 'one rail is its own total');
+  const cpu = run("chartOf('cpu/0/usage', [[1, 2000, 50], [1, 1000, 50]], HIST_LABEL[0])");
+  assert(cpu.includes('class="line" d="M0.0,14.0L200.0,14.0"'), 'a percentage on its 0–100 scale: 50 % is mid-height');
+  run("renderSystem({...latestStats, model: 'Board X'})");
+  assert.equal(el('system-model').textContent, 'Board X');
+  assert(el('system-service').textContent.endsWith(' · every 1 s'));
   console.log('views, summaries, keyboard, shared polling, cached errors and hidden-page suspension: passed');
 })().catch(e => { console.error(e); process.exitCode = 1; });
