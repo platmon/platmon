@@ -4,8 +4,9 @@
 > - Release gates and evidence per version, newest first (1.8.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.8.0's release tree passed the local checks, the dpkg lifecycle and the Orin's package smoke and live
->   HTTP (2026-11-12). Not verified for 1.8.0: the root unit's checks and soak, `hub_check.py`, the Windows zip
->   on a real PC, armhf on a real device, an apt upgrade to it on a real device.
+>   HTTP (2026-11-12). After publishing, a clean Ubuntu 24.04 container installed it from the APT repository
+>   and the Orin went from 1.7.0 to 1.8.0 with `apt install` (2026-11-12). Not verified for 1.8.0: the root
+>   unit's checks and soak, `hub_check.py`, the Windows zip on a real PC, armhf on a real device.
 > - 1.7.0's aarch64 binary passed its checks and a 24 h soak on the Orin as a user unit (2026-10-31, 11-01/02).
 >   After publishing, the Orin went from 1.6.0 to 1.7.0 with `apt install platmon` (2026-11-03).
 >   Not verified for 1.7.0: the root unit's soak and its sandbox, `hub_check.py`, armhf on a real device
@@ -41,6 +42,9 @@ Verified for this release:
 | `check_package_install.py` (amd64, Ubuntu 24.04 container): 1.8.0-1 and -2 | passed, including the listen notice on first installs only |
 | on the Jetson Orin Nano (Python 3.10), in a temporary directory beside the production 1.7.0 service | `check_package.py` on `platmon_1.8.0-1_arm64.deb` and platmon-cli: smoke passed; the aarch64 server's `live_http.py`: no difference |
 | the `Host` check on the Orin (#184, 2026-11-11): by address, host name and `.local` from another computer, Hub 1.1.1 registered by host name, Chrome | passed ([#184](https://github.com/platmon/platmon/pull/184)) |
+| the published release (2026-11-12): release run 43122006312, 11 files; `SHA256SUMS` before and after publishing; `gh attestation verify` (amd64 and arm64 `.deb`, x86_64 `.rpm`, Windows zip); the servers' bytes | all jobs passed; `sha256sum -c` OK; attestations verified; x86_64 and aarch64 the same bytes as the local build above |
+| `apt install platmon` from <https://platmon.github.io/apt> (platmon.github.io run 43215858589) in a clean `ubuntu:24.04` container, following [getting started](../guides/getting-started.md) | the key's fingerprint as documented; `platmon` and `platmon-cli` 1.8.0-1 (amd64; arm64 and armhf listed in the index); `platmon-server 1.8.0`, `platmon 1.8.0` |
+| the Orin Nano (Ubuntu 22.04.5, the production root service) from 1.7.0-1 to 1.8.0-1 with `apt install platmon platmon-cli` (2026-11-12 23:27 KST) | the service active as `platmon`, `NRestarts=0`, the journal's `version 1.8.0` and listen line; the edited `platmon.ini` kept; `/api/status` ready, `/` 200; `Host: evil.example` 421, the address and `ubuntu.local` 200 |
 | CI on `main` (`046de48`): the dpkg lifecycle and the service under systemd upgraded from 1.3.0 (amd64, arm64 on Ubuntu 20.04, 22.04, 24.04, 26.04); armhf under QEMU (Debian 13, Ubuntu 24.04); the `.rpm` lifecycle (Fedora 44, AlmaLinux 9, CentOS Stream 10); the Windows build and its zip; `hub_contract.py` | passed |
 
 Not verified, and therefore open:
@@ -51,8 +55,10 @@ Not verified, and therefore open:
 - **No `hub_check.py`** since 1.4.0 (`hub_contract.py` runs in CI instead).
 - **The Windows zip of this tree** is checked in CI only; the real-PC checks ran on 2026-11-01.
 - **armhf on a real device and its systemd service**, as at 1.7.0.
-- **No real device upgrade** from 1.7.0 to 1.8.0 under apt, and `apt install platmon` on a clean system
-  (after the release is published and the APT repository updated).
+- **No whole-system `apt upgrade`** to 1.8.0 on a real device (the Orin was upgraded with `apt install`), and no
+  Hub reconnecting through it: the PC's Hub registered the Orin by its USB network address, which was not
+  connected. Registered again by its LAN address after the upgrade, Hub 1.1.1 (raw capture on) reads the
+  Orin's 1.8.0 as live and ready, with the service's instance (2026-11-12).
 
 ## 1.7.0 release gate (2026-10-31)
 
