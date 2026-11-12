@@ -4,7 +4,9 @@
 > - Release gates and evidence per version, newest first (1.8.1 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.8.1, the frontends' design on 1.8.0's server, passed the same local checks, the dpkg lifecycle and the
->   Orin's package smoke and live HTTP (2026-11-13); its open items are 1.8.0's.
+>   Orin's package smoke and live HTTP (2026-11-13). After publishing, a clean Ubuntu 24.04 container
+>   installed it from the APT repository and the Orin went from 1.8.0 to 1.8.1 with a whole-system
+>   `apt-get upgrade`, the PC's Hub following it (2026-11-13). Its other open items are 1.8.0's.
 > - 1.8.0's release tree passed the local checks, the dpkg lifecycle and the Orin's package smoke and live
 >   HTTP (2026-11-12). After publishing, a clean Ubuntu 24.04 container installed it from the APT repository
 >   and the Orin went from 1.7.0 to 1.8.0 with `apt install` (2026-11-12). Not verified for 1.8.0: the root
@@ -37,9 +39,12 @@ Verified for this release:
 | `check_package_install.py` (amd64, Ubuntu 24.04 container): 1.8.1-1 and -2 | passed, including the listen notice on first installs only |
 | on the Jetson Orin Nano (Python 3.10), in a temporary directory beside the production 1.8.0 service | `check_package.py` on `platmon_1.8.1-1_arm64.deb` and platmon-cli: smoke passed; the aarch64 server's `live_http.py`: no difference |
 | the design on #193 (2026-11-12): `browser_smoke.cjs`, `browser_live.cjs` 60 s against a 1.8.0 server serving the branch's web page with the PC's readings, and the live view in a pseudo-terminal against the Orin's 1.8.0 service | passed ([#193](https://github.com/platmon/platmon/pull/193)) |
+| the published release (2026-11-13): release run 43306540842 (the first attempt's `rpm` check could not download a package from Fedora's mirrors; the failed jobs were run again), 11 files; `SHA256SUMS` before publishing and the assets' digests again just before; `gh attestation verify` of the 9 package files; the servers' bytes in every `.deb` and `.rpm`; `BUILD.json`'s source hashes against the tag; the Windows zip's web page | all jobs passed; `sha256sum -c` OK, unchanged before publishing; attestations verified; x86_64, aarch64 and armhf the same bytes as the local build above, the four `.deb` files byte for byte; 218 source files as tagged; `app.js` as tagged |
+| `apt install platmon` from <https://platmon.github.io/apt> (platmon.github.io run 43314868051) in a clean `ubuntu:24.04` container, following [getting started](../guides/getting-started.md) | the key's fingerprint as documented; `platmon` and `platmon-cli` 1.8.1-1 (amd64; arm64 and armhf listed in the index); the server's bytes as released; `platmon-server 1.8.1`, `platmon 1.8.1` |
+| the Orin Nano (Ubuntu 22.04.5, the production root service) from 1.8.0-1 to 1.8.1-1 with a whole-system `apt-get upgrade` (2026-11-13 07:01 KST, with libc6 and other updates), by the owner | the service active as `platmon` since 07:02:28, `NRestarts=0`, the journal's `version 1.8.1` and listen line; the server's bytes as released (aarch64); `/`, `/api/status`, `/api/stats`, `/text` 200, `/api/status` ready; the installed `index.html`, `app.js` and `styles.css` as tagged; `Host: evil.example` 421, the address and `ubuntu.local` 200; `platmon --once` on the Orin; Hub 1.1.1 on the PC (raw capture on) took the restarted service's instance at once, live, no transport failure |
 
-Not verified, and therefore open: 1.8.0's open items below (the root unit's checks and soak, `hub_check.py`,
-the Windows zip on a real PC, armhf on a real device, a whole-system `apt upgrade` on a real device), and the
+Not verified, and therefore open: 1.8.0's open items below other than the whole-system `apt upgrade` (the
+root unit's checks and soak, `hub_check.py`, the Windows zip on a real PC, armhf on a real device), and the
 new screens on a real phone or in another browser than Chromium.
 
 ## 1.8.0 release gate (2026-11-12)
