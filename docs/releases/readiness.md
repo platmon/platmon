@@ -1,8 +1,10 @@
 # Release readiness
 
 > **TL;DR**
-> - Release gates and evidence per version, newest first (1.8.0 at the top).
+> - Release gates and evidence per version, newest first (1.8.1 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
+> - 1.8.1, the frontends' design on 1.8.0's server, passed the same local checks, the dpkg lifecycle and the
+>   Orin's package smoke and live HTTP (2026-11-13); its open items are 1.8.0's.
 > - 1.8.0's release tree passed the local checks, the dpkg lifecycle and the Orin's package smoke and live
 >   HTTP (2026-11-12). After publishing, a clean Ubuntu 24.04 container installed it from the APT repository
 >   and the Orin went from 1.7.0 to 1.8.0 with `apt install` (2026-11-12). Not verified for 1.8.0: the root
@@ -11,6 +13,34 @@
 >   After publishing, the Orin went from 1.6.0 to 1.7.0 with `apt install platmon` (2026-11-03).
 >   Not verified for 1.7.0: the root unit's soak and its sandbox, `hub_check.py`, armhf on a real device
 >   under systemd, `apt upgrade` to it on a real device.
+
+## 1.8.1 release gate (2026-11-13)
+
+Changes since 1.8.0: one design policy for the `platmon` live view and the web page (#193): a status slot on
+every view, warning marks on the tabs, grey bars until a level, the Overview's five readings in both, labels
+and number formats shared through `ui-spec.json`, the phone tab bar's seventh column and the narrow core grid.
+
+A patch release by the owner's choice (2026-11-13), though the two screens change: the server's code, the
+HTTP API and its answers, `/text`, `platmon --once`, the `platmon.ini` keys and defaults, command options and
+schema versions are unchanged from 1.8.0. The server's bytes change with `VERSION` only (local
+`native/build.sh` / `build-armhf.sh` of the release tree): x86_64 `b9eab24455da5288`, aarch64
+`67b0cb1f26fa4f4c`, armhf `1c353336652cd5ca`.
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| native equivalence on the release tree (x86_64): fake trees, configurations, runtime, live HTTP | `fixture.sh` 11/11, `config_fixture.py` 77/77, `runtime_fixture.py` 7/7 (`/text` and the CLI's screen the same), `live_http.py` no difference |
+| `hub_contract.py` with platmon-hub 1.1.1 against the release tree's x86_64 server | passed |
+| `pytest`, Rust unit tests | 288 passed, 3 skipped; 277/277; `platmon-server --version` prints 1.8.1 |
+| `package.py` 1.8.1-1 and -2 (amd64, arm64, armhf, platmon-cli), `SHA256SUMS`, `check_package.py` (amd64, the PC), Lintian 2.117 (Ubuntu 24.04, `--pedantic --fail-on error,warning`) | built, `sha256sum -c` OK, smoke passed, clean |
+| `check_package_install.py` (amd64, Ubuntu 24.04 container): 1.8.1-1 and -2 | passed, including the listen notice on first installs only |
+| on the Jetson Orin Nano (Python 3.10), in a temporary directory beside the production 1.8.0 service | `check_package.py` on `platmon_1.8.1-1_arm64.deb` and platmon-cli: smoke passed; the aarch64 server's `live_http.py`: no difference |
+| the design on #193 (2026-11-12): `browser_smoke.cjs`, `browser_live.cjs` 60 s against a 1.8.0 server serving the branch's web page with the PC's readings, and the live view in a pseudo-terminal against the Orin's 1.8.0 service | passed ([#193](https://github.com/platmon/platmon/pull/193)) |
+
+Not verified, and therefore open: 1.8.0's open items below (the root unit's checks and soak, `hub_check.py`,
+the Windows zip on a real PC, armhf on a real device, a whole-system `apt upgrade` on a real device), and the
+new screens on a real phone or in another browser than Chromium.
 
 ## 1.8.0 release gate (2026-11-12)
 

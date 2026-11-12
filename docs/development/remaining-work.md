@@ -1,7 +1,7 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-11-12 (1.8.0 released); the evidence for
+> - What is still open, checked against the repository on 2026-11-13 (1.8.0 released, 1.8.1 being prepared); the evidence for
 >   each release is in [release readiness](../releases/readiness.md).
 > - 1.8.0 (owner, 2026-11-03 and 2026-11-12), released 2026-11-12: the experimental Windows zip together with
 >   `.rpm` release files and battery follow-ups; the root-unit checks and soak with `hub_check.py` on the Orin
@@ -31,6 +31,10 @@ this order; the version is 1.8.0 (owner, 2026-11-12):
    `hub_check.py` (installing and removing the unit needs the owner's sudo). **Open.**
 5. The release, with its gate in [release readiness](../releases/readiness.md#180-release-gate-2026-11-12).
    Done: published 2026-11-12, in the APT repository, the Orin upgraded with `apt install`.
+
+1.8.1 (owner, 2026-11-13) releases the frontends' design policy (#193), which missed 1.8.0, as a patch on
+1.8.0's server; its gate is in [release readiness](../releases/readiness.md#181-release-gate-2026-11-13).
+Item 4 above carries over.
 
 ## Windows build (2026-10-26)
 

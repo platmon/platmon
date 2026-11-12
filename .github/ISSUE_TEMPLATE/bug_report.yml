@@ -13,7 +13,7 @@ body:
     attributes:
       label: platmon version
       description: "`/usr/lib/platmon/platmon-server --version` (or `platmon --version`)"
-      placeholder: "1.8.0"
+      placeholder: "1.8.1"
     validations:
       required: true
   - type: dropdown

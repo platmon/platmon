@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - Which [platmon-hub](https://github.com/platmon/platmon-hub) release reads which platmon release, and
->   what each pairing was checked by. Current releases: platmon 1.8.0, platmon-hub 1.1.1.
-> - platmon-hub 1.1.1 reads every platmon release from 1.0.0 to 1.8.0. Its opt-in raw capture needs platmon
+>   what each pairing was checked by. Current releases: platmon 1.8.1, platmon-hub 1.1.1.
+> - platmon-hub 1.1.1 reads every platmon release from 1.0.0 to 1.8.1. Its opt-in raw capture needs platmon
 >   1.3.0 or later; older releases have no replay, and Hub 1.1.0 and later capture their polled documents instead.
 > - CI checks every build of `main` against platmon-hub 1.1.1, pinned by its PyPI hash.
 
@@ -15,6 +15,7 @@ ran on it.
 | platmon | platmon-hub 1.1.1 | platmon-hub 1.0.0, 1.1.0 |
 | --- | --- | --- |
 | next release (`main`) | **CI**: every build | not checked |
+| 1.8.1 | **CI**: every build up to its tag | not checked |
 | 1.8.0 | **CI**: every build up to its tag | not checked |
 | 1.7.0 | **contract**, 2026-11-11 | not checked |
 | 1.6.0 | **contract**, 2026-11-11 | not checked |
