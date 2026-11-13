@@ -6,7 +6,9 @@
 > - 1.8.1, the frontends' design on 1.8.0's server, passed the same local checks, the dpkg lifecycle and the
 >   Orin's package smoke and live HTTP (2026-11-13). After publishing, a clean Ubuntu 24.04 container
 >   installed it from the APT repository and the Orin went from 1.8.0 to 1.8.1 with a whole-system
->   `apt-get upgrade`, the PC's Hub following it (2026-11-13). Its other open items are 1.8.0's.
+>   `apt-get upgrade`, the PC's Hub following it (2026-11-13). Its release binary then passed the root
+>   candidate unit's checks, `hub_check.py` and a 24 h soak on the Orin (2026-11-13/14). Not verified for
+>   1.8.1: the Windows zip on a real PC, armhf on a real device, the new screens on a phone.
 > - 1.8.0's release tree passed the local checks, the dpkg lifecycle and the Orin's package smoke and live
 >   HTTP (2026-11-12). After publishing, a clean Ubuntu 24.04 container installed it from the APT repository
 >   and the Orin went from 1.7.0 to 1.8.0 with `apt install` (2026-11-12). Not verified for 1.8.0: the root
@@ -43,9 +45,22 @@ Verified for this release:
 | `apt install platmon` from <https://platmon.github.io/apt> (platmon.github.io run 43314868051) in a clean `ubuntu:24.04` container, following [getting started](../guides/getting-started.md) | the key's fingerprint as documented; `platmon` and `platmon-cli` 1.8.1-1 (amd64; arm64 and armhf listed in the index); the server's bytes as released; `platmon-server 1.8.1`, `platmon 1.8.1` |
 | the Orin Nano (Ubuntu 22.04.5, the production root service) from 1.8.0-1 to 1.8.1-1 with a whole-system `apt-get upgrade` (2026-11-13 07:01 KST, with libc6 and other updates), by the owner | the service active as `platmon` since 07:02:28, `NRestarts=0`, the journal's `version 1.8.1` and listen line; the server's bytes as released (aarch64); `/`, `/api/status`, `/api/stats`, `/text` 200, `/api/status` ready; the installed `index.html`, `app.js` and `styles.css` as tagged; `Host: evil.example` 421, the address and `ubuntu.local` 200; `platmon --once` on the Orin; Hub 1.1.1 on the PC (raw capture on) took the restarted service's instance at once, live, no transport failure |
 
-Not verified, and therefore open: 1.8.0's open items below other than the whole-system `apt upgrade` (the
-root unit's checks and soak, `hub_check.py`, the Windows zip on a real PC, armhf on a real device), and the
-new screens on a real phone or in another browser than Chromium.
+After publishing, on the Orin, the release's aarch64 server (`67b0cb1f26fa4f4c`, extracted from
+`platmon_1.8.1-1_arm64.deb`) as the root candidate unit: `install.sh` by the owner (DynamicUser, the product
+unit's hardening, `/etc/platmon-candidate/platmon.ini` from the production INI with 127.0.0.1:19797), beside
+the production 1.8.1 service, which stayed active and answering throughout
+([remaining work](../development/remaining-work.md#next-release-2026-11-03), item 4):
+
+| check | result |
+| --- | --- |
+| `deploy_check.py checks`, 2026-11-13 07:40 KST | 9/9 passed: start and restart ready in 0.1 s as the DynamicUser; back 5.26 s after SIGKILL (`NRestarts` + 1, a new instance, 409 for the old cursor); the held port: restarting until released, then serving; every stop within 0.05 s, `Result=success`, nothing left, including while 4 clients fetched replay pages; the fake nvidia-smi not reached (the Orin's collector does not call it), as before |
+| `hub_check.py --hosts orin=…` with platmon-hub 1.1.1 on the PC (through an SSH tunnel), 2026-11-13 07:45 KST: an agent restart, a SIGKILL, the Hub down 60 s, the agent down 30 s | passed: the 4 instances the agent had are the 4 the Hub stored; publication ids without a hole that no loss explains, each new instance from id 1; one `agent_restart_unknown_extent` loss per stream per instance change (3); 57 core publications of the Hub's 60 s down stored after it came back; the cursor at the agent's latest id; integrity check passed |
+| `deploy_check.py soak --hours 24`, 2026-11-13 07:58 to 11-14 08:00 KST, judged by `report --settled-mib 14` | PASS: 105,958 Hub-like requests and 2,016 in the concurrent rounds, no error, loss or walk problem (in odd hours a missing range only on the reconnect's first page, as expected); 84,281 collections, longest step 1.001 s, no gap; no automatic restart (the planned one after hour 11 only); CPU 0.80–0.89 % of a core per hour; settled PSS 10.6–11.4 MiB, segment baselines 10.9 and 11.0 MiB (budget 14), growth 36 and 40 KiB per round (limit 64); concurrency peaks up to 12.8 MiB; 5 threads, 4 descriptors |
+| the PC's Hub 1.1.1 (raw capture on) polling the Orin's production service over Wi-Fi, 2026-11-12 23:38 to 11-14 08:01 KST (32.4 h; 1.8.0, then 1.8.1 from 07:02 on 11-13) | every raw stream stored without a hole (1.8.1's core ids 1–89,946, collections at most 1.001 s apart); the only losses the first connection's (more than 600 s after 1.8.0 started) and the upgrade's restart; 156 transport timeouts of 10–15 s (29 min in all), each caught up from replay once answered. The service kept collecting every second through them, another node on the same Wi-Fi had none, and pings to the Orin spiked to 632 ms: most likely the Orin's network link, not confirmed |
+
+Not verified, and therefore open: the Windows zip of this tree on a real PC (CI only; the real-PC checks ran
+on 2026-11-01), armhf on a real device and its systemd service, and the new screens on a real phone or in
+another browser than Chromium.
 
 ## 1.8.0 release gate (2026-11-12)
 
