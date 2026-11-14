@@ -4,6 +4,14 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+Draft for the next release; the version and date replace this heading when it is tagged.
+
+- The `platmon` live view's Network view no longer runs a Wi-Fi interface's name into its signal: a name of
+  8 characters or more, such as a Jetson's `wlP1p1s0`, read `wlP1p1s0-29 dBm`. The names now take one column
+  as wide as the longest, then two spaces. `/text` and `platmon --once` are unchanged.
+
 ## 1.8.1 — 2026-11-13
 
 A patch release of the two frontends' design (the owner's choice): the server, the HTTP API and its answers,

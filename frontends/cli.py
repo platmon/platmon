@@ -915,19 +915,23 @@ def body_network(v):
 
     if wlans:
         body += ["", v.title("WI-FI", stale_text(wifi_o))]
+        # the names in one column as wide as the longest, then two spaces: "wlP1p1s0" (a Jetson's) once
+        # filled a fixed 8 columns and ran into its signal
+        names = max(len(i["name"]) for i in wlans)
         for i in wlans:
+            name = f"    {i['name']:<{names}}  "
             if i.get("connected") is not True:  # never the last signal of a connection that ended
                 state = "not connected" if i.get("connected") is False else i.get("connection_state", "unknown")
-                body.append(st(f"    {i['name']:<8}  {state}", "muted"))
+                body.append(st(name + state, "muted"))
                 continue
             signal, extra = wifi_signal(i)
             if i["signal_dbm"] is None:  # a value without dBm is shown without a bar, as on the web page
-                body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), signal]
+                body.append(joined(v.width, [st(name, "muted"), signal]
                                    + [st(f"   {e}", "muted") for e in extra]))
                 continue
             lv = level_of("wifi", i["signal_dbm"])
             weak, strong = UI_SPEC["scales"]["wifi_dbm"]  # the web page's bar scale
-            body.append(joined(v.width, [st(f"    {i['name']:<8}", "muted"), st(pad(signal, 9), tone(lv), "bold"),
+            body.append(joined(v.width, [st(name, "muted"), st(pad(signal, 9), tone(lv), "bold"),
                                          " " + meter(st, 100 * (i["signal_dbm"] - weak) / (strong - weak),
                                                      20 if v.wide else 11, ticks=False, lv=lv)]
                                + [st(f"   {e}", "muted") for e in extra]))
