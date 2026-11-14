@@ -5,6 +5,8 @@
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.8.2, two display fixes on 1.8.1's server (the live view's Wi-Fi rows, the web page's scrollbar colors),
 >   passed the same local checks, the dpkg lifecycle and the Orin's package smoke and live HTTP (2026-11-14).
+>   After publishing, a clean Ubuntu 24.04 container installed it from the APT repository and the Orin went
+>   from 1.8.1 to 1.8.2 with a whole-system `apt-get upgrade`, the PC's Hub following it (2026-11-14).
 >   Not verified for 1.8.2: the scrollbar fix in a real desktop Firefox window (headless Firefox only), the
 >   Windows zip on a real PC, armhf on a real device.
 > - 1.8.1, the frontends' design on 1.8.0's server, passed the same local checks, the dpkg lifecycle and the
@@ -48,6 +50,9 @@ Verified for this release:
 | `check_package_install.py` (amd64, Ubuntu 24.04 container): 1.8.2-1 and -2 | passed, including the listen notice on first installs only |
 | on the Jetson Orin Nano (Python 3.10), in a temporary directory beside the production 1.8.1 service | `check_package.py` on `platmon_1.8.2-1_arm64.deb` and platmon-cli: smoke passed; the aarch64 server's `live_http.py`: no difference |
 | the fixes on their PRs (2026-11-14) | #203: the live view in a pseudo-terminal against the Orin's 1.8.1 service, `wlP1p1s0  -29 dBm`; #206: headless Firefox 159.0.1, 500 px, dark theme, Network tab: the bar a grey thumb, white before |
+| the published release (2026-11-14): release run 43572221415, 11 files; `SHA256SUMS` before publishing and the assets' digests again just before; `gh attestation verify` of the 9 package files; the servers' bytes in every `.deb` and `.rpm`; `BUILD.json`'s source hashes against the tag; the source archive; the Windows zip's web page; the files again after publishing | all jobs passed at the first attempt; `sha256sum -c` OK, unchanged before publishing; attestations verified; x86_64, aarch64 and armhf the same bytes as the local build above, the four `.deb` files byte for byte; 218 source files as tagged; the archive's files as tagged; `index.html`, `app.js` and `styles.css` as tagged; the published files the verified ones |
+| `apt install platmon` from <https://platmon.github.io/apt> (platmon.github.io run 43574373510) in a clean `ubuntu:24.04` container, following [getting started](../guides/getting-started.md) | the key's fingerprint as documented; `platmon` and `platmon-cli` 1.8.2-1 (amd64; arm64 and armhf listed in the index); the server's bytes as released; `platmon-server 1.8.2`, `platmon 1.8.2` |
+| the Orin Nano (Ubuntu 22.04.5, the production root service) from 1.8.1-1 to 1.8.2-1 with a whole-system `apt-get upgrade` (2026-11-14 17:57 KST, with one other package), by the owner | the service active as `platmon` since 17:57:22, `NRestarts=0`, the journal's `version 1.8.2`; the server's bytes as released (aarch64); `/`, `/api/status`, `/api/stats`, `/text` 200, `/api/status` ready; the installed and served `styles.css`, and the installed `index.html` and `app.js`, as tagged; `Host: evil.example` 421, `ubuntu.local` 200; `platmon --once` on the Orin; Hub 1.1.1 on the PC took the new instance at 17:57:25, every stream from id 1 with one `agent_restart_unknown_extent` loss each. The Hub had shown the Orin offline from 16:51 to 17:56 while the PC was on another Wi-Fi network after a suspend; the Orin's own localhost poller had 4,500 answers, all 200, in that time |
 
 Not verified, and therefore open: the scrollbar fix in a real desktop Firefox window, the Windows zip of this
 tree on a real PC (CI only; the real-PC checks ran on 2026-11-01), and armhf on a real device and its systemd
