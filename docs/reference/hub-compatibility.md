@@ -15,7 +15,7 @@ ran on it.
 | platmon | platmon-hub 1.1.1 | platmon-hub 1.0.0, 1.1.0 |
 | --- | --- | --- |
 | next release (`main`) | **CI**: every build | not checked |
-| 1.8.1 | **CI**: every build up to its tag | not checked |
+| 1.8.1 | **CI**: every build up to its tag; **devices** (1.8.1 release gate) | not checked |
 | 1.8.0 | **CI**: every build up to its tag | not checked |
 | 1.7.0 | **contract**, 2026-11-11 | not checked |
 | 1.6.0 | **contract**, 2026-11-11 | not checked |
@@ -30,7 +30,9 @@ ran on it.
   polls the server through a restart, and its records and database are checked.
 - **contract**: the same `hub_contract.py` (from `main` on that date), run by hand against the released amd64
   server extracted from that release's `.deb`, checked against its `SHA256SUMS`.
-- **devices**: a released Hub polling real devices. At 1.4.0, Hub 1.1.1 on the x86-64 PC, the Jetson Orin Nano
+- **devices**: a released Hub polling real devices. At 1.8.1, Hub 1.1.1 on the x86-64 PC polling the Jetson Orin
+  Nano's candidate unit through the same events (`hub_check.py`), and the Orin's production service for a day
+  ([readiness](../releases/readiness.md#181-release-gate-2026-11-13)). At 1.4.0, Hub 1.1.1 on the x86-64 PC, the Jetson Orin Nano
   and the Raspberry Pi 4 through an agent restart, a SIGKILL, the Hub down 60 s and the agents down 30 s
   ([readiness](../releases/readiness.md#140-release-gate-2026-10-22)). At 1.3.0, the Orin Nano and the
   Raspberry Pi 4 registered in Hub 1.1.0 on the PC with raw capture on

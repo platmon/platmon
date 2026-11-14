@@ -5,10 +5,9 @@
 >   each release is in [release readiness](../releases/readiness.md).
 > - 1.8.0 (owner, 2026-11-03 and 2026-11-12), released 2026-11-12: the experimental Windows zip together with
 >   `.rpm` release files and battery follow-ups; 1.8.1, the frontends' design on its server, released
->   2026-11-13. The root-unit checks and soak with `hub_check.py` on the Orin (below) are still open.
+>   2026-11-13; its root candidate unit passed the checks, `hub_check.py` and a 24 h soak on the Orin.
 > - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, accepted as known
->   gaps. Linux: armhf on a real device, `hub_check.py` since 1.4.0, the root unit's soak (1.7.0 soaked
->   as a user unit), a remote probe target.
+>   gaps. Linux: armhf on a real device, a remote probe target.
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
 > - Also recorded, not started: a desktop tray frontend and a separate network process (deferred; no
 >   Unix socket).
@@ -28,14 +27,15 @@ this order; the version is 1.8.0 (owner, 2026-11-12):
 3. Battery follow-ups ([below](#deferred-after-the-battery-group-2026-10-11)), after a design decision.
    Done: `temp_c` (#161), the rest closed or deferred by the owner on 2026-11-03.
 4. On the Orin, the release candidate as the root candidate unit: `deploy_check.py checks`, a soak and
-   `hub_check.py` (installing and removing the unit needs the owner's sudo). **Open.**
+   `hub_check.py` (installing and removing the unit needs the owner's sudo). Done with 1.8.1's binary
+   (2026-11-13/14, [its gate](../releases/readiness.md#181-release-gate-2026-11-13)).
 5. The release, with its gate in [release readiness](../releases/readiness.md#180-release-gate-2026-11-12).
    Done: published 2026-11-12, in the APT repository, the Orin upgraded with `apt install`.
 
 1.8.1 (owner, 2026-11-13) releases the frontends' design policy (#193), which missed 1.8.0, as a patch on
 1.8.0's server; its gate is in [release readiness](../releases/readiness.md#181-release-gate-2026-11-13).
 Published 2026-11-13, in the APT repository, the Orin upgraded with a whole-system `apt-get upgrade`.
-Item 4 above carries over, with 1.8.1's binary.
+Item 4 above was done with 1.8.1's binary.
 
 ## Windows build (2026-10-26)
 
@@ -95,8 +95,10 @@ Open since the gates in [release readiness](../releases/readiness.md):
   throughout. Raw: the Orin's `~/platmon-soak-0ba5e2c/` (`checks-orin.jsonl`, `soak-orin.jsonl`). Later
   changes on `main` (the HTTP edges and `/text` 500, the binary's commands, the package split, the
   rename) ran after it; 1.7.0's aarch64 binary then passed `--user checks` (9/9) and
-  `--user soak --hours 24` on 2026-11-01/02 as a user unit, not the root unit (its gate). `hub_check.py`
-  was not run.
+  `--user soak --hours 24` on 2026-11-01/02 as a user unit, not the root unit (its gate). 1.8.1's aarch64
+  binary passed the root unit's checks (9/9), `hub_check.py` with platmon-hub 1.1.1 and
+  `soak --hours 24` on 2026-11-13/14 ([its gate](../releases/readiness.md#181-release-gate-2026-11-13));
+  the raw records are on the Orin in `~/platmon-item4-1.8.1/results/`.
 - **apt upgrade on a real device:** the Orin Nano upgraded from 1.4.0 to 1.6.0 under apt and rebooted
   (2026-10-28, [release readiness](../releases/readiness.md#160-release-gate-2026-10-25)), and from 1.6.0
   to 1.7.0 with `apt install platmon`, which also installed platmon-cli (2026-11-03,
@@ -107,10 +109,8 @@ Open since the gates in [release readiness](../releases/readiness.md):
   1.5.0 was checked only in CI's containers.
 - **Probe against a remote target:** checked on loopback and with fakes only; no remote target has been
   approved ([probe.md](../reference/probe.md#verification)).
-- **Orin candidate units:** the root units `platmon-server-candidate*` installed on 2026-11-04 with the
-  1.7.0 binary are still there, not started (the 1.7.0 soak's user units are gone); step 4 above replaces
-  them (`sudo bash native/tools/deploy/uninstall.sh`, then `install.sh` with the new binary) and removes
-  them when it is done.
+- **Orin candidate units:** the root units `platmon-server-candidate*` with 1.8.1's binary, left from step
+  4 above, not started; `sudo bash native/tools/deploy/uninstall.sh` removes them.
 - The local worktrees `platmon-w2` and `platmon-svc` on the machine that made them (not the Linux PC).
 
 ## Python server removal
