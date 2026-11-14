@@ -1,6 +1,7 @@
 """The experimental Windows zip (scripts/packaging/package_windows.py); no Windows needed."""
 import hashlib
 import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -71,6 +72,8 @@ def test_zip_contents_and_checksum(tmp_path, exe):
         for name in SCRIPTS:  # cmd misreads labels and goto in a batch file with LF line ends
             script = z.read(top + name)
             assert script.count(b"\r\n") == script.count(b"\n") > 0 and script.startswith(b"@echo off\r\n")
+            # findstr, never find: Git for Windows' Unix tools on PATH shadow find.exe (CI's bash steps did)
+            assert not re.search(rb"(^|[|&(\s])find\s", script), name
         # the install script sets the guide's recovery actions and the event log source, as the README's steps do
         install = z.read(top + "install-service.cmd").decode("utf-8")
         assert "restart/5000/restart/5000/restart/60000" in install and "EventLogMessages.dll" in install
