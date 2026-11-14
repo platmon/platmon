@@ -23,7 +23,7 @@ exit /b 0
 :stop
 sc.exe stop platmon >nul 2>&1
 for /l %%i in (1,1,30) do (
-  sc.exe query platmon | find "STOPPED" >nul && exit /b 0
+  sc.exe query platmon | findstr /c:"STOPPED" >nul && exit /b 0
   ping -n 2 127.0.0.1 >nul
 )
 echo The platmon service did not stop.
