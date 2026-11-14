@@ -5,6 +5,7 @@
 >   Debian-derived host with systemd; the `platmon` command (`platmon-cli`, installed with it) needs Python 3.9+.
 > - Then run `platmon`, open `http://<device>:9797`, or `curl` `/api/status`.
 > - Settings live in `/etc/platmon/platmon.ini`; the API has no authentication.
+> - Windows 11: an experimental, unsupported zip; double-click `start.cmd` ([Windows](#windows-experimental)).
 
 platmon is a device-side monitor: one background service reads host metrics and publishes
 snapshots. The `platmon` terminal client, web dashboard and HTTP clients all read the same
@@ -101,6 +102,25 @@ Other Linux systems can use the release source archive and the
 [source-systemd or Docker instructions](deployment.md). See
 [packaging and releases](../reference/packaging.md) for signing/checksums,
 installation lifecycle, migration and rollback.
+
+### Windows (experimental)
+
+A Windows 11 (x86_64) zip of the same server is among the release files,
+`platmon-<version>-windows-x86_64-experimental.zip`. It is not supported: checked in CI and on one laptop.
+Check it against `SHA256SUMS`, unzip it, then:
+
+- **Try it:** double-click `start.cmd`. It serves the folder's `platmon.ini` (listening on 127.0.0.1 only)
+  and web page as your user and opens `http://127.0.0.1:9797/`; closing its window stops it.
+- **Keep it running:** right-click `install-service.cmd`, *Run as administrator*. It copies the server,
+  `platmon.ini` and the web page to `C:\Program Files\platmon` and starts the Windows service `platmon`,
+  which starts with Windows. Run it again from a newer zip to upgrade; it keeps the `platmon.ini` there.
+  `uninstall-service.cmd`, also as administrator, removes the service and its files but `platmon.ini`.
+
+The scripts and the server without the Visual C++ Redistributable come with the first release after 1.8.2;
+the 1.8.0 to 1.8.2 zips need that Redistributable and the commands in their `README.txt`. The zip's
+`README.txt` covers the firewall, the service by hand and what was checked. The `platmon` command is not in
+it; its plain `--once` view runs on Windows with Python 3.9+ (`python frontends/cli.py --once` from a
+checkout), the live view needs a Unix terminal.
 
 To watch several devices in one place, run [platmon-hub](https://github.com/platmon/platmon-hub)
 on another computer. Which Hub release reads which platmon release, and what checked each pairing, is in

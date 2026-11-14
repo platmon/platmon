@@ -59,6 +59,13 @@ temperature) stay unchecked and are named in the zip's README instead of holding
 1.7.0 (native/README.md, "Windows"). Its CHANGELOG entry must call it experimental: the release workflow
 refuses a tag whose entry does not (`check_changelog` in `package_windows.py`).
 
+**Since (owner, 2026-11-14):** still experimental, but easy to start, to draw Windows testers and
+contributors. Two choices of the 1.8.0 zip change: the server links the C runtime statically (`+crt-static`; no
+Visual C++ Redistributable to install), and the zip registers the service: `start.cmd` (serve as the user,
+open the browser), `install-service.cmd` / `uninstall-service.cmd` (administrator; `C:\Program Files\platmon`,
+`sc.exe`). No installer and no package manager still. Windows reports do not count toward the APT-install
+testers of #181. Before the release that brings it: a check of the zip on the owner's Windows laptop.
+
 Real-PC checks (a laptop: Core Ultra 7 155H, Intel Arc iGPU, WD SN810 NVMe, Windows 11 26H2, Korean display
 language, non-admin unless stated). CI runs on a VM, which has none of these devices:
 
