@@ -1,8 +1,12 @@
 # Release readiness
 
 > **TL;DR**
-> - Release gates and evidence per version, newest first (1.8.1 at the top).
+> - Release gates and evidence per version, newest first (1.8.2 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
+> - 1.8.2, two display fixes on 1.8.1's server (the live view's Wi-Fi rows, the web page's scrollbar colors),
+>   passed the same local checks, the dpkg lifecycle and the Orin's package smoke and live HTTP (2026-11-14).
+>   Not verified for 1.8.2: the scrollbar fix in a real desktop Firefox window (headless Firefox only), the
+>   Windows zip on a real PC, armhf on a real device.
 > - 1.8.1, the frontends' design on 1.8.0's server, passed the same local checks, the dpkg lifecycle and the
 >   Orin's package smoke and live HTTP (2026-11-13). After publishing, a clean Ubuntu 24.04 container
 >   installed it from the APT repository and the Orin went from 1.8.0 to 1.8.1 with a whole-system
@@ -19,6 +23,35 @@
 >   After publishing, the Orin went from 1.6.0 to 1.7.0 with `apt install platmon` (2026-11-03).
 >   Not verified for 1.7.0: the root unit's soak and its sandbox, `hub_check.py`, armhf on a real device
 >   under systemd, `apt upgrade` to it on a real device.
+
+## 1.8.2 release gate (2026-11-14)
+
+Changes since 1.8.1: the `platmon` live view's Wi-Fi rows keep a long interface name such as the Jetson's
+`wlP1p1s0` apart from its signal (#203), and the web page's scrollbars take the theme's colors, which desktop
+Firefox drew white in the dark theme (#206).
+
+A patch release by the owner's choice (2026-11-14): `native/`, `packaging/` but the Debian changelog's date,
+`scripts/` and `deploy/` are unchanged from 1.8.1, and so are the HTTP API and its answers, `/text`,
+`platmon --once`, the `platmon.ini` keys and defaults, command options and schema versions. The server's bytes
+change with `VERSION` only (local `native/build.sh` / `build-armhf.sh` of the release tree): x86_64
+`e3f01ecb8359c894`, aarch64 `7c7668347df5f439`, armhf `7ee173c5f28a8a34`. The root candidate unit's checks,
+`hub_check.py` and the 24 h soak were not repeated: they ran on 1.8.1's release binary, whose code this is.
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| native equivalence on the release tree (x86_64): fake trees, configurations, runtime, live HTTP | `fixture.sh` 11/11, `config_fixture.py` 77/77, `runtime_fixture.py` 7/7 (`/text` and the CLI's screen the same), `live_http.py` no difference |
+| `hub_contract.py` with platmon-hub 1.1.1 against the release tree's x86_64 server | passed |
+| `pytest`, Rust unit tests | 292 passed, 2 skipped; 277/277; `platmon-server --version` prints 1.8.2 |
+| `package.py` 1.8.2-1 and -2 (amd64, arm64, armhf, platmon-cli), `SHA256SUMS`, `check_package.py` (amd64, the PC), Lintian 2.117 (Ubuntu 24.04, `--pedantic --fail-on error,warning`) | built, `sha256sum -c` OK, smoke passed, clean; `BUILD.json`'s server hashes the local builds above |
+| `check_package_install.py` (amd64, Ubuntu 24.04 container): 1.8.2-1 and -2 | passed, including the listen notice on first installs only |
+| on the Jetson Orin Nano (Python 3.10), in a temporary directory beside the production 1.8.1 service | `check_package.py` on `platmon_1.8.2-1_arm64.deb` and platmon-cli: smoke passed; the aarch64 server's `live_http.py`: no difference |
+| the fixes on their PRs (2026-11-14) | #203: the live view in a pseudo-terminal against the Orin's 1.8.1 service, `wlP1p1s0  -29 dBm`; #206: headless Firefox 159.0.1, 500 px, dark theme, Network tab: the bar a grey thumb, white before |
+
+Not verified, and therefore open: the scrollbar fix in a real desktop Firefox window, the Windows zip of this
+tree on a real PC (CI only; the real-PC checks ran on 2026-11-01), and armhf on a real device and its systemd
+service.
 
 ## 1.8.1 release gate (2026-11-13)
 
