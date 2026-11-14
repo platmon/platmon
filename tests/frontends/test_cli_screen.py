@@ -100,6 +100,25 @@ def test_wifi_signal_bar_uses_the_web_scale():
     assert "unit not reported" in row and "█" not in row and "░" not in row  # no dBm: no bar
 
 
+@pytest.mark.parametrize("width", [119, 79])
+def test_wifi_names_never_run_into_the_signal(width):
+    """A Jetson's "wlP1p1s0" filled the old fixed 8 columns and read "wlP1p1s0-29 dBm". The names take one
+    column as wide as the longest (a USB adapter's "wlx…" is 15), then two spaces, so every row lines up."""
+    import copy
+    obs = copy.deepcopy(OBSERVED)
+    wlans = obs["groups"]["wifi"]["data"]["interfaces"]
+    wlans[:] = [dict(wlans[0], name="wlP1p1s0", signal_dbm=-29), dict(wlans[0], name="wlx00c0ca123456", signal_dbm=-61),
+                dict(wlans[0], name="wlan0", connected=False), dict(wlans[0], name="wlan1", signal_dbm=None, signal_raw=40)]
+    lines = plain(screen(RICH, obs, width, 90, Style(), LIVE, "network"))
+    rows = {name: next(line for line in lines if line.startswith(f"    {name} ")) for name in
+            ("wlP1p1s0", "wlx00c0ca123456", "wlan0", "wlan1")}
+    column = 4 + len("wlx00c0ca123456") + 2
+    assert rows["wlP1p1s0"][column:].startswith("-29 dBm"), rows
+    assert rows["wlx00c0ca123456"][column - 2:].startswith("  -61 dBm"), rows
+    assert rows["wlan0"][column:].startswith("not connected"), rows
+    assert rows["wlan1"][column:].startswith("signal 40"), rows
+
+
 def test_low_levels_attention_and_colors(monkeypatch):
     """Battery charge and Wi-Fi signal: at or below a level, the opposite of the other readings; only from a
     current observation, and never from an empty bay or a disconnected interface."""
