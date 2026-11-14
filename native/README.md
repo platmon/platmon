@@ -686,10 +686,13 @@ accepted as known gaps, so 1.8.0 adds it as an experimental zip (the owner's dec
 and their status: [remaining work](../docs/development/remaining-work.md#windows-build-2026-10-26)).
 `scripts/packaging/package_windows.py` builds it from CI's binary into `package.py`'s output, adds it to
 `SHA256SUMS` and the binary's SHA-256 to `BUILD.json` (`windows_server_sha256`): `platmon-VERSION-windows-x86_64-experimental.zip` with `platmon-server.exe`, the web page,
-`platmon.ini` with `bind = 127.0.0.1`, `LICENSE`, `LICENSE-MIT` (the Rust standard library and the crates)
-and a `README.txt` (the Visual C++ Redistributable it needs and does not include, running it, the
-service, what was and was not checked). No installer and no Microsoft binaries: the binary links the
-Visual C++ runtime dynamically. `src/platform/`
+`platmon.ini` with `bind = 127.0.0.1`, `LICENSE`, `LICENSE-MIT` (the Rust standard library and the crates),
+a `README.txt` (running it, the service, what was and was not checked) and `packaging/windows/`'s scripts:
+`start.cmd` (serve as the user, open the browser), `install-service.cmd` and `uninstall-service.cmd`
+(administrator: the service `platmon` in `C:\Program Files\platmon`, an edited `platmon.ini` kept). No
+installer. Since the release after 1.8.2 the binary links the C runtime statically (CI's
+`RUSTFLAGS="-C target-feature=+crt-static"`), so it needs no Visual C++ Redistributable; the packager refuses
+one that imports the runtime's DLLs (the owner's decision, 2026-11-14). `src/platform/`
 holds what the service needs from the OS outside the collectors: the elapsed clocks, random bytes for the
 instance id, the listening socket and the exit on a stop request, one module per OS with the same
 functions. `platform/linux.rs` is the code `main.rs`, `metadata.rs`, `runtime.rs` and `http.rs` had,
@@ -699,8 +702,10 @@ required reads' spans, `Collected`); `src/collect/linux/` (`sysfs.rs`, `common.r
 on Linux only.
 
 On `x86_64-pc-windows-msvc`:
-- CI (`native-windows`, `windows-latest`) builds it with Rust 1.88 and MSVC, runs the unit tests and
-  `tools/windows_smoke.py`, which runs `collect` and `serve` on the runner.
+- CI (`native-windows`, `windows-latest`) builds it with Rust 1.88 and MSVC, the C runtime static, runs the
+  unit tests and `tools/windows_smoke.py`, which runs `collect`, `serve`, the service and the zip's scripts on
+  the runner. A local build like CI's: `RUSTFLAGS="-C target-feature=+crt-static" cargo build --release
+  --locked --no-default-features`.
 - `serve` and `collect` run; `config-check`, `runtime-script`, `replay-cost` and `build-info` too. `script`,
   `loop` and `observe-script` print the usage (they drive Linux's fake trees and `rusage`).
 - `src/collect/windows/`, Rust only (the Python service had no Windows collector to compare with): the

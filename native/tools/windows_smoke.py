@@ -2,7 +2,8 @@
 
   windows_smoke.py BINARY
 
-- build-info: the system allocator's mark;
+- build-info: the system allocator's mark; the imports: no Visual C++ runtime DLL (the C runtime linked
+  statically, so the zip needs no Redistributable);
 - collect: one recorded collection (src/collect/windows), with the required data, CPU usage, the elapsed
   clock reported as "boottime", the network and disk counters with rates, each CPU clock, GPU value and
   temperature with its sensor record (a runner can have none: its group is then unavailable, never error;
@@ -16,17 +17,29 @@
   listing the system volume, the Wi-Fi group (unavailable without a WLAN service) and the battery group
   with the AC line, then stopped by its own handle;
 - service: outside the service control manager it exits 2; as a service (sc.exe create, start) it serves
-  /api/status ready, and sc.exe stop leaves it stopped with exit code 0 and the port free.
+  /api/status ready, and sc.exe stop leaves it stopped with exit code 0 and the port free;
+- the zip's scripts, in a temporary folder laid out as the zip (package_windows.py's members), on the zip's
+  port 9797: start.cmd serves; install-service.cmd installs the service "platmon" in %ProgramFiles%\\platmon,
+  which serves, then upgrades it keeping an edited platmon.ini; uninstall-service.cmd removes the service and
+  its files but platmon.ini. Skipped where port 9797, a "platmon" service or that folder is already there.
 The INI files serve and the service read (platmon-smoke.ini, platmon-service.ini, in the current directory)
-are removed after each part, whatever its result."""
+and the zip's folders are removed after each part, whatever its result."""
 import json
 import os
+from pathlib import Path
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from scripts.packaging.package import version  # noqa: E402
+from scripts.packaging.package_windows import CRT_DLL, imported_dlls, members  # noqa: E402
 
 TIMEOUT = 30
 INSTANCE = "00000000-0000-4000-8000-000000000000"
@@ -65,6 +78,8 @@ def main(binary):
 
     r = run(binary, ["build-info"])
     check("build-info", r.returncode == 0 and r.stdout.strip() == "platmon-server-allocator=system;", repr(r))
+    dlls = imported_dlls(Path(binary).read_bytes()) or []
+    check("static C runtime", dlls and not any(CRT_DLL.match(d) for d in dlls), json.dumps(dlls))
 
     r = run(binary, ["collect"])
     out = json.loads(r.stdout) if r.returncode == 0 else {}
@@ -223,9 +238,79 @@ def main(binary):
         sc("stop", name)
         sc("delete", name)
         os.remove(ini)
+    zip_scripts(binary, check, sc)
     if failures:
         sys.exit(f"{len(failures)} failed: {', '.join(failures)}")
     print("all passed")
+
+
+def ready(port):
+    deadline, status = time.monotonic() + TIMEOUT, None
+    while time.monotonic() < deadline:
+        code, status = get(port, "/api/status")
+        if code == 200 and status.get("ready"):
+            break
+        time.sleep(0.5)
+    return status
+
+
+def zip_scripts(binary, check, sc):
+    """start.cmd, install-service.cmd (install, then upgrade) and uninstall-service.cmd, as a user of the zip runs them."""
+    port, dest = 9797, Path(os.environ["ProgramFiles"]) / "platmon"
+    if get(port, "/api/status") != (None, None) or sc("query", "platmon").returncode == 0 or dest.exists():
+        print(f"skip  the zip's scripts: port {port}, a platmon service or {dest} is already there")
+        return
+    folder = Path(tempfile.mkdtemp(prefix="platmon-zip-"))
+    for name, body in members(ROOT, Path(binary).read_bytes(), version(ROOT)):
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_bytes(body)
+
+    def script(name):  # stdin from NUL: each pause returns at once
+        return subprocess.run(["cmd", "/d", "/c", str(folder / name)], stdin=subprocess.DEVNULL, capture_output=True,
+                              encoding="utf-8", errors="replace", timeout=4 * TIMEOUT)
+
+    log = folder / "start.log"  # a file, not a pipe: the browser start.cmd opens may hold a pipe open
+    try:
+        with open(log, "w") as out:
+            starter = subprocess.Popen(["cmd", "/d", "/c", str(folder / "start.cmd")], stdin=subprocess.DEVNULL,
+                                       stdout=out, stderr=subprocess.STDOUT)
+        try:
+            status = ready(port)
+        finally:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(starter.pid)], capture_output=True, timeout=TIMEOUT)
+            starter.wait(timeout=TIMEOUT)
+        printed = log.read_text(encoding="utf-8", errors="replace")
+        check("start.cmd", bool(status) and status.get("ready") is True and f"http://127.0.0.1:{port}/" in printed,
+              printed + json.dumps(status))
+        deadline = time.monotonic() + TIMEOUT
+        while get(port, "/api/status") != (None, None) and time.monotonic() < deadline:
+            time.sleep(0.5)
+
+        r = script("install-service.cmd")
+        config = sc("qc", "platmon").stdout
+        status = ready(port)
+        check("install-service.cmd", r.returncode == 0 and "AUTO_START" in config
+              and f'"{dest}\\platmon-server.exe" service "{dest}\\platmon.ini" --web "{dest}\\web"' in config
+              and bool(status) and status.get("ready") is True
+              and all((dest / n).is_file() for n in ("platmon-server.exe", "platmon.ini", "web/index.html",
+                                                       "uninstall-service.cmd")),
+              r.stdout + config + json.dumps(status))
+        with open(dest / "platmon.ini", "a") as f:
+            f.write("; edited\n")
+        r = script("install-service.cmd")
+        status = ready(port)
+        check("install-service.cmd again (upgrade)", r.returncode == 0 and "Keeping" in r.stdout
+              and (dest / "platmon.ini").read_text().endswith("; edited\n") and bool(status) and status.get("ready") is True,
+              r.stdout + json.dumps(status))
+        r = script("uninstall-service.cmd")
+        check("uninstall-service.cmd", r.returncode == 0 and sc("query", "platmon").returncode != 0
+              and get(port, "/api/status") == (None, None) and (dest / "platmon.ini").is_file()
+              and sorted(p.name for p in dest.iterdir()) == ["platmon.ini"], r.stdout + sc("query", "platmon").stdout)
+    finally:
+        sc("stop", "platmon")
+        sc("delete", "platmon")
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 if __name__ == "__main__":
