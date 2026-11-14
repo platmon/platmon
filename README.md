@@ -60,6 +60,7 @@ The service starts with the install. Other ways in, all running the same server:
 | Windows 11 (x86_64) | the experimental, unsupported zip ([Windows (experimental)](docs/guides/getting-started.md#windows-experimental)) |
 | A headless device without Python | `sudo apt install --no-install-recommends platmon`, then the web page or the API |
 | A PC that only watches other devices | the terminal client alone: `scripts/install-cli.sh --user` from a checkout |
+| Windows 11 (x86_64), to try it | the experimental zip from [GitHub Releases](https://github.com/platmon/platmon/releases): unzip, double-click `start.cmd` ([Windows](docs/guides/getting-started.md#windows-experimental)); not supported |
 
 ## Use
 

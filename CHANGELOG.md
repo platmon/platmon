@@ -4,6 +4,19 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+Draft for the next release; the version and date replace this heading when it is tagged.
+
+- **Experimental:** the Windows x86_64 zip is easier to start. `platmon-server.exe` links the C runtime
+  statically, so the Visual C++ Redistributable is no longer needed. The zip adds `start.cmd`, which serves
+  the folder's `platmon.ini` and web page as the user and opens the page in the browser, and
+  `install-service.cmd` / `uninstall-service.cmd`, run as administrator, which install, upgrade or remove the
+  Windows service `platmon` in `C:\Program Files\platmon`, keeping an edited `platmon.ini`. The install script
+  sets the guide's recovery actions, registers the event log source and copies the `platmon` command with the
+  server. CI runs all three on its Windows runner, and the packager refuses a server that imports the Visual
+  C++ runtime. Still not supported, and no installer.
+
 ## 1.9.0 — 2026-11-18
 
 The experimental Windows service's failures, shutdown and memory, the `platmon` command in its zip, and two

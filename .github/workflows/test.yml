@@ -58,12 +58,14 @@ jobs:
           path: native/target/*-unknown-linux-musl*/release/platmon-server
           if-no-files-found: error
 
-  # Windows: the server builds with the MSVC toolchain and its tests pass; the smoke test (tools/windows_smoke.py)
-  # runs collect, serve with its observations, and the server as a Windows service, on the runner.
+  # Windows: the server builds with the MSVC toolchain, the C runtime linked statically (no Visual C++
+  # Redistributable to install), and its tests pass; the smoke test (tools/windows_smoke.py) runs collect, serve
+  # with its observations, the server as a Windows service, and the zip's scripts, on the runner.
   native-windows:
     runs-on: windows-latest
     env:
       RUSTUP_TOOLCHAIN: "1.88"   # native/build.sh's image
+      RUSTFLAGS: "-C target-feature=+crt-static"
     defaults:
       run:
         shell: bash
