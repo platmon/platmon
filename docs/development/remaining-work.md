@@ -98,7 +98,8 @@ Open since the gates in [release readiness](../releases/readiness.md):
   `--user soak --hours 24` on 2026-11-01/02 as a user unit, not the root unit (its gate). 1.8.1's aarch64
   binary passed the root unit's checks (9/9), `hub_check.py` with platmon-hub 1.1.1 and
   `soak --hours 24` on 2026-11-13/14 ([its gate](../releases/readiness.md#181-release-gate-2026-11-13));
-  the raw records are on the Orin in `~/platmon-item4-1.8.1/results/`.
+  the raw records are on the development PC in `~/.local/state/platmon-measure/item4-1.8.1-20261113/`
+  (SHA256SUMS there; the Orin's copy and its candidate units were removed on 2026-11-14).
 - **apt upgrade on a real device:** the Orin Nano upgraded from 1.4.0 to 1.6.0 under apt and rebooted
   (2026-10-28, [release readiness](../releases/readiness.md#160-release-gate-2026-10-25)), and from 1.6.0
   to 1.7.0 with `apt install platmon`, which also installed platmon-cli (2026-11-03,
@@ -109,8 +110,6 @@ Open since the gates in [release readiness](../releases/readiness.md):
   1.5.0 was checked only in CI's containers.
 - **Probe against a remote target:** checked on loopback and with fakes only; no remote target has been
   approved ([probe.md](../reference/probe.md#verification)).
-- **Orin candidate units:** the root units `platmon-server-candidate*` with 1.8.1's binary, left from step
-  4 above, not started; `sudo bash native/tools/deploy/uninstall.sh` removes them.
 - The local worktrees `platmon-w2` and `platmon-svc` on the machine that made them (not the Linux PC).
 
 ## Python server removal
