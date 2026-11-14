@@ -92,6 +92,8 @@
 
   /* tables */
   .table { overflow-x: auto; }
+  /* a scrollbar in theme colors: Firefox drew these light in the dark theme, a white bar under a wide table */
+  .table, .tabs { scrollbar-color: var(--muted) transparent; }
   .tr { display: grid; grid-template-columns: var(--cols); gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--line); font: 13px/1.4 var(--mono); }
   .tr > span { min-width: 0; overflow-wrap: anywhere; }
   .tr > span:not(:first-child) { text-align: right; }

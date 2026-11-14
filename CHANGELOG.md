@@ -11,6 +11,8 @@ Draft for the next release; the version and date replace this heading when it is
 - The `platmon` live view's Network view no longer runs a Wi-Fi interface's name into its signal: a name of
   8 characters or more, such as a Jetson's `wlP1p1s0`, read `wlP1p1s0-29 dBm`. The names now take one column
   as wide as the longest, then two spaces. `/text` and `platmon --once` are unchanged.
+- The web page's scrollbars take the theme's colors: desktop Firefox drew the bar under a table wider than
+  the window, such as the Network table at about 600 px, white in the dark theme.
 
 ## 1.8.1 — 2026-11-13
 

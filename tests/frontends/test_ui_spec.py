@@ -184,6 +184,16 @@ def test_the_narrow_tab_bar_has_a_column_per_view():
     assert int(re.search(r"grid-template-columns: repeat\((\d+),", tabs).group(1)) == len(SPEC["views"])
 
 
+def test_every_scrolling_box_names_its_scrollbar_colors():
+    """A box that scrolls draws its bar in theme colors: left to the browser, desktop Firefox drew the
+    Network table's bar white in the dark theme."""
+    css = re.sub(r"/\*.*?\*/", "", (WEB / "styles.css").read_text(encoding="utf-8"), flags=re.S)
+    rules = [([s.strip() for s in sel.split(",")], body) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css)]
+    scrolls = {s for sels, body in rules if re.search(r"overflow(?:-[xy])?: (?:auto|scroll)", body) for s in sels}
+    colored = {s for sels, body in rules if re.search(r"scrollbar-color: var\(--\w+\)", body) for s in sels}
+    assert scrolls and scrolls <= colored, scrolls - colored
+
+
 def js_object(app, name):
     """A constant object literal of app.js (keys bare, strings in single quotes) as Python data."""
     text = re.search(rf"const {name} = (\{{.*?\}});\n", app, re.S).group(1)
