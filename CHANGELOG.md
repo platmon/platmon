@@ -4,15 +4,20 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.8.2 — 2026-11-14
 
-Draft for the next release; the version and date replace this heading when it is tagged.
+A patch release of two display fixes found in 1.8.1's screenshots and browser checks: the server, the HTTP
+API and its answers, `/text`, `platmon --once`, the `platmon.ini` keys and defaults and the command's options
+are unchanged from 1.8.1.
 
 - The `platmon` live view's Network view no longer runs a Wi-Fi interface's name into its signal: a name of
   8 characters or more, such as a Jetson's `wlP1p1s0`, read `wlP1p1s0-29 dBm`. The names now take one column
   as wide as the longest, then two spaces. `/text` and `platmon --once` are unchanged.
 - The web page's scrollbars take the theme's colors: desktop Firefox drew the bar under a table wider than
   the window, such as the Network table at about 600 px, white in the dark theme.
+
+- **Experimental:** the Windows x86_64 zip, `platmon-VERSION-windows-x86_64-experimental.zip`, is built from
+  this release as for 1.8.1; it is still not supported.
 
 ## 1.8.1 — 2026-11-13
 
