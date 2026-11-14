@@ -13,7 +13,7 @@ device once a second and serves the same snapshot to a terminal client, a web da
 | ![The web dashboard's Overview on a Jetson Orin Nano](docs/assets/screenshot-web.png) | ![The terminal client's Overview](docs/assets/screenshot-cli.png) |
 
 - **Small enough to leave running.** One static binary of about 1.5 MB. On a Jetson Orin Nano over 24 h:
-  0.76 to 0.96 % of one core and 10.6 to 11.4 MiB of memory, while a Hub-like client polled it
+  0.80 to 0.89 % of one core and 10.6 to 11.4 MiB of memory at 1.8.1, while a Hub-like client polled it
   ([release evidence](docs/releases/readiness.md), [budget](docs/performance/budget.md)).
 - **Nothing to install beside it.** The server depends on nothing on the device; the `platmon` command
   needs only Python 3.9+ and its standard library. No pip, no Node, no database.
@@ -90,7 +90,7 @@ flowchart LR
 
 | Device | System | Checked |
 | --- | --- | --- |
-| Jetson Orin Nano devkit | L4T R36.5.2, Ubuntu 22.04 | 1.4.0 to 1.7.0: the release binary checked on the device before each release, with a soak (24 h at 1.4.0 and 1.7.0, 1 h at 1.5.0 and 1.6.0); GPU, power rails, fans, power mode |
+| Jetson Orin Nano devkit | L4T R36.5.2, Ubuntu 22.04 | 1.4.0 to 1.8.1: the release binary checked on the device at each release; a soak of 24 h at 1.4.0, 1.7.0 and 1.8.1 (1.8.1's after its release), 1 h at 1.5.0 and 1.6.0, none at 1.8.0; GPU, power rails, fans, power mode |
 | Raspberry Pi 4 Model B | Debian 13 | package install and upgrade (1.3.0), CPU and memory comparison (1.4.0) |
 | x86-64 PC | Ubuntu 24.04 | development baseline |
 | amd64 and arm64 containers | Ubuntu 22.04, 24.04, 26.04 | every commit: package lifecycle and the service under systemd |
