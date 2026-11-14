@@ -7,8 +7,10 @@
 >   Orin's package smoke and live HTTP (2026-11-13). After publishing, a clean Ubuntu 24.04 container
 >   installed it from the APT repository and the Orin went from 1.8.0 to 1.8.1 with a whole-system
 >   `apt-get upgrade`, the PC's Hub following it (2026-11-13). Its release binary then passed the root
->   candidate unit's checks, `hub_check.py` and a 24 h soak on the Orin (2026-11-13/14). Not verified for
->   1.8.1: the Windows zip on a real PC, armhf on a real device, the new screens on a phone.
+>   candidate unit's checks, `hub_check.py` and a 24 h soak on the Orin (2026-11-13/14). The owner checked
+>   the new screens on a phone and in desktop Firefox (2026-11-14): Firefox drew a white scrollbar under a
+>   wide table in the dark theme; its fix is #206, after 1.8.1. Not verified for 1.8.1: the Windows zip on a
+>   real PC, armhf on a real device.
 > - 1.8.0's release tree passed the local checks, the dpkg lifecycle and the Orin's package smoke and live
 >   HTTP (2026-11-12). After publishing, a clean Ubuntu 24.04 container installed it from the APT repository
 >   and the Orin went from 1.7.0 to 1.8.0 with `apt install` (2026-11-12). Not verified for 1.8.0: the root
@@ -58,9 +60,16 @@ the production 1.8.1 service, which stayed active and answering throughout
 | `deploy_check.py soak --hours 24`, 2026-11-13 07:58 to 11-14 08:00 KST, judged by `report --settled-mib 14` | PASS: 105,958 Hub-like requests and 2,016 in the concurrent rounds, no error, loss or walk problem (in odd hours a missing range only on the reconnect's first page, as expected); 84,281 collections, longest step 1.001 s, no gap; no automatic restart (the planned one after hour 11 only); CPU 0.80–0.89 % of a core per hour; settled PSS 10.6–11.4 MiB, segment baselines 10.9 and 11.0 MiB (budget 14), growth 36 and 40 KiB per round (limit 64); concurrency peaks up to 12.8 MiB; 5 threads, 4 descriptors |
 | the PC's Hub 1.1.1 (raw capture on) polling the Orin's production service over Wi-Fi, 2026-11-12 23:38 to 11-14 08:01 KST (32.4 h; 1.8.0, then 1.8.1 from 07:02 on 11-13) | every raw stream stored without a hole (1.8.1's core ids 1–89,946, collections at most 1.001 s apart); the only losses the first connection's (more than 600 s after 1.8.0 started) and the upgrade's restart; 156 transport timeouts of 10–15 s (29 min in all), each caught up from replay once answered. The service kept collecting every second through them and pings to the Orin spiked to 632 ms, so the network rather than the server; the PC and the Orin are both on the same Wi-Fi with power saving on, and which end's link is at fault is not confirmed (an earlier wording cited the PC's own node as a Wi-Fi node without drops: the Hub polls that one over loopback) |
 
+1.8.1's new screens outside Chromium (2026-11-14; headless Firefox against the Orin's production service):
+
+| check | result |
+| --- | --- |
+| the owner's phone | the new design shown as intended, no problem found |
+| desktop Firefox, by the owner, the window narrowed to 500–600 px, the Network tab | in the dark theme, a white bar under the table: its overflow scrollbar, drawn light because the page left scrollbar colors to the browser. The fix, after 1.8.1, gives theme colors to `.table` and `.tabs` ([#206](https://github.com/platmon/platmon/pull/206)), checked in headless Firefox; not in 1.8.1 |
+| headless Firefox 159.0.1 (snap) on the PC, 1280 px: all seven views | each view live, nothing wider than the window |
+
 Not verified, and therefore open: the Windows zip of this tree on a real PC (CI only; the real-PC checks ran
-on 2026-11-01), armhf on a real device and its systemd service, and the new screens on a real phone or in
-another browser than Chromium.
+on 2026-11-01), and armhf on a real device and its systemd service.
 
 ## 1.8.0 release gate (2026-11-12)
 
