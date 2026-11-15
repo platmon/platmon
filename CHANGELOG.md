@@ -4,6 +4,14 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
+## Unreleased
+
+Draft for the next release; the version and date replace this heading when it is tagged.
+
+- CI checks every build against platmon-hub 1.2.0 (`native/tools/equivalence/hub-requirements.txt`, pinned by
+  its PyPI wheel hash), which reads what platmon 1.4.0–1.8.2 added. The compatibility table has a 1.2.0 column:
+  `hub_contract.py` with Hub 1.2.0 passed against the released 1.4.0 to 1.8.2 servers.
+
 ## 1.8.2 — 2026-11-14
 
 A patch release of two display fixes found in 1.8.1's screenshots and browser checks: the server, the HTTP
