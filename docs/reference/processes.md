@@ -88,7 +88,8 @@ The JSON API only, at `/api/observations` and in replay (`/api/observation-sampl
 web page, `/text` and the `platmon` command do not show it yet. Not in `/api/history`: process ids come and
 go, and the history's series slots are already full on some hosts.
 
-platmon-hub 1.1.1 accepts the group and ignores it: it stores only the groups it knows.
+platmon-hub 1.2.0 shows the group in a node's detail while it is current (counts and a table of the listed
+processes) and stores none of it: no history, no raw capture. platmon-hub 1.1.1 accepts it and ignores it.
 
 ## Containers
 
