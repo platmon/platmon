@@ -32,6 +32,9 @@ Draft for the next release; the version and date replace this heading when it is
   The zip's README and the guide show how to put the folder on the user's `PATH`, and how to register the
   event log source once (the .NET Framework message file Windows includes) so that Event Viewer shows the
   service's messages without the note that their description cannot be found.
+- **Experimental (Windows):** restarting or shutting down Windows stops the service cleanly. It ended itself on
+  the console's shutdown notice before reporting the stop, so the service control manager logged it as ended
+  unexpectedly (System log, event 7034) and counted a failure toward its recovery actions at every restart.
 
 ## 1.8.2 — 2026-11-14
 

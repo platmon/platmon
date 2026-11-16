@@ -6,7 +6,7 @@ use windows_sys::Win32::Networking::WinSock as ws;
 use windows_sys::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::OnceLock;
-use windows_sys::Win32::System::Console::{SetConsoleCtrlHandler, CTRL_LOGOFF_EVENT};
+use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
 use windows_sys::Win32::System::EventLog::{DeregisterEventSource, RegisterEventSourceW, ReportEventW, EVENTLOG_ERROR_TYPE};
 use windows_sys::Win32::System::Services as svc;
 use windows_sys::Win32::System::WindowsProgramming::{QueryInterruptTimePrecise, QueryUnbiasedInterruptTimePrecise};
@@ -64,15 +64,18 @@ pub fn listen(ip: Ipv4Addr, port: u16, backlog: i32) -> std::io::Result<TcpListe
     }
 }
 
-unsafe extern "system" fn on_stop(event: u32) -> windows_sys::core::BOOL {
-    if event == CTRL_LOGOFF_EVENT && !STATUS.load(Ordering::Acquire).is_null() {
-        return 1; // a user logging off does not stop a service
+unsafe extern "system" fn on_stop(_: u32) -> windows_sys::core::BOOL {
+    if !STATUS.load(Ordering::Acquire).is_null() {
+        // a service gets logoff and shutdown here too: logoff does not stop it, and at shutdown the service
+        // control manager's own request follows (on_control), which reports the stop; exiting here first
+        // made each restart of Windows log the service as ended unexpectedly (event 7034) and count a failure
+        return 1;
     }
     std::process::exit(0) // Ctrl+C, Ctrl+Break, the console closed, logoff or shutdown: as SIGTERM on Linux
 }
 
-/// Exits at once, with status 0, when the console asks the process to stop (a service: at shutdown, not at
-/// a user's logoff). The service control manager's stop: run_service.
+/// Exits at once, with status 0, when the console asks the process to stop; a service ignores the console
+/// (its stop and shutdown: run_service).
 pub fn exit_on_terminate() {
     unsafe { SetConsoleCtrlHandler(Some(on_stop), 1) };
 }
