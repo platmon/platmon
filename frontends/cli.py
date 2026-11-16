@@ -1387,12 +1387,23 @@ def main(argv=None):
             stats = json.load(r)
         return stats, observations()
 
+    # A Windows pipe or file is written in the locale's code page (cp949, cp1252), which has no block character:
+    # without UTF-8 the bars are "#" as in the live view, and any other character it lacks "?", not a crash.
+    utf8 = (sys.stdout.encoding or "").lower().replace("-", "") == "utf8"
+    if not utf8 and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
+
+    def plain_screen(stats, obs):
+        """render() for this stdout."""
+        text = render(stats, obs)
+        return text if utf8 else text.replace("█", "#")
+
     try:
         first = fetch()
     except (OSError, ValueError) as e:  # not running / unreachable: say so once instead of retrying forever
         sys.exit(explain(addr, e))
     if a.once:
-        print(render(*first))
+        print(plain_screen(*first))
         return
     try:
         if interactive():
@@ -1403,7 +1414,7 @@ def main(argv=None):
                 pass
             live(addr, a.interval, fetch, first, a.view or "overview")
             return
-        out = render(*first)  # not a terminal (a pipe, a log, Windows): the plain screen as before
+        out = plain_screen(*first)  # not a terminal (a pipe, a log, Windows): the plain screen as before
         # A console (Windows) redraws it in place; a pipe or a log gets no escapes, a blank line between snapshots.
         clear = "\033[H\033[J" if sys.stdout.isatty() else ""
         lead = clear
@@ -1412,7 +1423,7 @@ def main(argv=None):
             lead = clear or "\n"
             time.sleep(a.interval)
             try:
-                out = render(*fetch())
+                out = plain_screen(*fetch())
             except (OSError, ValueError) as e:  # lost while watching: keep the screen, keep retrying
                 out = f"{explain(addr, e)}\n(retrying every {a.interval:g}s, Ctrl+C to quit)"
     except KeyboardInterrupt:

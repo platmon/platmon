@@ -107,6 +107,25 @@ def test_once_prints_one_snapshot():
     assert r.stdout == render(FULL) + "\n"  # the metadata the server adds changes nothing, no screen clearing
 
 
+def test_once_without_utf8_does_not_crash():
+    """A Windows pipe or file is in the locale's code page: cp949 has no block character (it raised
+    UnicodeEncodeError). The bars are "#", a character the code page lacks "?", the rest as it was."""
+    import os
+    import subprocess
+    import sys
+    stats = dict(FULL, model="Board अ")  # a Devanagari letter: not in cp949
+    httpd, base = serve(stats)
+    try:
+        r = subprocess.run([sys.executable, CLI, "--once", base[len("http://"):]], capture_output=True, timeout=20,
+                           env=dict(os.environ, PYTHONIOENCODING="cp949"))
+    finally:
+        httpd.shutdown()
+    assert r.returncode == 0, r.stderr
+    out = r.stdout.decode("cp949").replace("\r\n", "\n")
+    assert out == render(stats).replace("█", "#").replace("अ", "?") + "\n"
+    assert "RAM   #####··············· 2.0G/8.0G" in out and "cpu 51.2 °C" in out
+
+
 def test_pipe_gets_snapshots_without_escapes():
     """Repeated snapshots to a pipe or a log: plain text, a blank line between them, no screen clearing."""
     import subprocess
