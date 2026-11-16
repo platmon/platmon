@@ -50,6 +50,12 @@ extern "C" fn on_term(_: libc::c_int) {
     unsafe { libc::_exit(0) } // a clean exit on SIGTERM (systemd stop, docker stop)
 }
 
+/// Ends the process with status code after printing message to stderr (the journal, under systemd).
+pub fn fatal(code: i32, message: &str) -> ! {
+    eprintln!("{}", message);
+    std::process::exit(code)
+}
+
 /// Exits at once, with status 0, when the service is asked to stop.
 pub fn exit_on_terminate() {
     unsafe { libc::signal(libc::SIGTERM, on_term as extern "C" fn(libc::c_int) as libc::sighandler_t) };

@@ -1,5 +1,5 @@
 //! Windows: the interrupt time, BCryptGenRandom, a WinSock socket, the console's stop events and the service
-//! control manager's.
+//! control manager's, and the event log for what a service cannot print.
 use std::net::{Ipv4Addr, TcpListener};
 use std::os::windows::io::FromRawSocket;
 use windows_sys::Win32::Networking::WinSock as ws;
@@ -7,6 +7,7 @@ use windows_sys::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYS
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::OnceLock;
 use windows_sys::Win32::System::Console::{SetConsoleCtrlHandler, CTRL_LOGOFF_EVENT};
+use windows_sys::Win32::System::EventLog::{DeregisterEventSource, RegisterEventSourceW, ReportEventW, EVENTLOG_ERROR_TYPE};
 use windows_sys::Win32::System::Services as svc;
 use windows_sys::Win32::System::WindowsProgramming::{QueryInterruptTimePrecise, QueryUnbiasedInterruptTimePrecise};
 
@@ -82,19 +83,50 @@ static SERVE: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
 /// The stop request, from the control handler to service_main.
 static STOP: OnceLock<std::sync::mpsc::Sender<()>> = OnceLock::new();
 
-fn report(state: u32) {
+/// state, and for a stop the service's own exit code (0: none; sc.exe query shows it as SERVICE_EXIT_CODE).
+fn report(state: u32, code: u32) {
     let accepted = if state == svc::SERVICE_RUNNING { svc::SERVICE_ACCEPT_STOP | svc::SERVICE_ACCEPT_SHUTDOWN } else { 0 };
+    let win32 = if code == 0 { 0 } else { windows_sys::Win32::Foundation::ERROR_SERVICE_SPECIFIC_ERROR };
     let status = svc::SERVICE_STATUS { dwServiceType: svc::SERVICE_WIN32_OWN_PROCESS, dwCurrentState: state,
-                                       dwControlsAccepted: accepted, dwWin32ExitCode: 0, dwServiceSpecificExitCode: 0,
+                                       dwControlsAccepted: accepted, dwWin32ExitCode: win32, dwServiceSpecificExitCode: code,
                                        dwCheckPoint: 0, dwWaitHint: 0 };
     unsafe { svc::SetServiceStatus(STATUS.load(Ordering::Acquire), &status) };
+}
+
+/// An error in the Application event log, source "platmon": a service has no console, so this is where its
+/// stderr would go. The source is not registered (no message file), so Event Viewer prefixes the text with a
+/// note that its description cannot be found; the text itself is complete.
+fn log_error(id: u32, text: &str) {
+    let source: Vec<u16> = "platmon\0".encode_utf16().collect();
+    let text: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        let log = RegisterEventSourceW(std::ptr::null(), source.as_ptr());
+        if log.is_null() {
+            return;
+        }
+        let strings = [text.as_ptr()];
+        ReportEventW(log, EVENTLOG_ERROR_TYPE, 0, id, std::ptr::null_mut(), 1, 0, strings.as_ptr(), std::ptr::null());
+        DeregisterEventSource(log);
+    }
+}
+
+/// Ends the process with status code after printing message to stderr. As a service, the message also goes
+/// to the event log (event 1) and the stop is reported as the service's error code: a configuration that
+/// cannot run stops the service with its reason, where the process ending alone said nothing.
+pub fn fatal(code: i32, message: &str) -> ! {
+    eprintln!("{}", message);
+    if !STATUS.load(Ordering::Acquire).is_null() {
+        log_error(1, message);
+        report(svc::SERVICE_STOPPED, code as u32);
+    }
+    std::process::exit(code)
 }
 
 unsafe extern "system" fn on_control(control: u32, _: u32, _: *mut core::ffi::c_void, _: *mut core::ffi::c_void) -> u32 {
     match control {
         // service_main reports stopped: exiting here would leave the request unanswered (ERROR_BROKEN_PIPE)
         svc::SERVICE_CONTROL_STOP | svc::SERVICE_CONTROL_SHUTDOWN => {
-            report(svc::SERVICE_STOP_PENDING);
+            report(svc::SERVICE_STOP_PENDING, 0);
             if let Some(stop) = STOP.get() {
                 let _ = stop.send(());
             }
@@ -115,17 +147,25 @@ unsafe extern "system" fn service_main(_: u32, _: *mut windows_sys::core::PWSTR)
     let (stop, stopped) = std::sync::mpsc::channel();
     let _ = STOP.set(stop);
     std::thread::spawn(|| SERVE.get().expect("run_service sets it")());
-    report(svc::SERVICE_RUNNING);
+    report(svc::SERVICE_RUNNING, 0);
     let _ = stopped.recv();
-    report(svc::SERVICE_STOPPED); // then the dispatcher returns and run_service exits
+    report(svc::SERVICE_STOPPED, 0); // then the dispatcher returns and run_service exits
 }
 
 /// Runs serve as a Windows service in its own process (SERVICE_WIN32_OWN_PROCESS): running once it has
 /// connected to the service control manager, stopped on its stop or shutdown request, then the exit with
 /// status 0 as on SIGTERM (nothing to flush: the history is in memory). Exits with status 2 when the
-/// process was not started by the service control manager.
+/// process was not started by the service control manager. A panic goes to the event log (event 2) before
+/// the abort: the service control manager then sees the process fail and runs its recovery actions.
 pub fn run_service(serve: impl Fn() + Send + Sync + 'static) {
     let _ = SERVE.set(Box::new(serve));
+    let print = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if !STATUS.load(Ordering::Acquire).is_null() {
+            log_error(2, &format!("platmon-server: {}", info));
+        }
+        print(info)
+    }));
     let mut name = [0u16];
     let table = [svc::SERVICE_TABLE_ENTRYW { lpServiceName: name.as_mut_ptr(), lpServiceProc: Some(service_main) },
                  svc::SERVICE_TABLE_ENTRYW::default()];

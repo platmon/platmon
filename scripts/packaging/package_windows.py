@@ -47,11 +47,15 @@ your user can write (Downloads, Desktop): a program running as you could
 replace platmon-server.exe or platmon.ini there and run as LocalSystem at the
 next start. Then, in a Command Prompt (cmd) run as administrator:
   sc.exe create platmon start= auto binPath= "\\"C:\\Program Files\\platmon\\platmon-server.exe\\" service \\"C:\\Program Files\\platmon\\platmon.ini\\" --web \\"C:\\Program Files\\platmon\\web\\""
+  sc.exe failure platmon reset= 86400 actions= restart/5000/restart/5000/restart/60000
+  sc.exe failureflag platmon 1
   sc.exe start platmon
   sc.exe stop platmon
   sc.exe delete platmon
-A service has no console: a configuration error shows only as the service
-stopping (run config-check to see it). There is no log and no recovery action.
+The failure lines restart it after a crash or an error exit: in 5 s twice,
+then every minute. A service has no console: why it stopped (a configuration
+it refuses, a port in use) is in Event Viewer, Windows Logs > Application,
+source platmon; run config-check after editing platmon.ini.
 
 What it reads on Windows, and what it does not (no pressure, no power or fans):
 native/README.md, "Windows", in the source.

@@ -158,7 +158,7 @@ fn serve(args: &[String]) {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--web" | "--app-version" | "--frontends" => {
-                let value = it.next().unwrap_or_else(|| { eprintln!("serve: {} needs a value", arg); std::process::exit(2) }).clone();
+                let value = it.next().unwrap_or_else(|| platform::fatal(2, &format!("serve: {} needs a value", arg))).clone();
                 match arg.as_str() {
                     "--web" => web_dir = Some(value),
                     "--app-version" => version = value,
@@ -167,11 +167,11 @@ fn serve(args: &[String]) {
             }
             a if a.starts_with("--frontends=") => frontends = Some(a["--frontends=".len()..].to_string()),
             _ if path.is_none() && !arg.starts_with("--") => path = Some(arg.clone()),
-            _ => { eprintln!("serve: unknown argument {}", arg); std::process::exit(2) }
+            _ => platform::fatal(2, &format!("serve: unknown argument {}", arg)),
         }
     }
     let names = config::frontends(frontends.as_deref());
-    let cfg = config::load(path.as_deref(), names.as_deref()).unwrap_or_else(|e| { eprintln!("platmon-server serve: error: {}", e); std::process::exit(2) });
+    let cfg = config::load(path.as_deref(), names.as_deref()).unwrap_or_else(|e| platform::fatal(2, &format!("platmon-server serve: error: {}", e)));
     platform::exit_on_terminate();
     let interval = cfg.float("core", "interval");
     let mut c = Collector::new((3.0 * interval).max(5.0), [cfg.flag("network", "enabled"), cfg.flag("disk_io", "enabled"),
@@ -197,7 +197,7 @@ fn serve(args: &[String]) {
                                                                 clock_source: source });
     let levels = config::levels_for(&cfg, c.platform);
     let (bind, port) = (cfg.text("http", "bind"), cfg.int("http", "port") as u16);
-    let listener = http::bind(&bind, port).unwrap_or_else(|e| { eprintln!("platmon-server: cannot listen on {}:{}: {}", bind, port, e); std::process::exit(1) });
+    let listener = http::bind(&bind, port).unwrap_or_else(|e| platform::fatal(1, &format!("platmon-server: cannot listen on {}:{}: {}", bind, port, e)));
     let s = sampler.clone();
     std::thread::Builder::new().name("sampler".into()).spawn(move || {
         static STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
