@@ -57,6 +57,7 @@ The service starts with the install. Other ways in, all running the same server:
 | No APT repository access | the `.deb` files and `SHA256SUMS` from [GitHub Releases](https://github.com/platmon/platmon/releases) ([steps](docs/guides/getting-started.md#requirements-and-installation)) |
 | Fedora or Enterprise Linux 9+ | the `.rpm` packages ([RPM packages](docs/reference/packaging.md#rpm-packages)) |
 | Another Linux, or a change to try | a [source installation or a locally built container](docs/guides/deployment.md) |
+| Windows 11 (x86_64) | the experimental, unsupported zip ([Windows (experimental)](docs/guides/getting-started.md#windows-experimental)) |
 | A headless device without Python | `sudo apt install --no-install-recommends platmon`, then the web page or the API |
 | A PC that only watches other devices | the terminal client alone: `scripts/install-cli.sh --user` from a checkout |
 
