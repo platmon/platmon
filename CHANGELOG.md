@@ -15,6 +15,11 @@ Draft for the next release; the version and date replace this heading when it is
   UTF-8, as a pipe or a file on Windows is (the locale's code page, such as cp949): the bars are drawn with
   `#` as the live view does without UTF-8, and a character the code page lacks prints as `?`. UTF-8 output
   does not change.
+- **Experimental (Windows):** the service says why it stopped. A configuration it refuses or a port it
+  cannot listen on goes to the Application event log (source `platmon`, event 1) and the stop carries the
+  exit code as the service's own (`SERVICE_EXIT_CODE` 2 or 1); a panic goes there too (event 2). The zip's
+  README and the guide add the recovery actions (`sc.exe failure`, `failureflag`): a crash or an error exit
+  restarts it after 5 s, as `Restart=on-failure` does on Linux. Linux does not change.
 
 ## 1.8.2 — 2026-11-14
 

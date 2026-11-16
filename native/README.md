@@ -774,9 +774,17 @@ On `x86_64-pc-windows-msvc`:
   LocalSystem at the next start.
   It reports running once connected, and on a stop or shutdown request reports stopped and exits with
   status 0; a user's logoff does not stop it. Outside the service control manager it exits with status 2.
-  Not provided: an installer, a default configuration path, recovery actions and a log: the server's
-  messages go to standard error, which a service does not have, so a configuration error shows only as
-  the service stopping (`config-check` shows it). CI's smoke test creates, starts and stops it.
+  A service has no standard error, so what `serve` would print there before exiting (a configuration it
+  refuses, a port it cannot listen on) also goes to the Application event log, source `platmon`, event 1,
+  and the stop is reported with that exit code as the service's own (`sc.exe query`: `WIN32_EXIT_CODE`
+  1066, `SERVICE_EXIT_CODE` 2 or 1). A panic goes there too, event 2, before the abort. The source is not
+  registered (no message file): Event Viewer shows the text after a note that the description cannot be
+  found, and `Get-WinEvent -LogName Application -FilterXPath "*[System[Provider[@Name='platmon']]]"` reads
+  it as `Properties[0]`. Restarting is the service control manager's recovery actions, set with
+  `sc.exe failure` (a crash) and `sc.exe failureflag` (an error exit too), as the guide shows; with them a
+  crash restarts it as `Restart=on-failure` does on Linux. Not provided: an installer and a default
+  configuration path. CI's smoke test creates and starts it, kills it and sees it restarted, stops it, and
+  starts it with a configuration it refuses.
 - Exposure: as on Linux, the API has no authentication and `[http] bind` defaults to `0.0.0.0`, so a
   service started with the defaults answers every host that can reach port 9797, with the host name, model
   and OS version among its data. Windows Defender Firewall asks only when an interactive program first

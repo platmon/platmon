@@ -16,7 +16,10 @@
   listing the system volume, the Wi-Fi group (unavailable without a WLAN service) and the battery group
   with the AC line, then stopped by its own handle;
 - service: outside the service control manager it exits 2; as a service (sc.exe create, start) it serves
-  /api/status ready, and sc.exe stop leaves it stopped with exit code 0 and the port free.
+  /api/status ready; with the guide's recovery actions (sc.exe failure) a crash (the process killed)
+  restarts it, ready as a new instance; sc.exe stop leaves it stopped with exit code 0 and the port free;
+  a configuration it refuses stops it with the service's own exit code 2 and the reason in the Application
+  event log (source platmon, event 1). Needs an administrator (the CI runner is one).
 The INI files serve and the service read (platmon-smoke.ini, platmon-service.ini, in the current directory)
 are removed after each part, whatever its result."""
 import json
@@ -198,27 +201,60 @@ def main(binary):
     def sc(*args):
         return subprocess.run(["sc.exe", *args], capture_output=True, text=True, timeout=TIMEOUT)
 
-    created = sc("create", name, "binPath=", f'"{os.path.abspath(binary)}" service "{ini}"')
-    try:
-        started = sc("start", name)
+    def ready(other=None):
+        """/api/status once it is ready (from another instance than other, when given), else the last one."""
         deadline, status = time.monotonic() + TIMEOUT, None
         while time.monotonic() < deadline:
             code, status = get(port, "/api/status")
-            if code == 200 and status.get("ready"):
+            if code == 200 and status.get("ready") and status.get("instance_id") != other:
                 break
             time.sleep(0.5)
-        check("service start", created.returncode == 0 and started.returncode == 0 and bool(status)
-              and status.get("ready") is True, created.stdout + started.stdout + json.dumps(status))
-        stopped = sc("stop", name)
+        return status or {}
+
+    def stopped_query():
         deadline, query = time.monotonic() + TIMEOUT, ""
         while time.monotonic() < deadline:
             query = sc("query", name).stdout
             if "STOPPED" in query:
                 break
             time.sleep(0.5)
+        return query
+
+    created = sc("create", name, "binPath=", f'"{os.path.abspath(binary)}" service "{ini}"')
+    try:
+        started = sc("start", name)
+        status = ready()
+        check("service start", created.returncode == 0 and started.returncode == 0 and status.get("ready") is True,
+              created.stdout + started.stdout + json.dumps(status))
+        # the recovery actions the guide sets up: a crash (here the process killed) restarts it after 5 s
+        failure = sc("failure", name, "reset=", "86400", "actions=", "restart/5000/restart/5000/restart/60000")
+        pid = re.search(r"PID\s*:\s*(\d+)", sc("queryex", name).stdout)
+        killed = subprocess.run(["taskkill", "/F", "/PID", pid.group(1) if pid else "0"], capture_output=True,
+                                text=True, timeout=TIMEOUT)
+        again = ready(other=status.get("instance_id"))
+        check("service restarts after a crash", failure.returncode == 0 and killed.returncode == 0
+              and again.get("ready") is True and again.get("instance_id") != status.get("instance_id"),
+              failure.stdout + killed.stdout + killed.stderr + json.dumps(again))
+        stopped = sc("stop", name)
+        query = stopped_query()
         check("service stop", stopped.returncode == 0 and "STOPPED" in query
               and re.search(r"WIN32_EXIT_CODE\s*:\s*0\s", query) is not None and get(port, "/api/status") == (None, None),
               stopped.stdout + query)
+        # a configuration it refuses: stopped with its own exit code 2 (not a crash, so no restart without
+        # sc.exe failureflag) and the reason in the Application event log
+        with open(ini, "w") as f:
+            f.write("[http]\nport = 99999\n")
+        sc("start", name)
+        query = stopped_query()
+        # XML: the text is the event's data; without a registered message file /f:text shows no description
+        events = subprocess.run(["wevtutil", "qe", "Application", "/c:1", "/rd:true", "/f:xml",
+                                 "/q:*[System[Provider[@Name='platmon'] and EventID=1 and "
+                                 "TimeCreated[timediff(@SystemTime) <= 120000]]]"],
+                                capture_output=True, text=True, timeout=TIMEOUT)
+        check("service refuses its configuration", "STOPPED" in query
+              and re.search(r"WIN32_EXIT_CODE\s*:\s*1066\s", query) is not None
+              and re.search(r"SERVICE_EXIT_CODE\s*:\s*2\s", query) is not None
+              and "port = 99999 is out of range" in events.stdout, query + events.stdout + events.stderr)
     finally:
         sc("stop", name)
         sc("delete", name)

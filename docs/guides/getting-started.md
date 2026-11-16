@@ -138,13 +138,27 @@ as administrator:
 
 ```bat
 sc.exe create platmon start= auto binPath= "\"C:\Program Files\platmon\platmon-server.exe\" service \"C:\Program Files\platmon\platmon.ini\" --web \"C:\Program Files\platmon\web\""
+sc.exe failure platmon reset= 86400 actions= restart/5000/restart/5000/restart/60000
+sc.exe failureflag platmon 1
 sc.exe start platmon
 ```
 
-`sc.exe stop platmon` stops it and `sc.exe delete platmon` removes it; delete the folder afterwards. A service
-has no console and no log: a configuration error shows only as the service stopping, so run `config-check`
-after editing `platmon.ini`, then restart the service. Stop anything else on port 9797 first (a server
-started by hand), or the service stops at once.
+The `failure` lines are the service's recovery actions: after a crash or an error exit it restarts in 5 s,
+twice, then every minute, as `Restart=on-failure` does on Linux. `sc.exe stop platmon` stops it and
+`sc.exe delete platmon` removes it; delete the folder afterwards. Stop anything else on port 9797 first (a
+server started by hand), or the service cannot listen.
+
+A service has no console. From the release after 1.8.2, why it stopped (a configuration it refuses, a port
+in use, a crash) is in the Application event log, source `platmon`: in Event Viewer under Windows Logs >
+Application, after a note that the description cannot be found, or in PowerShell:
+
+```powershell
+Get-WinEvent -LogName Application -FilterXPath "*[System[Provider[@Name='platmon']]]" -MaxEvents 5 |
+  ForEach-Object { "$($_.TimeCreated) $($_.Properties[0].Value)" }
+```
+
+`sc.exe query platmon` then shows the exit code as `SERVICE_EXIT_CODE` (2: the configuration, 1: the port).
+Run `config-check` after editing `platmon.ini`, then restart the service.
 
 The API has no authentication. Before setting `bind = 0.0.0.0`, allow port 9797 only from trusted
 addresses in Windows Defender Firewall; the firewall does not ask about a service.
