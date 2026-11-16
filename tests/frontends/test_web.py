@@ -31,7 +31,8 @@ def test_every_step_ran(steps):
                            "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout",
                            "cpu_warmup", "cpu_partial", "cpu_odd_reason",
                            "collection_bad", "collection_bad_then_down", "collection_ok", "collection_odd",
-                           "read_based_age", "counters", "pressure", "counters_absent", "counters_odd"]
+                           "read_based_age", "counters", "pressure", "counters_absent", "counters_odd",
+                           "counters_host"]
     for s in steps.values():
         if s["step"] != "cpu_warmup":  # no CPU rows before the second reading, by design
             assert s["shows_data"], s     # the last good values stay on screen
