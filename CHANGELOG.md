@@ -27,6 +27,11 @@ Draft for the next release; the version and date replace this heading when it is
   page's Network caption say "this host" where they said "this process's network namespace", which Windows
   does not have. On Windows, `platmon` names `sc.exe query platmon` and the event log when the local service
   is not running, in place of systemctl and journalctl. Linux output does not change.
+- **Experimental (Windows):** the zip has the `platmon` command: `cli.py` (the terminal client, as in the
+  source) and `platmon.cmd`, which runs it with the Python 3.9+ on `PATH`, as `platmon-cli` needs on Linux.
+  The zip's README and the guide show how to put the folder on the user's `PATH`, and how to register the
+  event log source once (the .NET Framework message file Windows includes) so that Event Viewer shows the
+  service's messages without the note that their description cannot be found.
 - **Experimental (Windows):** restarting or shutting down Windows stops the service cleanly. It ended itself on
   the console's shutdown notice before reporting the stop, so the service control manager logged it as ended
   unexpectedly (System log, event 7034) and counted a failure toward its recovery actions at every restart.
