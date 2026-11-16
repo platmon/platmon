@@ -193,6 +193,8 @@ python3 native/tools/deploy/deploy_check.py checks --out checks.jsonl   # about 
 bash native/tools/deploy/install_user.sh   # without root, in place of install.sh: the same units in the user's systemd
 python3 native/tools/deploy/deploy_check.py --user checks --out checks.jsonl   # and --user soak, on those units
 python3 native/tools/deploy/hub_check.py --hub HUB_EXECUTABLE --hosts pc,orin=USER@HOST --out DIR   # 13 min
+python native\tools\deploy\windows_check.py install BINARY   # Windows, an administrator shell: the candidate service
+python native\tools\deploy\windows_check.py checks --out checks.jsonl --previous OLD_BINARY   # about 15 min; soak, report, uninstall
 ```
 
 `tools/` by purpose: `equivalence/` compares the server with the recorded answers (first the Python
@@ -211,6 +213,14 @@ the same two units in the login user's systemd, the binary and the INI under the
 (`PrivateUsers=yes`) instead of a DynamicUser, with `ProtectHome=read-only` instead of `yes`; the rest of
 the hardening, the INI, the port and every check are the same. For a soak longer than the login, turn on
 linger (`loginctl enable-linger`). `uninstall_user.sh` removes them.
+
+On Windows, `windows_check.py` (an administrator shell) installs the build as the service
+`platmon-candidate` from `C:\Program Files\platmon-candidate`, as LocalSystem with the guide's recovery
+actions, on the same INI and port, and runs `deploy_check.py`'s checks on it (start, restart, a kill, the
+held port, the stops; not the fake nvidia-smi) plus an upgrade from an earlier binary, and its soak. The
+soak's lines keep `deploy_check.py`'s keys, so its `report` judges them by the same rules: there `pss` is
+the process's private bytes and `fds` its handles. It reuses `service_ab.py`'s poller through a `Proc`
+that reads the process with the Win32 calls. `uninstall` removes the service and the folder.
 
 - `equivalence/fixture.sh` / `fixture.py`: **the equivalence test.** Fake `/sys` and `/proc` trees are
   mounted over the real ones in a throwaway container (a local Debian 13 image with python3, built on first
