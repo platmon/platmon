@@ -11,6 +11,10 @@ Draft for the next release; the version and date replace this heading when it is
 - CI checks every build against platmon-hub 1.2.0 (`native/tools/equivalence/hub-requirements.txt`, pinned by
   its PyPI wheel hash), which reads what platmon 1.4.0–1.8.2 added. The compatibility table has a 1.2.0 column:
   `hub_contract.py` with Hub 1.2.0 passed against the released 1.4.0 to 1.8.2 servers.
+- `platmon --once` and the plain screen no longer fail with `UnicodeEncodeError` when their output is not
+  UTF-8, as a pipe or a file on Windows is (the locale's code page, such as cp949): the bars are drawn with
+  `#` as the live view does without UTF-8, and a character the code page lacks prints as `?`. UTF-8 output
+  does not change.
 
 ## 1.8.2 — 2026-11-14
 
