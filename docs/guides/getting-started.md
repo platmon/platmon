@@ -160,6 +160,16 @@ Get-WinEvent -LogName Application -FilterXPath "*[System[Provider[@Name='platmon
 `sc.exe query platmon` then shows the exit code as `SERVICE_EXIT_CODE` (2: the configuration, 1: the port).
 Run `config-check` after editing `platmon.ini`, then restart the service.
 
+To have Event Viewer show the text without that note, register the source once, in PowerShell run as
+administrator. It uses the .NET Framework message file Windows includes, as `System.Diagnostics.EventLog`
+does; `Remove-Item` on the same key removes it:
+
+```powershell
+New-Item -Force HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\platmon |
+  New-ItemProperty -Force -Name EventMessageFile -PropertyType ExpandString `
+    -Value '%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll'
+```
+
 The API has no authentication. Before setting `bind = 0.0.0.0`, allow port 9797 only from trusted
 addresses in Windows Defender Firewall; the firewall does not ask about a service.
 
@@ -168,12 +178,21 @@ clocks, drive and GPU temperatures, storage, Wi-Fi and battery. It has no CPU te
 power mode or pressure: those groups are `unavailable` (`unsupported_platform`) and pressure is left out
 ([native/README.md, "Windows (experimental)"](../../native/README.md#windows-experimental)).
 
-The `platmon` command has no Windows installer. It is one standard-library file: take `frontends/cli.py`
-from the release source archive (`platmon-<version>.tar.gz`) and run it with Python 3.9+, for example
-`python cli.py --once` or `python cli.py 192.168.55.53`. On Windows it shows the plain screen with every
-section, redrawn in place, instead of the live view. Up to 1.8.2, piping or redirecting its output fails
-with `UnicodeEncodeError` on a code page without block characters (cp949, for example); run it as
-`python -X utf8 cli.py --once` there.
+The `platmon` command needs Python 3.9 or later on `PATH` as `python`, as `platmon-cli` needs it on Linux.
+From the release after 1.8.2 the zip has it: `cli.py`, one standard-library file, and `platmon.cmd`, which
+runs it. To type `platmon` anywhere, add the folder to your user `PATH` once (no administrator needed; a new
+terminal then finds it):
+
+```powershell
+[Environment]::SetEnvironmentVariable('Path',
+  [Environment]::GetEnvironmentVariable('Path', 'User') + ';C:\Program Files\platmon', 'User')
+```
+
+Then `platmon --once`, `platmon` or `platmon 192.168.55.53` work as on Linux. On Windows it shows the plain
+screen with every section, redrawn in place, instead of the live view. Up to 1.8.2 the zip has no client:
+take `frontends/cli.py` from the release source archive (`platmon-<version>.tar.gz`) and run
+`python cli.py --once`; piping or redirecting its output there fails with `UnicodeEncodeError` on a code page
+without block characters (cp949, for example), so run it as `python -X utf8 cli.py --once`.
 
 ## View a running device
 

@@ -20,6 +20,11 @@ Draft for the next release; the version and date replace this heading when it is
   exit code as the service's own (`SERVICE_EXIT_CODE` 2 or 1); a panic goes there too (event 2). The zip's
   README and the guide add the recovery actions (`sc.exe failure`, `failureflag`): a crash or an error exit
   restarts it after 5 s, as `Restart=on-failure` does on Linux. Linux does not change.
+- **Experimental (Windows):** the zip has the `platmon` command: `cli.py` (the terminal client, as in the
+  source) and `platmon.cmd`, which runs it with the Python 3.9+ on `PATH`, as `platmon-cli` needs on Linux.
+  The zip's README and the guide show how to put the folder on the user's `PATH`, and how to register the
+  event log source once (the .NET Framework message file Windows includes) so that Event Viewer shows the
+  service's messages without the note that their description cannot be found.
 
 ## 1.8.2 — 2026-11-14
 

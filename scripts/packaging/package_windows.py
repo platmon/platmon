@@ -2,8 +2,8 @@
 """Build the experimental Windows zip with stdlib, after package.py, into the same output directory.
 
 platmon-VERSION-windows-x86_64-experimental.zip: the server built by CI's native-windows job (MSVC, the
-Visual C++ runtime linked dynamically), the web page, platmon.ini listening on 127.0.0.1 only, the license
-and a README. No installer, no service registration, no Microsoft binaries (the owner's decisions,
+Visual C++ runtime linked dynamically), the web page, platmon.ini listening on 127.0.0.1 only, the license,
+a README, and the terminal client (cli.py, run by platmon.cmd with the Python on PATH). No installer, no service registration, no Microsoft binaries (the owner's decisions,
 docs/development/remaining-work.md, "Windows build"). Its checksum is added to the SHA256SUMS package.py
 wrote, and the server's to its BUILD.json (whose own checksum line follows).
 """
@@ -21,6 +21,8 @@ else:  # run as a script, from its own directory
     from package import ALLOCATOR_MARK, ROOT, packaging_epoch, version
 
 WEB_SUFFIXES = (".html", ".css", ".js", ".svg", ".json")
+# the platmon command: the terminal client beside it, with the Python on PATH (as platmon-cli on Linux)
+PLATMON_CMD = b'@python "%~dp0cli.py" %*\r\n'
 PE_AMD64 = 0x8664
 README = """platmon {release} for Windows (x86_64), EXPERIMENTAL
 
@@ -56,6 +58,18 @@ The failure lines restart it after a crash or an error exit: in 5 s twice,
 then every minute. A service has no console: why it stopped (a configuration
 it refuses, a port in use) is in Event Viewer, Windows Logs > Application,
 source platmon; run config-check after editing platmon.ini.
+Event Viewer shows that text after a note that its description cannot be found
+until the source is registered, once, in PowerShell run as administrator (the
+.NET Framework message file Windows includes; Remove-Item removes the key):
+  New-Item -Force HKLM:\\SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\platmon |
+    New-ItemProperty -Force -Name EventMessageFile -PropertyType ExpandString -Value '%SystemRoot%\\Microsoft.NET\\Framework64\\v4.0.30319\\EventLogMessages.dll'
+
+The platmon command (the terminal client) needs Python 3.9 or later as python
+on PATH: platmon.cmd runs cli.py beside it, as platmon --once, platmon
+192.168.55.53 or platmon --help. To type platmon anywhere, add this folder to
+your user PATH once, in PowerShell (a new terminal then finds it):
+  [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';C:\\Program Files\\platmon', 'User')
+On Windows it shows every section on one screen, redrawn in place.
 
 What it reads on Windows, and what it does not (no pressure, no power or fans):
 native/README.md, "Windows", in the source.
@@ -131,7 +145,9 @@ def members(root, server, release):
     files = [("platmon-server.exe", server), ("platmon.ini", local_ini(root)),
              ("LICENSE", (root / "LICENSE").read_bytes()),
              ("LICENSE-MIT", (MIT_HOLDERS + MIT).replace("\n", "\r\n").encode("utf-8")),
-             ("README.txt", README.format(release=release).replace("\n", "\r\n").encode("utf-8"))]
+             ("README.txt", README.format(release=release).replace("\n", "\r\n").encode("utf-8")),
+             ("cli.py", (root / "frontends/cli.py").read_bytes()),
+             ("platmon.cmd", PLATMON_CMD)]
     for path in sorted(web.rglob("*")):
         if path.is_file() and path.suffix in WEB_SUFFIXES:
             if path.is_symlink():
