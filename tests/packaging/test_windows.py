@@ -43,7 +43,11 @@ def test_zip_contents_and_checksum(tmp_path, exe):
     top = f"platmon-{release}-windows-x86_64/"
     with zipfile.ZipFile(target) as z:
         names = z.namelist()
-        assert names[:5] == [top + n for n in ("platmon-server.exe", "platmon.ini", "LICENSE", "LICENSE-MIT", "README.txt")]
+        assert names[:7] == [top + n for n in ("platmon-server.exe", "platmon.ini", "LICENSE", "LICENSE-MIT", "README.txt",
+                                               "cli.py", "platmon.cmd")]
+        # the platmon command: the client as it is in the source, run with the Python on PATH
+        assert z.read(top + "cli.py") == (ROOT / "frontends/cli.py").read_bytes()
+        assert z.read(top + "platmon.cmd") == b'@python "%~dp0cli.py" %*\r\n'
         assert top + "web/index.html" in names and all(n.startswith(top) for n in names)
         assert z.read(top + "platmon-server.exe") == exe.read_bytes()
         ini = z.read(top + "platmon.ini").decode("utf-8")
@@ -52,6 +56,7 @@ def test_zip_contents_and_checksum(tmp_path, exe):
         assert f"platmon {release} for Windows" in readme and "EXPERIMENTAL" in readme and "vc_redist" in readme
         # the service runs as LocalSystem: its files only where administrators alone can write
         assert "\\Program Files\\platmon\\platmon-server.exe" in readme and "Windows 10 was not checked" in readme
+        assert "platmon.cmd runs cli.py" in readme and "EventLogMessages.dll" in readme
         assert all(i.date_time[0] >= 1980 and i.create_system == 0 for i in z.infolist())
     sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
     assert json.loads((out / "BUILD.json").read_text(encoding="utf-8")) == \
