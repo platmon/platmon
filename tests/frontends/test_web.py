@@ -31,7 +31,8 @@ def test_every_step_ran(steps):
                            "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout",
                            "cpu_warmup", "cpu_partial", "cpu_odd_reason",
                            "collection_bad", "collection_bad_then_down", "collection_ok", "collection_odd",
-                           "read_based_age", "counters", "pressure", "counters_absent", "counters_odd"]
+                           "read_based_age", "counters", "pressure", "counters_absent", "counters_odd",
+                           "counters_host"]
     for s in steps.values():
         if s["step"] != "cpu_warmup":  # no CPU rows before the second reading, by design
             assert s["shows_data"], s     # the last good values stay on screen
@@ -149,6 +150,8 @@ def test_network_and_disk_rows(steps):
     net, dio = steps["counters"]["net"], steps["counters"]["dio"]
     assert "eth0</span><span>1.5 KiB/s</span><span>0 B/s</span>" in net and '<span class="t-warn">3 · 0</span>' in net
     assert steps["counters"]["net_cap"] == "This process's network namespace · window 1.000 s · errors and drops are totals"
+    # Windows (scope host) has no network namespace
+    assert steps["counters_host"]["net_cap"] == "This host · window 1.000 s · errors and drops are totals"
     assert "&#60;img src=x onerror=alert(1)&#62;" in net and "<img" not in net  # a name is text, never HTML
     assert '<span class="muted">2 · 0</span>' in net  # per second: ui-spec formats, as the terminal
     assert "warming up" in net and "some_new_reason" in net  # no rate: the reason, not 0
