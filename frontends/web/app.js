@@ -99,7 +99,9 @@ const listOf = (obj, key) => obj && Array.isArray(obj[key]) ? obj[key] : [];
 const idle = r => r && !r.rx_bytes_per_s && !r.tx_bytes_per_s ? ' idle' : '';
 const netCaption = s => {
   const timed = listOf(s.network, 'interfaces').find(i => Number.isFinite(i.window_ms));
-  return "This process's network namespace" + (timed ? ` · window ${(timed.window_ms / 1000).toFixed(3)} s` : '') + ' · errors and drops are totals';
+  // the host's interfaces on Windows (scope "host"), else this process's network namespace (Linux)
+  const whose = s.network && s.network.scope && s.network.scope.kind === 'host' ? 'This host' : "This process's network namespace";
+  return whose + (timed ? ` · window ${(timed.window_ms / 1000).toFixed(3)} s` : '') + ' · errors and drops are totals';
 };
 function netRows(s) {
   // the server's order, loopback last, as the terminal: a row keeps its place whatever the traffic does

@@ -126,6 +126,13 @@ def disk_line(d):
     return value + (f"  in flight {d['in_flight']}" if d.get("in_flight") is not None else "")
 
 
+def net_scope(net):
+    """Whose interfaces the network group counts: the host's (scope "host": Windows, which has no network
+    namespace), else this process's network namespace (Linux, and servers without a scope)."""
+    scope = net.get("scope")
+    return "this host" if isinstance(scope, dict) and scope.get("kind") == "host" else "this process's network namespace"
+
+
 def counters_lines(s):
     """Network interfaces (this process's namespace) and physical disks, with the rates the server computed;
     nothing for servers without them or with them off. I/O time is the share of the window with I/O in
@@ -133,7 +140,7 @@ def counters_lines(s):
     out = []
     net, dio = s.get("network"), s.get("disk_io")
     if isinstance(net, dict) and isinstance(net.get("interfaces"), list) and net["interfaces"]:
-        out += ["NET   bytes/s, this process's network namespace"] + rows_of(net["interfaces"], "interfaces", network_line)
+        out += [f"NET   bytes/s, {net_scope(net)}"] + rows_of(net["interfaces"], "interfaces", network_line)
     if isinstance(dio, dict) and isinstance(dio.get("disks"), list) and dio["disks"]:
         out += ["IO    bytes/s per disk"] + rows_of(dio["disks"], "disks", disk_line)
     psi = s.get("pressure")
@@ -1328,13 +1335,18 @@ def live(addr, interval, fetch, first, view="overview"):
                 deadline = time.monotonic() + interval
 
 
-def explain(addr, e):
-    """Why the service could not be read, and what to do about it."""
+def explain(addr, e, windows=os.name == "nt"):
+    """Why the service could not be read, and what to do about it; on Windows the service control manager's
+    and the event log's commands (docs/guides/getting-started.md, "Windows") in place of systemd's."""
     if isinstance(e, urllib.error.HTTPError):
         hint = "\n  it has no current data yet, or collection keeps failing; check the service log" if e.code == 503 else ""
         return f"platmon at {addr} answered {e.code} {e.reason}{hint}"
     reason = getattr(e, "reason", e)
     if addr.rsplit(":", 1)[0] in ("localhost", "127.0.0.1"):
+        if windows:
+            return (f"platmon is not running on {addr} ({reason})\n"
+                    "  check the service: sc.exe query platmon    (why it stopped: Event Viewer, Windows Logs >"
+                    " Application, source platmon)")
         return (f"platmon is not running on {addr} ({reason})\n"
                 "  check the service: systemctl status platmon    (log: journalctl -u platmon)\n"
                 "  from a checkout: deploy/systemd/start.sh or deploy/docker/start.sh")

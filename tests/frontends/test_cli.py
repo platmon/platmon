@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -160,6 +161,9 @@ def test_not_running_explains_and_exits():
     assert r.returncode == 1
     lines = r.stderr.splitlines()
     assert f"platmon is not running on localhost:{port}" in lines[0]
+    if os.name == "nt":  # the service control manager's and the event log's (test_not_running_on_windows_...)
+        assert lines[1].split()[:5] == ["check", "the", "service:", "sc.exe", "query"]
+        return
     assert lines[1].split()[:5] == ["check", "the", "service:", "systemctl", "status"]  # what a package install has
     assert "deploy/docker/start.sh" in r.stderr  # and a checkout's way still
 
@@ -257,6 +261,24 @@ def test_render_network_and_disk_io():
                            "  nvme0n1  read 3.0 MiB/s (4.0/s)  write 512 B/s (0.5/s)  I/O time 3.4 %  in flight 2",
                            "  sda      counter went backwards  in flight 0"]
     assert out[i - 1] == ""  # one blank line before, never two
+
+
+def test_render_names_the_host_without_a_network_namespace():
+    """Windows reports scope host: the header says whose interfaces they are, not Linux's namespace."""
+    out = render(dict(FULL, network={"scope": {"kind": "host", "id": None}, "interfaces": [iface("Wi-Fi", NET_RATES)]}))
+    assert "NET   bytes/s, this host" in out.splitlines() and "namespace" not in out
+    linux = {"scope": {"kind": "process_network_namespace", "id": "netns1:x"}, "interfaces": [iface("eth0", NET_RATES)]}
+    assert "NET   bytes/s, this process's network namespace" in render(dict(FULL, network=linux)).splitlines()
+
+
+def test_not_running_on_windows_names_the_service_control_manager():
+    import urllib.error
+    from frontends.cli import explain
+    e = urllib.error.URLError(ConnectionRefusedError(10061, "refused"))
+    lines = explain("localhost:9797", e, windows=True).splitlines()
+    assert lines[0].startswith("platmon is not running on localhost:9797")
+    assert "sc.exe query platmon" in lines[1] and "source platmon" in lines[1]
+    assert "systemctl" not in "\n".join(lines) and "systemctl" in explain("localhost:9797", e, windows=False)
 
 
 def test_render_limits_rows_and_says_how_many_were_left_out():

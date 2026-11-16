@@ -20,6 +20,10 @@ Draft for the next release; the version and date replace this heading when it is
   exit code as the service's own (`SERVICE_EXIT_CODE` 2 or 1); a panic goes there too (event 2). The zip's
   README and the guide add the recovery actions (`sc.exe failure`, `failureflag`): a crash or an error exit
   restarts it after 5 s, as `Restart=on-failure` does on Linux. Linux does not change.
+- **Windows wording:** with the Windows server (network scope `host`), `/text`, `platmon --once` and the web
+  page's Network caption say "this host" where they said "this process's network namespace", which Windows
+  does not have. On Windows, `platmon` names `sc.exe query platmon` and the event log when the local service
+  is not running, in place of systemctl and journalctl. Linux output does not change.
 
 ## 1.8.2 — 2026-11-14
 

@@ -184,7 +184,11 @@ fn counters_lines(st: &Value) -> R<Vec<String>> {
     let mut out = Vec::new();
     if let Some(Value::Arr(ifs)) = st.get("network").filter(|n| matches!(n, Value::Obj(_))).and_then(|n| n.get("interfaces")) {
         if !ifs.is_empty() {
-            out.push("NET   bytes/s, this process's network namespace".to_string());
+            // frontends/cli.py net_scope: the host's interfaces on Windows (scope "host"), else this process's
+            // network namespace (Linux)
+            let host = st.get("network").and_then(|n| n.get("scope")).and_then(|s| s.get("kind"))
+                .map_or(false, |k| matches!(k, Value::Str(s) if s == "host"));
+            out.push(format!("NET   bytes/s, {}", if host { "this host" } else { "this process's network namespace" }));
             out.extend(rows_of(ifs, "interfaces", network_line)?);
         }
     }

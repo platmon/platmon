@@ -208,4 +208,7 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
     io: {some: {avg10: 3, avg60: 0, avg300: 0, total_us: 1}, full: {avg10: 0.5, avg60: 0, avg300: 0, total_us: 1}}}}}), 'pressure');
   await next(ok(meta('c', 9, 100)), 'counters_absent');  // turned off, or an older server
   await next(ok({...meta('c', 10, 100), network: {interfaces: 'odd'}, disk_io: null}), 'counters_odd');
+  // Windows: no network namespace, the host's interfaces
+  await next(ok({...meta('c', 11, 100), network: {scope: {kind: 'host', id: null}, provider: 'if_table2', read: null,
+    interfaces: [iface('Wi-Fi', {rx_bytes_per_s: 10, tx_bytes_per_s: 0, rx_packets_per_s: 1, tx_packets_per_s: 0})]}}), 'counters_host');
 })();
