@@ -683,6 +683,8 @@ def report(args):
     hours = [r for r in rows if "hour" in r and "settled" in r]
     end = next((r for r in rows if r.get("end")), None)
     rounds = rows[0]["phases"]["concurrent_rounds"]
+    # how far a settled count may stray from its segment's first reading: none here; windows_check.py's own
+    slack = getattr(args, "slack", {})
     bad, segs, seg = [], [], {}
     for sg in segments(hours):
         pss = [r["settled"]["pss"] for r in sg]
@@ -719,7 +721,8 @@ def report(args):
         if r is not first:
             ref = first["settled"]
             for k in ("threads", "fds", "sockets", "processes"):
-                if s.get(k) != ref.get(k):
+                a, b = s.get(k), ref.get(k)
+                if a != b and not (k in slack and a is not None and b is not None and abs(a - b) <= slack[k]):
                     p.append(f"settled {k} {s.get(k)}, hour {first['hour']} {ref.get(k)}")
             if base is not None:
                 limit = max(base * 1.10, base + 1024)

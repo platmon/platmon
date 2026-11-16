@@ -56,7 +56,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 import walk  # noqa: E402
 import worker  # noqa: E402
 
-TICK = os.sysconf("SC_CLK_TCK")
+# Windows has no sysconf: deploy/windows_check.py imports Hub, concurrent and retained with its own Proc, which
+# counts CPU time in 10 ms ticks
+TICK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 STREAMS = ("core", "storage", "wifi", "battery", "probe")
 PHASES = {"warmup": 30, "window": 120, "w2_at": 1290, "hub_warmup": 30, "disconnect": 480, "idle_at": 30,
           "after": 120, "reconnect_limit": 300, "repeats": 5, "concurrent_rounds": 3, "concurrent_pollers": 4,
