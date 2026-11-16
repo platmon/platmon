@@ -20,6 +20,9 @@ Draft for the next release; the version and date replace this heading when it is
   exit code as the service's own (`SERVICE_EXIT_CODE` 2 or 1); a panic goes there too (event 2). The zip's
   README and the guide add the recovery actions (`sc.exe failure`, `failureflag`): a crash or an error exit
   restarts it after 5 s, as `Restart=on-failure` does on Linux. Linux does not change.
+- **Experimental (Windows):** restarting or shutting down Windows stops the service cleanly. It ended itself on
+  the console's shutdown notice before reporting the stop, so the service control manager logged it as ended
+  unexpectedly (System log, event 7034) and counted a failure toward its recovery actions at every restart.
 
 ## 1.8.2 — 2026-11-14
 

@@ -783,7 +783,8 @@ On `x86_64-pc-windows-msvc`:
   Files\platmon`, as the zip's README says), or a program running as a user could replace them and run as
   LocalSystem at the next start.
   It reports running once connected, and on a stop or shutdown request reports stopped and exits with
-  status 0; a user's logoff does not stop it. Outside the service control manager it exits with status 2.
+  status 0; it ignores the console's notices (a user's logoff does not stop it, and at shutdown it waits for
+  the service control manager's request, so Windows restarting is not a failure). Outside the service control manager it exits with status 2.
   A service has no standard error, so what `serve` would print there before exiting (a configuration it
   refuses, a port it cannot listen on) also goes to the Application event log, source `platmon`, event 1,
   and the stop is reported with that exit code as the service's own (`sc.exe query`: `WIN32_EXIT_CODE`
