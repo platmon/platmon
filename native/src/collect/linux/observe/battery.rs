@@ -53,7 +53,11 @@ pub fn battery(g: &mut Group) -> Value {
                 let percent = attr(g, &d, &attrs, name, "capacity", |v| py_int(v).filter(|p| (0..=100).contains(p)).map(Value::Int));
                 item.set("percent", percent);
                 for (a, f) in CHARGE_ENERGY.iter().chain(UNSIGNED.iter()) {
-                    let v = attr(g, &d, &attrs, name, a, |v| py_int(v).filter(|x| *x >= 0).map(Value::Int));
+                    let v = attr(g, &d, &attrs, name, a, |v| match py_int(v) {
+                        // ACPI's "unknown" cycle count (0xFFFFFFFF) as the kernel shows it: no count, not a bad one
+                        Some(-1) if *a == "cycle_count" => Some(Value::Null),
+                        x => x.filter(|x| *x >= 0).map(Value::Int),
+                    });
                     item.set(f, v);
                 }
                 for (a, f) in SIGNED {
@@ -250,6 +254,21 @@ mod tests {
             assert!(["\"some_unreadable\"", "\"invalid_data\""].contains(&text(&status, "reason").as_str()), "{}", target);
             assert_eq!(text(&status, "issues"), format!(r#"[{{"target":"{}","reason":"invalid_data"}}]"#, target));
         }
+    }
+
+    #[test]
+    fn an_unknown_cycle_count_is_null_not_invalid() {
+        // ACPI's unknown count (0xFFFFFFFF) reads -1, as on Hyper-V's virtual battery under WSL; -2 is still bad
+        let root = Root::new(0);
+        supplies(&root, &[("BAT1", &[("type", "Battery"), ("present", "1"), ("capacity", "89"), ("cycle_count", "-1")])]);
+        let (data, status) = observe_battery();
+        assert_eq!(text(&status, "state"), r#""ok""#, "{}", text(&status, "issues"));
+        let Some(Value::Arr(bs)) = data.get("batteries") else { panic!("{}", data.to_string(false)) };
+        assert_eq!((text(&bs[0], "cycle_count"), text(&bs[0], "percent")), ("null".into(), "89".into()));
+        let root = Root::new(0);
+        supplies(&root, &[("BAT1", &[("type", "Battery"), ("present", "1"), ("cycle_count", "-2")])]);
+        let (_, status) = observe_battery();
+        assert_eq!(text(&status, "issues"), r#"[{"target":"BAT1.cycle_count","reason":"invalid_data"}]"#);
     }
 
     #[test]

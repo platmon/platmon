@@ -67,7 +67,9 @@ reported.
   is its own momentary reading, and the result would look like one measurement instead of two.
   `charge_full` / `energy_full` is what the gauge now calls full, `*_design` what the cell was built for;
   their ratio is the wear the viewers show as "% of design".
-- `voltage_uv` (µV), `cycle_count`: non-negative; a negative value is reported as `invalid_data`.
+- `voltage_uv` (µV), `cycle_count`: non-negative; a negative value is reported as `invalid_data`, except a
+  `cycle_count` of -1, which is `null` without an issue: ACPI's "unknown" count (0xFFFFFFFF) as the kernel
+  shows it, for example on Hyper-V's virtual battery under WSL.
 - `current_ua` (µA), `power_uw` (µW): **signed, and passed through**. Drivers differ: some report a
   negative current while discharging, others a positive one with a `Discharging` status. platmon does not
   reinterpret the sign, so a reader must use `status` to tell charging from discharging.

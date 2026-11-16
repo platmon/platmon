@@ -15,6 +15,9 @@ Draft for the next release; the version and date replace this heading when it is
   UTF-8, as a pipe or a file on Windows is (the locale's code page, such as cp949): the bars are drawn with
   `#` as the live view does without UTF-8, and a character the code page lacks prints as `?`. UTF-8 output
   does not change.
+- Battery: a `cycle_count` of -1, ACPI's "unknown" count as the kernel shows it (Hyper-V's virtual battery
+  under WSL, for one), is `null` instead of an `invalid_data` issue that made the battery group `partial`.
+  Other negative values are still `invalid_data`.
 - **Experimental (Windows):** the service says why it stopped. A configuration it refuses or a port it
   cannot listen on goes to the Application event log (source `platmon`, event 1) and the stop carries the
   exit code as the service's own (`SERVICE_EXIT_CODE` 2 or 1); a panic goes there too (event 2). The zip's
