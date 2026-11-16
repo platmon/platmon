@@ -5,6 +5,7 @@
 >   Debian-derived host with systemd; the `platmon` command (`platmon-cli`, installed with it) needs Python 3.9+.
 > - Then run `platmon`, open `http://<device>:9797`, or `curl` `/api/status`.
 > - Settings live in `/etc/platmon/platmon.ini`; the API has no authentication.
+> - Windows 11 (x86_64) has an experimental, unsupported zip of the server: [Windows (experimental)](#windows-experimental).
 
 platmon is a device-side monitor: one background service reads host metrics and publishes
 snapshots. The `platmon` terminal client, web dashboard and HTTP clients all read the same
@@ -106,6 +107,60 @@ To watch several devices in one place, run [platmon-hub](https://github.com/plat
 on another computer. Which Hub release reads which platmon release, and what checked each pairing, is in
 [platmon-hub compatibility](../reference/hub-compatibility.md).
 
+## Windows (experimental)
+
+Since 1.8.0 each release also has `platmon-<version>-windows-x86_64-experimental.zip`: the server
+(`platmon-server.exe`), the web page, a `platmon.ini` that listens on `127.0.0.1` only, the licenses and a
+`README.txt`. It is **not supported**: it was checked in CI and on one Windows 11 laptop. It needs
+Windows 11 x86_64 (Windows 10 was not checked) and the
+[Visual C++ 2015-2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe), which the zip
+does not include; without it the server does not start (`vcruntime140.dll` was not found). There is no
+installer.
+
+Download the zip and `SHA256SUMS` from [GitHub Releases](https://github.com/platmon/platmon/releases), compare
+the hash in PowerShell, and unpack it:
+
+```powershell
+(Get-FileHash .\platmon-<version>-windows-x86_64-experimental.zip -Algorithm SHA256).Hash.ToLower()
+Select-String windows-x86_64 .\SHA256SUMS
+Expand-Archive .\platmon-<version>-windows-x86_64-experimental.zip -DestinationPath .
+cd .\platmon-<version>-windows-x86_64
+.\platmon-server.exe serve platmon.ini --web web
+```
+
+Then open `http://127.0.0.1:9797/`; Ctrl+C stops it. `.\platmon-server.exe config-check platmon.ini` prints
+the settings it would use.
+
+To run it as a Windows service, first copy the folder's contents to `C:\Program Files\platmon`. The service
+runs as LocalSystem, so it must not run from a folder your user can write (Downloads, Desktop): a program
+running as you could replace `platmon-server.exe` or `platmon.ini` there. Then, in a Command Prompt (cmd) run
+as administrator:
+
+```bat
+sc.exe create platmon start= auto binPath= "\"C:\Program Files\platmon\platmon-server.exe\" service \"C:\Program Files\platmon\platmon.ini\" --web \"C:\Program Files\platmon\web\""
+sc.exe start platmon
+```
+
+`sc.exe stop platmon` stops it and `sc.exe delete platmon` removes it; delete the folder afterwards. A service
+has no console and no log: a configuration error shows only as the service stopping, so run `config-check`
+after editing `platmon.ini`, then restart the service. Stop anything else on port 9797 first (a server
+started by hand), or the service stops at once.
+
+The API has no authentication. Before setting `bind = 0.0.0.0`, allow port 9797 only from trusted
+addresses in Windows Defender Firewall; the firewall does not ask about a service.
+
+Windows reads CPU usage and clocks, memory, the system volume, disk I/O, network, the first GPU's usage and
+clocks, drive and GPU temperatures, storage, Wi-Fi and battery. It has no CPU temperature, power, fans,
+power mode or pressure: those groups are `unavailable` (`unsupported_platform`) and pressure is left out
+([native/README.md, "Windows (experimental)"](../../native/README.md#windows-experimental)).
+
+The `platmon` command has no Windows installer. It is one standard-library file: take `frontends/cli.py`
+from the release source archive (`platmon-<version>.tar.gz`) and run it with Python 3.9+, for example
+`python cli.py --once` or `python cli.py 192.168.55.53`. On Windows it shows the plain screen with every
+section, redrawn in place, instead of the live view. Up to 1.8.2, piping or redirecting its output fails
+with `UnicodeEncodeError` on a code page without block characters (cp949, for example); run it as
+`python -X utf8 cli.py --once` there.
+
 ## View a running device
 
 On the device:
@@ -155,6 +210,7 @@ address and port, web enablement, threshold values and memory retention.
 | --- | --- |
 | Debian package or source systemd | `/etc/platmon/platmon.ini` |
 | Docker from this checkout | `platmon.ini` in the checkout root, mounted read-only |
+| Windows zip (experimental) | `platmon.ini` in the unpacked folder, or `C:\Program Files\platmon\platmon.ini` for the service |
 | Foreground source run | the supplied config path; defaults to `platmon.ini` |
 
 To run the service in the foreground while developing:
