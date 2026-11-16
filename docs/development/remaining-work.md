@@ -8,6 +8,8 @@
 >   2026-11-13; its root candidate unit passed the checks, `hub_check.py` and a 24 h soak on the Orin.
 > - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, accepted as known
 >   gaps. Linux: armhf on a real device, a remote probe target.
+> - Windows as a supported platform: proposed 2026-11-16 after a 12 h run of 1.8.2's service; the plan and
+>   what it lacks against the Linux gate are [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16).
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
 > - Also recorded, not started: a desktop tray frontend and a separate network process (deferred; no
 >   Unix socket).
@@ -83,6 +85,64 @@ Known gaps: Intel's GPU driver reports no clocks while the GPU sleeps (`no_data`
 runs failed the Wi-Fi observation check before its PR: most likely a link going down, which Windows lists
 connected for some seconds while refusing its RSSI (#154 reports that as `unknown`); GitHub's runners have
 a virtual disk that answers the temperature query with a device error (#119 reports it as not exposed).
+
+## Windows: promotion to a supported platform (proposed 2026-11-16)
+
+Windows is still experimental: the README's support table, native/README.md and the release check
+(`check_changelog`) say so. After the checks below the owner asked what promoting it would take; this is
+the plan, not a decision. Each step that changes the release or the support scope waits for the owner.
+
+**Evidence so far (2026-11-16, the laptop above, 1.8.2's zip):**
+
+- Installed as documented ([Windows (experimental)](../guides/getting-started.md#windows-experimental),
+  #214): checksum, `config-check`, `serve` by hand, then the service from `C:\Program Files\platmon` with
+  the elevated `sc.exe` line; running and started at boot.
+- A 12 h run of the service with an ad-hoc script (not `deploy_check.py`, which is Linux only): `/api/status`
+  every second, `/api/stats`, `/api/observations`, `/api/history` and `/text` every 10 s, the process every
+  minute. No restart (one instance id and PID), 0 of 42,818 polls not ready, 0 failed requests, data age
+  median 0.5 s and at most 2.7 s, sequence always rising. Private bytes 26.6 → about 30.1 MiB in the first
+  4 hours, then flat (29.6 to 30.3 MiB) to hour 12: +1.79 MiB against hour 1, under the 2 MiB set before
+  the run. Its last criterion, an unchanged thread count, failed as written: 9 to 12 threads (10 in 628 of
+  716 readings, handles 208 or 210 with them), bounded and not growing, which the request threads explain;
+  the rule was too strict. One client only, no Hub; four loop stalls of 5 to 12 s were the script's, not
+  sleep. The script and its record were in a temporary directory and are not kept.
+- Compared with the Orin running 1.8.2: the required data, CPU clocks, GPU usage and clocks, network,
+  disk I/O, storage, Wi-Fi, battery and history answer with the same structure. Windows has no CPU
+  temperature, power, fans, power mode or pressure (native/README.md, "Windows (experimental)").
+- The `platmon` command crashed when piped on a non-UTF-8 code page; fixed in #213. Windows still has no
+  way to install the command.
+
+**What a supported platform lacks, against the Linux gate:**
+
+| | Linux (the release gate) | Windows now |
+| --- | --- | --- |
+| devices | x86_64 PC, Orin Nano, Raspberry Pi 4 | one laptop (Intel, Windows 11 26H2) |
+| deployment checks | `deploy_check.py checks`: restart, crash recovery, failed start and the rest (9) | none |
+| soak | `deploy_check.py soak --hours 24`: concurrent pollers, Hub-like requests, settled PSS rule | the ad-hoc 12 h run above |
+| failures | systemd `Restart=`, the journal | no recovery action, no log: a configuration error only stops the service |
+| install, upgrade, removal | apt, the edited `platmon.ini` kept | copied by hand and `sc.exe`; an upgrade never tried |
+| `platmon` command | `platmon-cli` package | none |
+| unchecked | named in native/README.md | Windows 10, more than 64 CPUs, a discrete GPU's temperature, S3 and hibernation |
+
+**Plan, in order:**
+
+1. **Failures:** the service restarts after a crash (a recovery action: `sc.exe failure`, or the
+   installer's) and reports a failed start and its reason to the Windows event log.
+2. **Deployment checks and soak on Windows:** restart, crash recovery, failed start and upgrade checked by
+   a tool (a Windows mode of `deploy_check.py`, or its own), then a 24 h soak with concurrent pollers and
+   `hub_check.py`; thread and handle counts judged by bounds and growth, not equality.
+3. **A second device:** AMD, or a desktop with a discrete GPU (its temperature is a known gap). Whether
+   Windows 10 is in scope is the owner's call; it is out of Microsoft's support.
+4. **Installation:** an MSI or scripts in the zip, including the `platmon` command (`frontends/cli.py`
+   with Python 3.9+, as `platmon-cli` on Linux). An MSI built with WiX using only MSI's own tables
+   (`ServiceInstall`, `ServiceControl`, `Environment`), no custom action DLLs, so that none of WiX's code
+   ships in it; WiX's license (MS-RL) is to be checked against the dependency rules first. An unsigned
+   installer meets SmartScreen warnings: signing needs a certificate and its key in CI (owner).
+5. **The switch:** the support table, native/README.md, the zip's name and README, and the release check
+   that requires "experimental" changed together, with the supported scope and its known gaps (no CPU
+   temperature among them) stated (owner).
+
+Steps 1 and 2 can be done on this laptop; step 3 needs the hardware; 4 and 5 follow their results.
 
 ## Linux releases
 
