@@ -775,6 +775,15 @@ On `x86_64-pc-windows-msvc`:
   and `/api/status` reports `"clock": {"source": "boottime", "suspend_aware": true}` as on Linux (the Hub's
   contract unchanged); the unbiased interrupt time, which stops while asleep, stands for `CLOCK_MONOTONIC`.
   Chosen 2026-10-24.
+- The heap: the segment heap, which `build.rs` asks for in the manifest it embeds with the MSVC linker
+  (`src/platform/windows.manifest`; Windows 10 2004 and later, earlier versions keep the default heap). The
+  allocator stays the system one. With the default heap, the accelerated soak of 2026-11-16 (the history
+  and the replay buffers full and unchanged, the same work every cycle) settled between 33 and 65 MB of
+  private bytes, by how much of the memory freed after each round of concurrent pollers the heap kept: no
+  leak, but the settled PSS rule failed. The same build and load side by side on 2026-11-17 (8 bursts of 3
+  rounds of 4 pollers paging a 480-record backlog, 120 s apart): the default heap settled at 31.5, 45.8,
+  46.6, 47.7, 46.2, 61.5, 48.1 and 64.8 MB, the segment heap at 23.1, 23.3, 24.7, then 38.3 to 38.5
+  after the peak rose with both from about 86 to 105 MB, with 21.9 s of CPU against 27.5.
 - The stop request: Ctrl+C, Ctrl+Break, the console closed, logoff and shutdown exit with status 0, as
   SIGTERM does on Linux (`SetConsoleCtrlHandler`).
 - `service [CONFIG] [serve's options]`: `serve` as a Windows service in its own process, for the service

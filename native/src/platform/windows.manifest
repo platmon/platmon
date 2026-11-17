@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Embedded by build.rs (MSVC). The segment heap, Windows 10 2004 and later (earlier versions ignore it):
+     the default heap kept a varying share of the memory freed after concurrent backlog pollers, settling
+     between 31 and 65 MB under the same load; the segment heap gave the memory back (native/README.md). -->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <heapType xmlns="http://schemas.microsoft.com/SMI/2020/WindowsSettings">SegmentHeap</heapType>
+    </windowsSettings>
+  </application>
+</assembly>

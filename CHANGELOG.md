@@ -35,6 +35,10 @@ Draft for the next release; the version and date replace this heading when it is
 - **Experimental (Windows):** restarting or shutting down Windows stops the service cleanly. It ended itself on
   the console's shutdown notice before reporting the stop, so the service control manager logged it as ended
   unexpectedly (System log, event 7034) and counted a failure toward its recovery actions at every restart.
+- **Experimental (Windows):** the server uses the segment heap (Windows 10 2004 and later), named in a
+  manifest embedded in `platmon-server.exe`. With the default heap, its memory after bursts of concurrent
+  pollers settled anywhere between about 31 and 65 MB under the same load, as the heap kept freed memory;
+  with the segment heap it settled at 23 to 38 MB and used less CPU (native/README.md). Linux does not change.
 
 ## 1.8.2 — 2026-11-14
 
