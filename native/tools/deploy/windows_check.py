@@ -15,7 +15,7 @@ checks, in order; a check passes with no problem in its line:
   ready         the candidate service stopped, the port free, the platmon service running and answering
   start         sc.exe start: ready, as LocalSystem; the INI unchanged
   restart       sc.exe stop and start: ready, a new instance_id, 409 for the previous one
-  crash         taskkill /F: the recovery actions bring it back (a new process and instance_id), the old
+  crash         taskkill /F (kill()): the recovery actions bring it back (a new process and instance_id), the old
                 process gone, 409 for the previous instance
   failed_start  the port held by this tool: the service cannot listen, logs why (event 1) and is restarted
                 (sc.exe failureflag); released, it serves again without anyone starting it
@@ -102,6 +102,31 @@ if k32:
     k32.K32GetProcessMemoryInfo.argtypes = (wt.HANDLE, ctypes.POINTER(Counters), wt.DWORD)
     k32.Thread32First.argtypes = k32.Thread32Next.argtypes = (wt.HANDLE, ctypes.POINTER(Thread))
     k32.CloseHandle.argtypes = (wt.HANDLE,)
+    k32.TerminateProcess.argtypes = (wt.HANDLE, wt.UINT)
+
+
+def kill(pid):
+    """taskkill /F on pid: {"method", "code", "output"}. Elevated runs have had the launch of taskkill itself
+    refused (PermissionError, WinError 5) with no cause found (2026-11-16 and 17, 4 of 7 checks runs, never
+    without elevation): then the process ends by TerminateProcess, exit code 1, as taskkill /F does, and the
+    refused launch is kept in "launch"."""
+    exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe")
+    try:
+        k = subprocess.run([exe, "/F", "/PID", str(pid)], capture_output=True, text=True, timeout=60)
+        return {"method": "taskkill", "code": k.returncode, "output": (k.stdout + k.stderr).strip()}
+    except PermissionError as e:
+        launch = f"{type(e).__name__}: {e}"
+    h = k32.OpenProcess(0x0001, False, pid)  # PROCESS_TERMINATE
+    if not h:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        ok = k32.TerminateProcess(h, 1)
+        err = ctypes.get_last_error()
+    finally:
+        k32.CloseHandle(h)
+    if not ok:
+        raise ctypes.WinError(err)
+    return {"method": "TerminateProcess", "code": 0, "output": "", "launch": launch}
 
 
 class Proc:
@@ -339,7 +364,7 @@ def checks(args):
 
     def crash():
         old, pid0 = res["native"], query()["pid"]
-        k = subprocess.run(["taskkill", "/F", "/PID", str(pid0)], capture_output=True, text=True, timeout=60)
+        k = kill(pid0)
         secs, s = dc.ready(timeout=30, other_than=old["instance_id"])
         res["native"] = s
         pid1 = query()["pid"]
@@ -348,7 +373,7 @@ def checks(args):
         p += [] if not process_alive(pid0) else [f"the killed process {pid0} still there"]
         oc = dc.old_cursor(old["instance_id"]) if s else None
         p += [] if oc == 409 else [f"the previous cursor: {oc}, not 409"]
-        return {"kill": [k.returncode, (k.stdout + k.stderr).strip()], "back_s": secs, "pids": [pid0, pid1],
+        return {"kill": k, "back_s": secs, "pids": [pid0, pid1],
                 "old_cursor": oc, "problems": p}
 
     def failed_start():
