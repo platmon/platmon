@@ -2,10 +2,10 @@
 
 > **TL;DR**
 > - Which [platmon-hub](https://github.com/platmon/platmon-hub) release reads which platmon release, and
->   what each pairing was checked by. Current releases: platmon 1.8.2, platmon-hub 1.2.0.
-> - platmon-hub 1.2.0 and 1.1.1 read every platmon release from 1.0.0 to 1.8.2. Their opt-in raw capture needs
->   platmon 1.3.0 or later; older releases have no replay, and Hub 1.1.0 and later capture their polled documents
->   instead.
+>   what each pairing was checked by. Current releases: platmon 1.9.0, platmon-hub 1.2.0.
+> - platmon-hub 1.2.0 reads every platmon release from 1.0.0 to 1.9.0, and 1.1.1 from 1.0.0 to 1.8.2. Their
+>   opt-in raw capture needs platmon 1.3.0 or later; older releases have no replay, and Hub 1.1.0 and later
+>   capture their polled documents instead.
 > - CI checks every build of `main` against platmon-hub 1.2.0, pinned by its PyPI hash.
 
 Hub validates each endpoint's schema, not platmon's application version (platmon-hub's
@@ -15,7 +15,8 @@ ran on it.
 
 | platmon | platmon-hub 1.2.0 | platmon-hub 1.1.1 | platmon-hub 1.0.0, 1.1.0 |
 | --- | --- | --- | --- |
-| next release (`main`) | **CI**: every build | **CI**: every build until 2026-11-15 | not checked |
+| next release (`main`) | **CI**: every build | not checked | not checked |
+| 1.9.0 | **CI**: every build up to its tag | **CI**: its builds until 2026-11-15, not its tag | not checked |
 | 1.8.2 | **contract**, 2026-11-15; **devices** (Hub 1.2.0 release) | **CI**: every build up to its tag | not checked |
 | 1.8.1 | **contract**, 2026-11-15 | **CI**: every build up to its tag; **devices** (1.8.1 release gate) | not checked |
 | 1.8.0 | **contract**, 2026-11-15 | **CI**: every build up to its tag | not checked |

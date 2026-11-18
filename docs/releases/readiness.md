@@ -1,8 +1,11 @@
 # Release readiness
 
 > **TL;DR**
-> - Release gates and evidence per version, newest first (1.8.2 at the top).
+> - Release gates and evidence per version, newest first (1.9.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
+> - 1.9.0, the experimental Windows service's failures, shutdown and memory and two fixes on every platform:
+>   being prepared (2026-11-18). Its Windows service passed `windows_check.py checks` and an accelerated soak
+>   on the test laptop; the Windows 24 h soak is not part of its gate (the owner, 2026-11-18).
 > - 1.8.2, two display fixes on 1.8.1's server (the live view's Wi-Fi rows, the web page's scrollbar colors),
 >   passed the same local checks, the dpkg lifecycle and the Orin's package smoke and live HTTP (2026-11-14).
 >   After publishing, a clean Ubuntu 24.04 container installed it from the APT repository and the Orin went
@@ -25,6 +28,30 @@
 >   After publishing, the Orin went from 1.6.0 to 1.7.0 with `apt install platmon` (2026-11-03).
 >   Not verified for 1.7.0: the root unit's soak and its sandbox, `hub_check.py`, armhf on a real device
 >   under systemd, `apt upgrade` to it on a real device.
+
+## 1.9.0 release gate (2026-11-18)
+
+Changes since 1.8.2 (CHANGELOG.md): on every platform, the plain screen on output that is not UTF-8 (#213) and
+a battery cycle count of -1 read as `null` (#220); CI against platmon-hub 1.2.0 (#212); on the experimental
+Windows server, the reasons for a stop in the event log and the recovery actions (#216), "this host" in place
+of a network namespace (#218), the `platmon` command in the zip (#219), a clean stop when Windows shuts down
+(#221) and the segment heap (#222). A minor release by the owner's choice (2026-11-18), without waiting for
+the Windows 24 h soak of the promotion plan.
+
+The HTTP API's schema versions, the `platmon.ini` keys and defaults and the command's options are unchanged
+from 1.8.2. On Linux the server's answers change only for a battery whose `cycle_count` is -1; its `/text`
+and fatal messages read as before (`platform::fatal` prints them as `eprintln!` did), `packaging/` but the
+Debian changelog's date and `deploy/` are unchanged.
+
+Verified for this release:
+
+| check | result |
+| --- | --- |
+| the Windows service on the test laptop (Core Ultra 7 155H, Windows 11 26H2), the segment heap build (`a34e4d8`'s server) | `windows_check.py checks --previous` 1.8.2: 9 of 9, twice (2026-11-17 and 18); `soak --accel --hours 20` (about 6 h) twice: settled private bytes 25.6 to 27.9 MiB, no lost or failed request; the first run 66 KiB per round in its second segment against 64, the second 24 and 5 ([remaining work](../development/remaining-work.md#windows-promotion-to-a-supported-platform-proposed-2026-11-16)) |
+
+Not verified, and therefore open: the Windows 24 h soak and `hub_check.py` on Windows (their tool change is
+not merged), a clean stop across a real Windows restart (#221), armhf on a real device and its systemd
+service.
 
 ## 1.8.2 release gate (2026-11-14)
 
