@@ -1,7 +1,7 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-11-14 (1.8.2 released); the evidence for
+> - What is still open, checked against the repository on 2026-11-18 (1.8.2 released, 1.9.0 being prepared); the evidence for
 >   each release is in [release readiness](../releases/readiness.md).
 > - 1.8.0 (owner, 2026-11-03 and 2026-11-12), released 2026-11-12: the experimental Windows zip together with
 >   `.rpm` release files and battery follow-ups; 1.8.1, the frontends' design on its server, released
@@ -42,6 +42,10 @@ Item 4 above was done with 1.8.1's binary.
 1.8.2 (owner, 2026-11-14) is a patch of two display fixes found after 1.8.1 (#203, #206); its gate is in
 [release readiness](../releases/readiness.md#182-release-gate-2026-11-14).
 Published 2026-11-14, in the APT repository, the Orin upgraded with a whole-system `apt-get upgrade`.
+
+1.9.0 (owner, 2026-11-18) releases what `main` gained after 1.8.2, without waiting for the Windows 24 h soak
+of the promotion plan (Windows stays experimental); its gate is in
+[release readiness](../releases/readiness.md#190-release-gate-2026-11-18).
 
 ## Windows build (2026-10-26)
 

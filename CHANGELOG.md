@@ -4,9 +4,12 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.9.0 — 2026-11-18
 
-Draft for the next release; the version and date replace this heading when it is tagged.
+The experimental Windows service's failures, shutdown and memory, the `platmon` command in its zip, and two
+fixes on every platform (the plain screen on output that is not UTF-8, an unknown battery cycle count). The
+HTTP API's schema versions, the `platmon.ini` keys and defaults and the command's options are unchanged from
+1.8.2; on Linux the server's answers change only for a battery with a cycle count of -1.
 
 - CI checks every build against platmon-hub 1.2.0 (`native/tools/equivalence/hub-requirements.txt`, pinned by
   its PyPI wheel hash), which reads what platmon 1.4.0–1.8.2 added. The compatibility table has a 1.2.0 column:
@@ -39,6 +42,9 @@ Draft for the next release; the version and date replace this heading when it is
   manifest embedded in `platmon-server.exe`. With the default heap, its memory after bursts of concurrent
   pollers settled anywhere between about 31 and 65 MB under the same load, as the heap kept freed memory;
   with the segment heap it settled at 23 to 38 MB and used less CPU (native/README.md). Linux does not change.
+
+- **Experimental:** the Windows x86_64 zip, `platmon-VERSION-windows-x86_64-experimental.zip`, is built from
+  this release as for 1.8.2; it is still not supported.
 
 ## 1.8.2 — 2026-11-14
 
