@@ -4,9 +4,9 @@
 > - Release gates and evidence per version, newest first (1.9.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.9.0, the experimental Windows service's failures, shutdown and memory and two fixes on every platform:
->   being prepared (2026-11-18). Its Windows service passed `windows_check.py checks` and an accelerated soak
->   on the test laptop; the Windows 24 h soak and the Orin's package checks are not part of its gate (the owner,
->   2026-11-18).
+>   published 2026-11-18 and in the APT repository. Its Windows service passed `windows_check.py checks` and an
+>   accelerated soak on the test laptop; the release workflow ran the Linux checks. The Windows 24 h soak and
+>   the Orin's package checks are not part of its gate (the owner, 2026-11-18).
 > - 1.8.2, two display fixes on 1.8.1's server (the live view's Wi-Fi rows, the web page's scrollbar colors),
 >   passed the same local checks, the dpkg lifecycle and the Orin's package smoke and live HTTP (2026-11-14).
 >   After publishing, a clean Ubuntu 24.04 container installed it from the APT repository and the Orin went
@@ -49,9 +49,12 @@ Verified for this release:
 | check | result |
 | --- | --- |
 | the Windows service on the test laptop (Core Ultra 7 155H, Windows 11 26H2), the segment heap build (`a34e4d8`'s server) | `windows_check.py checks --previous` 1.8.2: 9 of 9, twice (2026-11-17 and 18); `soak --accel --hours 20` (about 6 h) twice: settled private bytes 25.6 to 27.9 MiB, no lost or failed request; the first run 66 KiB per round in its second segment against 64, the second 24 and 5 ([remaining work](../development/remaining-work.md#windows-promotion-to-a-supported-platform-proposed-2026-11-16)) |
+| CI on the release tree: #225's head `9bde100` and `main` at `fa7000d` (the same tree): pytest 3.8 to 3.14, `native/build.sh` and `build-armhf.sh`, the recorded answers, `hub_contract.py` with platmon-hub 1.2.0, the Windows build and smoke, the packages, Lintian, the dpkg, service and rpm checks | all passed |
+| the published release (2026-11-18): release run 44304887701 from the tag `v1.9.0` (`fa7000d`), 11 files; `SHA256SUMS` of the downloaded draft; `gh attestation verify` (the release workflow) of the 9 package files; the Windows zip's server; the amd64 `.deb`'s server; the notes; the assets' digests just before publishing and after | all jobs passed at the first attempt; `sha256sum -c` OK; attestations verified; `platmon-server 1.9.0` with the segment heap manifest embedded, `cli.py` and `platmon.cmd` in the zip; `platmon-server 1.9.0`, package 1.9.0-1; the CHANGELOG section; the published files the verified ones |
+| the APT repository (platmon.github.io run 44306887547, approved by the owner), read with a private apt state under WSL Ubuntu 24.04 (nothing installed) and the guide's source stanza | the key's fingerprint as documented; `platmon` and `platmon-cli` candidates 1.9.0-1 (amd64); both `.deb` files `apt-get download`ed byte for byte the released ones |
 
 Not verified, and therefore open: the release packages on the Orin (package smoke and live HTTP), skipped by
-the owner (2026-11-18) while the Orin was not reachable; the Windows 24 h soak and `hub_check.py` on Windows
+the owner (2026-11-18) while the Orin was not reachable, and an `apt install` or upgrade of 1.9.0 on a host; the Windows 24 h soak and `hub_check.py` on Windows
 (their tool change is not merged); a clean stop across a real Windows restart (#221); armhf on a real device
 and its systemd service.
 
