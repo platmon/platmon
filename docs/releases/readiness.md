@@ -5,7 +5,8 @@
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.9.0, the experimental Windows service's failures, shutdown and memory and two fixes on every platform:
 >   being prepared (2026-11-18). Its Windows service passed `windows_check.py checks` and an accelerated soak
->   on the test laptop; the Windows 24 h soak is not part of its gate (the owner, 2026-11-18).
+>   on the test laptop; the Windows 24 h soak and the Orin's package checks are not part of its gate (the owner,
+>   2026-11-18).
 > - 1.8.2, two display fixes on 1.8.1's server (the live view's Wi-Fi rows, the web page's scrollbar colors),
 >   passed the same local checks, the dpkg lifecycle and the Orin's package smoke and live HTTP (2026-11-14).
 >   After publishing, a clean Ubuntu 24.04 container installed it from the APT repository and the Orin went
@@ -49,9 +50,10 @@ Verified for this release:
 | --- | --- |
 | the Windows service on the test laptop (Core Ultra 7 155H, Windows 11 26H2), the segment heap build (`a34e4d8`'s server) | `windows_check.py checks --previous` 1.8.2: 9 of 9, twice (2026-11-17 and 18); `soak --accel --hours 20` (about 6 h) twice: settled private bytes 25.6 to 27.9 MiB, no lost or failed request; the first run 66 KiB per round in its second segment against 64, the second 24 and 5 ([remaining work](../development/remaining-work.md#windows-promotion-to-a-supported-platform-proposed-2026-11-16)) |
 
-Not verified, and therefore open: the Windows 24 h soak and `hub_check.py` on Windows (their tool change is
-not merged), a clean stop across a real Windows restart (#221), armhf on a real device and its systemd
-service.
+Not verified, and therefore open: the release packages on the Orin (package smoke and live HTTP), skipped by
+the owner (2026-11-18) while the Orin was not reachable; the Windows 24 h soak and `hub_check.py` on Windows
+(their tool change is not merged); a clean stop across a real Windows restart (#221); armhf on a real device
+and its systemd service.
 
 ## 1.8.2 release gate (2026-11-14)
 
