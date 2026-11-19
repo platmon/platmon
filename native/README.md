@@ -195,6 +195,7 @@ python3 native/tools/deploy/deploy_check.py --user checks --out checks.jsonl   #
 python3 native/tools/deploy/hub_check.py --hub HUB_EXECUTABLE --hosts pc,orin=USER@HOST --out DIR   # 13 min
 python native\tools\deploy\windows_check.py install BINARY   # Windows, an administrator shell: the candidate service
 python native\tools\deploy\windows_check.py checks --out checks.jsonl --previous OLD_BINARY   # about 15 min; soak, report, uninstall
+python native\tools\deploy\hub_check.py --hub HUB_EXECUTABLE --out DIR   # Windows, the same shell after install: 13 min
 ```
 
 `tools/` by purpose: `equivalence/` compares the server with the recorded answers (first the Python
@@ -221,6 +222,9 @@ held port, the stops; not the fake nvidia-smi) plus an upgrade from an earlier b
 soak's lines keep `deploy_check.py`'s keys, so its `report` judges them by the same rules: there `pss` is
 the process's private bytes and `fds` its handles. It reuses `service_ab.py`'s poller through a `Proc`
 that reads the process with the Win32 calls. `uninstall` removes the service and the folder.
+`hub_check.py` runs there too, in the same shell after `install`: this host's agent is that service (sc.exe
+for the restart and the stops, `windows_check.py`'s kill), and the Hub is stopped with Ctrl+C in a console of
+its own, since Windows has no SIGTERM to send; hosts given with an SSH target stay Linux units.
 
 - `equivalence/fixture.sh` / `fixture.py`: **the equivalence test.** Fake `/sys` and `/proc` trees are
   mounted over the real ones in a throwaway container (a local Debian 13 image with python3, built on first
