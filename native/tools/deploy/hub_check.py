@@ -9,6 +9,12 @@ through an SSH tunnel), then, at fixed times: a restart of every agent (180 s), 
 every agent stopped for 30 s (600 s), the end (780 s). Only what this run started is stopped, by its own
 handle; the units by the candidate sudoers rules. The production services and Hub are not touched.
 
+On Windows, this host's agent is windows_check.py's candidate service (platmon-candidate, the same port),
+installed beforehand with `windows_check.py install BINARY`, and the run needs an administrator shell: it is
+started and stopped with sc.exe and killed as windows_check.py's crash check kills it (its recovery actions
+restart it). The Hub is stopped with Ctrl+C in a console of its own, which it handles as SIGTERM, since
+Windows has no SIGTERM to send. Hosts reached by SSH are Linux hosts with the candidate unit, as above.
+
 Checked, per host, from the Hub's database and APIs:
 - the agent instances the Hub stored are the ones the agents had (4: start, restart, kill, stop/start)
 - replay, per instance and stream: publication ids rising without a hole that no loss explains; every
@@ -36,6 +42,15 @@ EVENTS = ((180, "restart"), (300, "kill"), (420, "hub down"), (480, "hub up"), (
           (630, "agents up"), (780, "end"))
 INSTANCES = 4  # the first, then after the restart, the kill and the stop
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+WINDOWS = os.name == "nt"
+# Run as its own process: attaches to the console of the process whose id it is given and sends Ctrl+C to
+# every process on it, ignoring the event itself.
+CTRL_C = ("import ctypes, sys\n"
+          "k = ctypes.WinDLL('kernel32', use_last_error=True)\n"
+          "k.FreeConsole()\n"
+          "if not k.AttachConsole(int(sys.argv[1])): sys.exit(f'AttachConsole: {ctypes.get_last_error()}')\n"
+          "k.SetConsoleCtrlHandler(None, True)\n"
+          "if not k.GenerateConsoleCtrlEvent(0, 0): sys.exit(f'GenerateConsoleCtrlEvent: {ctypes.get_last_error()}')\n")
 
 
 def get(port, path, timeout=3):
@@ -54,12 +69,36 @@ class Host:
         self.name, self.ssh, self.unit = name, ssh, "platmon-server-candidate.service"
         self.node_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"platmon-hub-check/{name}"))
         self.port, self.tunnel, self.instances = AGENT_PORT, None, []
+        self.service = None
+        if WINDOWS and not ssh:
+            import windows_check  # noqa: E402 (Windows only; it imports deploy_check and the perf tools)
+            self.service, self.unit = windows_check, f"{windows_check.NAME} (Windows service)"
 
-    def systemctl(self, *args):
-        command = ["sudo", "-n", "/usr/bin/systemctl", *args]
+    def control(self, action):
+        """start, stop, restart or kill the candidate agent."""
+        if self.service is not None:
+            self.windows(action)
+            return
+        args = {"kill": ("kill", "--signal=SIGKILL")}.get(action, (action,))
+        command = ["sudo", "-n", "/usr/bin/systemctl", *args, self.unit]
         if self.ssh:
             command = ["ssh", "-o", "BatchMode=yes", self.ssh, " ".join(command)]
         subprocess.run(command, check=True, capture_output=True, timeout=60)
+
+    def windows(self, action):
+        wc = self.service
+        if action == "kill":
+            pid = wc.query()["pid"]
+            if not pid:
+                raise RuntimeError(f"{wc.NAME} has no process to kill: {wc.query()}")
+            wc.kill(pid)  # the recovery actions start it again
+            return
+        for verb in ("stop", "start") if action == "restart" else (action,):
+            if wc.query()["state"] == ("STOPPED" if verb == "stop" else "RUNNING"):
+                continue  # as systemctl, which succeeds; sc.exe fails (1062, 1056)
+            code, out, _ = wc.ctl(verb)
+            if code:
+                raise RuntimeError(f"sc.exe {verb} {wc.NAME}: {out}")
 
     def open_tunnel(self):
         if self.ssh:
@@ -79,15 +118,36 @@ class Host:
 
 
 def start_hub(hub, registry, port, db, log):
+    # on Windows in a hidden console of its own, which stop() sends Ctrl+C to
+    console = {}
+    if WINDOWS:
+        # Ignoring Ctrl+C is inherited: a shell started in a process group of its own (as some terminals and
+        # agents start one) passes it on, and the Hub would then ignore stop()'s Ctrl+C
+        import ctypes
+        ctypes.WinDLL("kernel32").SetConsoleCtrlHandler(None, False)
+        console = {"creationflags": subprocess.CREATE_NEW_CONSOLE,
+                   "startupinfo": subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=0)}
     return subprocess.Popen([hub, "--nodes", str(registry), "--port", str(port), "--history-db", str(db),
                              "--raw-capture", "--raw-retention-days", "1", "--raw-quota-mib", "1024",
                              "--no-registry-reload", "--log-file", str(log)],
-                            cwd=db.parent, stdout=subprocess.DEVNULL, stderr=open(log.with_suffix(".err"), "w"))
+                            cwd=db.parent, stdout=subprocess.DEVNULL, stderr=open(log.with_suffix(".err"), "a"),
+                            **console)
 
 
-def stop(process):
-    if process is not None and process.poll() is None:
+def interrupt(process):
+    """SIGTERM, or on Windows Ctrl+C on the process's own console (send_signal(SIGTERM) would terminate it)."""
+    if not WINDOWS:
         process.send_signal(signal.SIGTERM)
+        return
+    sent = subprocess.run([sys.executable, "-I", "-c", CTRL_C, str(process.pid)], capture_output=True, text=True,
+                          timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+    if sent.returncode:
+        raise RuntimeError(f"Ctrl+C to {process.pid}: {sent.stderr.strip()}")
+
+
+def stop(process, ask=interrupt):
+    if process is not None and process.poll() is None:
+        ask(process)
         try:
             process.wait(30)
         except subprocess.TimeoutExpired:
@@ -116,7 +176,7 @@ def run(args, hosts, out):
     hub_port, hub, timeline, final = free_port(), None, [], {}
     try:
         for h in hosts:
-            h.systemctl("start", h.unit)
+            h.control("start")
         time.sleep(3)
         if any(h.observe() is None for h in hosts):
             raise RuntimeError("an agent did not answer after its start")
@@ -131,7 +191,7 @@ def run(args, hosts, out):
             timeline.append({"event": event, "at_ms": int(time.time() * 1000)})
             if event in ("restart", "kill"):
                 for h in hosts:
-                    h.systemctl(*(("restart",) if event == "restart" else ("kill", "--signal=SIGKILL")), h.unit)
+                    h.control(event)
             elif event == "hub down":
                 final["hub_exit_1"] = stop(hub)
             elif event == "hub up":
@@ -139,7 +199,7 @@ def run(args, hosts, out):
                 wait_hub(hub_port)
             elif event in ("agents down", "agents up"):
                 for h in hosts:
-                    h.systemctl("stop" if event == "agents down" else "start", h.unit)
+                    h.control("stop" if event == "agents down" else "start")
         for h in hosts:
             instance = h.observe()
             latest = get(h.port, "/api/samples?limit=1")["latest_id"]
@@ -150,7 +210,7 @@ def run(args, hosts, out):
     finally:
         final["hub_exit_2"] = stop(hub)
         for h in hosts:
-            h.systemctl("stop", h.unit)
+            h.control("stop")
     return timeline, final
 
 
@@ -238,6 +298,10 @@ def main():
     parser.add_argument("--scale", type=float, default=1.0, help=argparse.SUPPRESS)  # a shorter trial of the tool
     args = parser.parse_args()
     hosts = [Host(*(item.split("=", 1) if "=" in item else (item, None))) for item in args.hosts.split(",")]
+    if any(h.service is not None for h in hosts):
+        import ctypes
+        if not ctypes.windll.shell32.IsUserAnAdmin():
+            sys.exit("hub_check.py: run it in an administrator shell (sc.exe start on the candidate service needs one)")
     out = Path(args.out).resolve()
     try:
         for h in hosts:
@@ -248,7 +312,7 @@ def main():
         timeline, final = run(args, hosts, out)
     finally:
         for h in hosts:
-            stop(h.tunnel)
+            stop(h.tunnel, subprocess.Popen.terminate)  # SIGTERM; it shares this console, so never Ctrl+C
     report, problems = judge(hosts, timeline, final, out / "history.db", out / "hub.log")
     result = {"unit": hosts[0].unit, "timeline": timeline, "hosts": report, "problems": problems,
               "passed": not problems}
