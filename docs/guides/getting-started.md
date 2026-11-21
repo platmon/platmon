@@ -5,8 +5,8 @@
 >   Debian-derived host with systemd; the `platmon` command (`platmon-cli`, installed with it) needs Python 3.9+.
 > - Then run `platmon`, open `http://<device>:9797`, or `curl` `/api/status`.
 > - Settings live in `/etc/platmon/platmon.ini`; the API has no authentication.
-> - Windows 11 (x86_64) has an experimental, unsupported zip of the server; from the release after 1.9.0,
->   double-click `start.cmd`: [Windows (experimental)](#windows-experimental).
+> - Windows 11 (x86_64): the installer `platmon-<version>-windows-x86_64.msi`, or the zip to try it
+>   ([Windows](#windows)).
 
 platmon is a device-side monitor: one background service reads host metrics and publishes
 snapshots. The `platmon` terminal client, web dashboard and HTTP clients all read the same
@@ -108,17 +108,19 @@ To watch several devices in one place, run [platmon-hub](https://github.com/plat
 on another computer. Which Hub release reads which platmon release, and what checked each pairing, is in
 [platmon-hub compatibility](../reference/hub-compatibility.md).
 
-## Windows (experimental)
+## Windows
 
-Since 1.8.0 each release also has `platmon-<version>-windows-x86_64-experimental.zip`: the server
-(`platmon-server.exe`), the web page, a `platmon.ini` that listens on `127.0.0.1` only, the licenses and a
-`README.txt`. It is **not supported**: it was checked in CI and on one Windows 11 laptop. It needs
-Windows 11 x86_64 (Windows 10 was not checked). From the release after 1.9.0 the server links the C runtime
+Windows 11 x86_64 is supported from the release after 1.9.0 (Windows 10 was not checked; what Windows does
+not report, such as the CPU's temperature, is listed in
+[native/README.md, "Windows"](../../native/README.md#windows)). Each release has the installer described next
+and `platmon-<version>-windows-x86_64.zip` (until 1.9.0 `platmon-<version>-windows-x86_64-experimental.zip`,
+not supported then): the server (`platmon-server.exe`), the web page, a `platmon.ini` that listens on
+`127.0.0.1` only, the licenses and a `README.txt`. From the release after 1.9.0 the server links the C runtime
 statically and needs nothing installed first; the 1.8.0 to 1.9.0 zips need the
 [Visual C++ 2015-2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe), which the zip
 does not include; without it the server does not start (`vcruntime140.dll` was not found).
 
-From the release after 1.9.0 there is also an installer, `platmon-<version>-windows-x86_64.msi`. Check it
+From the release after 1.9.0 there is an installer, `platmon-<version>-windows-x86_64.msi`. Check it
 against `SHA256SUMS`, then double-click it (it asks for administrator rights) or, in an administrator shell,
 `msiexec /i platmon-<version>-windows-x86_64.msi /qn`. It puts the server, `platmon.ini` (listening on
 `127.0.0.1`), the web page and the `platmon` command in `C:\Program Files\platmon`, adds that folder to the
@@ -133,9 +135,9 @@ Download the zip and `SHA256SUMS` from [GitHub Releases](https://github.com/plat
 the hash in PowerShell, and unpack it:
 
 ```powershell
-(Get-FileHash .\platmon-<version>-windows-x86_64-experimental.zip -Algorithm SHA256).Hash.ToLower()
+(Get-FileHash .\platmon-<version>-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
 Select-String windows-x86_64 .\SHA256SUMS
-Expand-Archive .\platmon-<version>-windows-x86_64-experimental.zip -DestinationPath .
+Expand-Archive .\platmon-<version>-windows-x86_64.zip -DestinationPath .
 cd .\platmon-<version>-windows-x86_64
 .\platmon-server.exe serve platmon.ini --web web
 ```
@@ -201,7 +203,7 @@ addresses in Windows Defender Firewall; the firewall does not ask about a servic
 Windows reads CPU usage and clocks, memory, the system volume, disk I/O, network, the first GPU's usage and
 clocks, drive and GPU temperatures, storage, Wi-Fi and battery. It has no CPU temperature, power, fans,
 power mode or pressure: those groups are `unavailable` (`unsupported_platform`) and pressure is left out
-([native/README.md, "Windows (experimental)"](../../native/README.md#windows-experimental)).
+([native/README.md, "Windows"](../../native/README.md#windows)).
 
 The `platmon` command needs Python 3.9 or later on `PATH` as `python`, as `platmon-cli` needs it on Linux.
 From the release after 1.8.2 the zip has it: `cli.py`, one standard-library file, and `platmon.cmd`, which
@@ -268,7 +270,7 @@ address and port, web enablement, threshold values and memory retention.
 | --- | --- |
 | Debian package or source systemd | `/etc/platmon/platmon.ini` |
 | Docker from this checkout | `platmon.ini` in the checkout root, mounted read-only |
-| Windows zip (experimental) | `platmon.ini` in the unpacked folder, or `C:\Program Files\platmon\platmon.ini` for the service |
+| Windows | `C:\Program Files\platmon\platmon.ini` for the service (installer or scripts), or `platmon.ini` in the unpacked zip |
 | Foreground source run | the supplied config path; defaults to `platmon.ini` |
 
 To run the service in the foreground while developing:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the experimental Windows zip with stdlib, after package.py, into the same output directory.
+"""Build the Windows zip with stdlib, after package.py, into the same output directory.
 
-platmon-VERSION-windows-x86_64-experimental.zip: the server built by CI's native-windows job (MSVC, the C
+platmon-VERSION-windows-x86_64.zip: the server built by CI's native-windows job (MSVC, the C
 runtime linked statically, so it needs no Visual C++ Redistributable), the web page, platmon.ini listening on
 127.0.0.1 only, the licenses, a README, the terminal client (cli.py, run by platmon.cmd with the Python on PATH)
 and packaging/windows's scripts: start.cmd (serve as the user, open the browser) and install-service.cmd /
@@ -31,13 +31,16 @@ PE_AMD64 = 0x8664
 SCRIPTS = ("start.cmd", "install-service.cmd", "uninstall-service.cmd")
 # the Visual C++ runtime's DLLs: a server linked with the C runtime statically (+crt-static) imports none
 CRT_DLL = re.compile(r"(vcruntime|msvcp|msvcr|ucrtbase|api-ms-win-crt-)", re.I)
-README = """platmon {release} for Windows (x86_64), EXPERIMENTAL
+README = """platmon {release} for Windows (x86_64)
 
-Not supported: built and checked in CI and on one laptop only. Linux is the supported
-platform (https://github.com/platmon/platmon).
+Supported on Windows 11 x86_64 (https://github.com/platmon/platmon);
+Windows 10 was not checked. The installer, platmon-{release}-windows-x86_64.msi,
+is the same server with the service set up for you; this zip is for trying it,
+or for running it without installing.
 
-Needs: Windows 11 (x86_64; Windows 10 was not checked). Nothing to install
-first. Windows may ask before it runs a file downloaded from the internet.
+Needs: Windows 11 (x86_64). Nothing to install first. Windows may ask before
+it runs a file downloaded from the internet: the files are not signed, so
+compare SHA256SUMS first.
 
 Run (as your user): double-click start.cmd. It serves this folder's platmon.ini
 and web page and opens http://127.0.0.1:9797/ in the browser; Ctrl+C or closing
@@ -86,14 +89,17 @@ your user PATH once, in PowerShell (a new terminal then finds it):
   [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';C:\\Program Files\\platmon', 'User')
 On Windows it shows every section on one screen, redrawn in place.
 
-What it reads on Windows, and what it does not (no pressure, no power or fans):
+What it reads on Windows, and what it does not (no CPU temperature, pressure,
+power rails, fans or power mode; SATA drives give no temperature):
 native/README.md, "Windows", in the source.
 
-Checked on a real PC (Core Ultra 7 155H, Intel Arc iGPU, NVMe, Windows 11 26H2):
-CPU and its clocks, GPU usage and clocks, drive temperature, storage, battery,
-Wi-Fi, network and disk history, the service, sleep and resume (Modern
-Standby). Not checked: more than 64 CPUs (several processor groups), a
-discrete GPU's temperature, S3 sleep and hibernation.
+Checked on two PCs (a laptop: Core Ultra 7 155H, Intel Arc iGPU, Windows 11
+26H2; a desktop: Core i5-13600KF, GeForce RTX 4070 Ti, Windows 11 25H2): CPU
+and its clocks, GPU usage, clocks and temperature, drive temperature, storage,
+battery, Wi-Fi, network and disk history, the service and its recovery, Windows
+restarts, sleep and resume (Modern Standby, S3, hibernation), a 24 h soak and
+platmon-hub. Not checked: Windows 10, more than 64 CPUs (several processor
+groups), an AMD CPU.
 
 Licenses: LICENSE (Apache-2.0) for platmon. platmon-server.exe also includes
 the Rust standard library and the libc, windows-sys and windows-link crates,
@@ -210,15 +216,11 @@ def members(root, server, release):
 
 
 def check_changelog(text, release):
-    """The release's CHANGELOG.md section must call the Windows zip experimental (the owner's decision,
-    docs/development/remaining-work.md, "Windows build"): one entry names both. The release workflow runs it."""
-    start = text.find(f"## {release} —")
-    if start == -1:
+    """The release must have a CHANGELOG.md section, which its notes are made from; the release workflow runs
+    it. Until Windows was supported it also had to call the Windows zip experimental (removed with the switch,
+    docs/development/remaining-work.md, "Windows: promotion")."""
+    if f"## {release} —" not in text:
         raise ValueError("release has no changelog entry")
-    end = text.find("\n## ", start + 1)
-    entries = text[start:end if end != -1 else None].split("\n- ")
-    if not any("windows" in e.lower() and "experimental" in e.lower() for e in entries):
-        raise ValueError(f"the {release} changelog entry must call the Windows zip experimental")
 
 
 def build(output, binary=None, root=ROOT, epoch=None, msi=None):
@@ -235,7 +237,7 @@ def build(output, binary=None, root=ROOT, epoch=None, msi=None):
     for path in (sums, manifest):
         if not path.is_file():
             raise ValueError(f"{path} not found: run package.py into {output} first")
-    target = output / f"platmon-{release}-windows-x86_64-experimental.zip"
+    target = output / f"platmon-{release}-windows-x86_64.zip"
     if target.exists():
         raise ValueError(f"{target} already exists; use a fresh output directory")
     top = f"platmon-{release}-windows-x86_64/"

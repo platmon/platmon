@@ -8,7 +8,13 @@ API schema versions are independent of release versions.
 
 Draft for the next release; the version and date replace this heading when it is tagged.
 
-- **Experimental (Windows):** an installer, `platmon-VERSION-windows-x86_64.msi`, beside the zip. It installs
+- **Windows is supported** on Windows 11 x86_64, after the promotion plan's checks on a laptop and a desktop
+  (failures and recovery, the deployment checks and an upgrade, a 24 h soak, `hub_check.py`, Windows restarts,
+  S3 and hibernation; `docs/development/remaining-work.md`). The zip is `platmon-VERSION-windows-x86_64.zip`,
+  without `-experimental`, and its README states the supported scope; the release no longer requires the
+  changelog to call it experimental. Not checked: Windows 10, more than 64 CPUs, an AMD CPU. Windows reports no
+  CPU temperature, pressure, power rails, fans or power mode.
+- **Windows:** an installer, `platmon-VERSION-windows-x86_64.msi`, beside the zip. It installs
   the server, `platmon.ini` (127.0.0.1), the web page and the `platmon` command in `C:\Program Files\platmon`,
   the service `platmon` with the guide's recovery actions, the event log source and the folder on the system
   `PATH`; a newer one upgrades it keeping an edited `platmon.ini`, an older one refuses, and removal leaves
@@ -32,14 +38,14 @@ Draft for the next release; the version and date replace this heading when it is
   32 idle connections held every slot until their 10 s deadline, closing the web page's, the `platmon`
   command's and platmon-hub's connections meanwhile. Hub polls a node with at most two connections at once.
 
-- **Experimental:** the Windows x86_64 zip is easier to start. `platmon-server.exe` links the C runtime
+- **Windows:** the x86_64 zip is easier to start. `platmon-server.exe` links the C runtime
   statically, so the Visual C++ Redistributable is no longer needed. The zip adds `start.cmd`, which serves
   the folder's `platmon.ini` and web page as the user and opens the page in the browser, and
   `install-service.cmd` / `uninstall-service.cmd`, run as administrator, which install, upgrade or remove the
   Windows service `platmon` in `C:\Program Files\platmon`, keeping an edited `platmon.ini`. The install script
   sets the guide's recovery actions, registers the event log source and copies the `platmon` command with the
   server. CI runs all three on its Windows runner, and the packager refuses a server that imports the Visual
-  C++ runtime. Still not supported, and no installer.
+  C++ runtime.
 
 ## 1.9.0 — 2026-11-18
 

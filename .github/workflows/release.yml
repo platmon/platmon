@@ -55,7 +55,7 @@ jobs:
           match = re.fullmatch(r"v" + re.escape(release) + r"(?:-([1-9][0-9]*))?", tag)
           if not match:
               raise SystemExit("tag does not match the application VERSION")
-          try:  # an entry, and it calls the Windows zip experimental
+          try:  # the release has an entry, which its notes are made from
               check_changelog(Path("CHANGELOG.md").read_text(encoding="utf-8"), release)
           except ValueError as e:
               raise SystemExit(str(e))
@@ -68,7 +68,7 @@ jobs:
         with:
           name: platmon-server
           path: native/target
-      # The Windows server the checks built and smoke-tested (native-windows), for the experimental zip.
+      # The Windows server the checks built and smoke-tested (native-windows), for the zip.
       - uses: actions/download-artifact@v4
         with:
           name: platmon-server-windows

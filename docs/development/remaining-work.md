@@ -9,9 +9,9 @@
 > - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, accepted as known
 >   gaps; one of them, a discrete GPU's temperature, passed on a desktop on 2026-11-19. Linux: armhf on a
 >   real device, a remote probe target.
-> - Windows as a supported platform: proposed 2026-11-16 after a 12 h run of 1.8.2's service; steps 1 and 2
->   of its plan are done (on a desktop, 2026-11-19 to 21: `hub_check.py`, a 24 h soak, S3 and hibernation);
->   the plan and what it lacks against the Linux gate are [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16).
+> - Windows as a supported platform: proposed 2026-11-16; its plan is done (owner, 2026-11-21: step 3 needs no
+>   further device unless asked, an unsigned MSI, the switch in the next release): Windows 11 x86_64 is
+>   supported from the release after 1.9.0; the evidence is [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16).
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
 > - Also recorded, not started: a desktop tray frontend and a separate network process (deferred; no
 >   Unix socket).
@@ -102,13 +102,14 @@ a virtual disk that answers the temperature query with a device error (#119 repo
 
 ## Windows: promotion to a supported platform (proposed 2026-11-16)
 
-Windows is still experimental: the README's support table, native/README.md and the release check
-(`check_changelog`) say so. After the checks below the owner asked what promoting it would take; this is
-the plan, not a decision. Each step that changes the release or the support scope waits for the owner.
+**Switched (owner, 2026-11-21):** supported on Windows 11 x86_64 from the release after 1.9.0, with the
+installer and the zip (no longer `-experimental`); the release check no longer requires "experimental". Until
+then it was experimental: the README's support table, native/README.md and the release check said so. After
+the checks below the owner asked what promoting it would take; this was the plan.
 
 **Evidence so far (2026-11-16, the laptop above, 1.8.2's zip):**
 
-- Installed as documented ([Windows (experimental)](../guides/getting-started.md#windows-experimental),
+- Installed as documented ([Windows](../guides/getting-started.md#windows),
   #214): checksum, `config-check`, `serve` by hand, then the service from `C:\Program Files\platmon` with
   the elevated `sc.exe` line; running and started at boot.
 - A 12 h run of the service with an ad-hoc script (not `deploy_check.py`, which is Linux only): `/api/status`
@@ -224,10 +225,11 @@ the plan, not a decision. Each step that changes the release or the support scop
    tables, no custom actions. Step 3 needs no further device unless a user asks for one (owner, 2026-11-21).
 5. **The switch:** the support table, native/README.md, the zip's name and README, and the release check
    that requires "experimental" changed together, with the supported scope and its known gaps (no CPU
-   temperature among them) stated (owner).
+   temperature among them) stated (owner). **Done** for the release after 1.9.0: the scope is Windows 11
+   x86_64; not checked: Windows 10, more than 64 CPUs, an AMD CPU.
 
-Steps 1 and 2 are done (above). Step 3 has a desktop with a discrete GPU; whether an AMD CPU or Windows 10
-is also needed is the owner's call. 4 and 5 follow.
+All five steps are done: 1 and 2 on the laptop and the desktop, 3 with the desktop (no further device unless a
+user asks), 4 as the MSI, 5 for the release after 1.9.0.
 
 ## Linux releases
 
