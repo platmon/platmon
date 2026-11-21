@@ -289,7 +289,8 @@ for precise behavior.
 
 The HTTP API has **no authentication**. The default `[http]` bind is
 `0.0.0.0:9797` (IPv4); run only on trusted networks or restrict its
-bind address and network exposure. IPv6 is not served.
+bind address and network exposure. `bind = ::` serves IPv6 instead
+([deployment](deployment.md#network-troubleshooting)).
 Device-specific and optional metric availability is explained in
 [CLI and web interfaces](interfaces.md#data-coverage-and-limitations)
 and [HTTP API](../reference/api.md).

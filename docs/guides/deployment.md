@@ -180,8 +180,13 @@ decides who gets through. See [Host header](../reference/api.md#host-header).
 
 The API has **no authentication**; expose it only to trusted networks.
 By default `[http] bind = 0.0.0.0` listens on all IPv4 interfaces
-on port 9797 (`ss -ltn` shows `0.0.0.0:9797`). IPv6 is not served: `bind` takes an IPv4 address, and
-`platmon-server config-check` refuses anything else before the service is started.
+on port 9797 (`ss -ltn` shows `0.0.0.0:9797`). For IPv6, set `bind = ::` (every IPv6 interface, `[::]:9797`),
+`::1` or one of the device's IPv6 addresses, without brackets; the browser and Hub then use
+`http://[address]:9797/`. An IPv6 `bind` serves IPv6 only, on Linux and Windows alike (`IPV6_V6ONLY`): one
+listener serves one address family, so a device reached over both keeps `0.0.0.0` or uses `::` where its
+clients have IPv6. A link-local address with a zone (`fe80::1%eth0`) is not taken. `platmon-server
+config-check` refuses a host name, a bracketed address or anything else that is not an IP address before
+the service is started.
 
 If the device answers locally but another machine cannot connect,
 check in this order:

@@ -415,14 +415,20 @@ pub fn parse_hosts(text: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// [http] bind: serve listens on IPv4 only and http::bind parses the value as an IPv4 address, so refuse here
-/// what it would refuse (an IPv6 address, a host name, an empty value) instead of letting the service fail.
+/// [http] bind: an IPv4 or IPv6 address, as http::bind parses it; refuse here what it would refuse (a host name,
+/// an address in brackets or with a zone, an empty value) instead of letting the service fail.
 fn check_bind(text: &str) -> Result<(), String> {
-    if text.parse::<std::net::Ipv4Addr>().is_ok() {
+    if text.parse::<std::net::IpAddr>().is_ok() {
         return Ok(());
     }
-    let why = if text.contains(':') { "IPv6 is not served" } else { "0.0.0.0 for every interface, or one of the device's addresses" };
-    Err(format!("[http] bind = {} is not an IPv4 address ({})", py_repr(text), why))
+    let why = if text.starts_with('[') {
+        "write an IPv6 address without brackets"
+    } else if text.contains(':') && text.contains('%') {
+        "an IPv6 address with a zone (%interface) is not taken; use :: or a global address"
+    } else {
+        "0.0.0.0 or :: for every interface, or one of the device's addresses"
+    };
+    Err(format!("[http] bind = {} is not an IP address ({})", py_repr(text), why))
 }
 
 /// The --frontends value as serve passes it on: None when not given or empty, else split at commas.
@@ -642,11 +648,14 @@ mod tests {
             ("[core]\ninterval = -1\n", None, Some("out of range")),
             ("port = 1\n", None, Some("cannot parse config")), // no section header
             ("[http]\nbind = 10%\n", Some(&["http"]), Some("bind = '10%' is not")), // % is literal, not interpolation
-            ("[http]\nbind = ::\n", None, Some("[http] bind = '::' is not an IPv4 address (IPv6 is not served)")),
-            ("[http]\nbind = [::1]\n", None, Some("(IPv6 is not served)")),
-            ("[http]\nbind = 999.1.1.1\n", None, Some("[http] bind = '999.1.1.1' is not an IPv4 address (0.0.0.0 for every")),
-            ("[http]\nbind = robot1\n", None, Some("bind = 'robot1' is not an IPv4 address")),
-            ("[http]\nbind =\n", None, Some("bind = '' is not an IPv4 address")),
+            ("[http]\nbind = ::\n", None, None),
+            ("[http]\nbind = ::1\n", None, None),
+            ("[http]\nbind = 2001:db8::18\n", None, None),
+            ("[http]\nbind = [::1]\n", None, Some("[http] bind = '[::1]' is not an IP address (write an IPv6 address without brackets)")),
+            ("[http]\nbind = fe80::1%eth0\n", None, Some("(an IPv6 address with a zone (%interface) is not taken")),
+            ("[http]\nbind = 999.1.1.1\n", None, Some("[http] bind = '999.1.1.1' is not an IP address (0.0.0.0 or :: for every")),
+            ("[http]\nbind = robot1\n", None, Some("bind = 'robot1' is not an IP address")),
+            ("[http]\nbind =\n", None, Some("bind = '' is not an IP address")),
             ("[http]\nbind = 0.0.0.0\n", None, None),
             ("[http]\nbind = 127.0.0.1\n", None, None),
             ("[http]\nbind = 192.168.18.18\n", None, None),

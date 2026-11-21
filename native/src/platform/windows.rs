@@ -1,6 +1,6 @@
 //! Windows: the interrupt time, BCryptGenRandom, a WinSock socket, the console's stop events and the service
 //! control manager's, and the event log for what a service cannot print.
-use std::net::{Ipv4Addr, TcpListener};
+use std::net::{IpAddr, TcpListener};
 use std::os::windows::io::FromRawSocket;
 use windows_sys::Win32::Networking::WinSock as ws;
 use windows_sys::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
@@ -32,9 +32,10 @@ pub fn random_bytes(b: &mut [u8]) -> bool {
     unsafe { BCryptGenRandom(std::ptr::null_mut(), b.as_mut_ptr(), len, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 }
 }
 
-/// A listening IPv4 socket with the given backlog. SO_EXCLUSIVEADDRUSE, not SO_REUSEADDR: on Windows
-/// SO_REUSEADDR would let another socket bind the same port and take its connections.
-pub fn listen(ip: Ipv4Addr, port: u16, backlog: i32) -> std::io::Result<TcpListener> {
+/// A listening socket with the given backlog; on an IPv6 address IPv6 only (IPV6_V6ONLY, Windows's default
+/// made explicit), as on Linux. SO_EXCLUSIVEADDRUSE, not SO_REUSEADDR: on Windows SO_REUSEADDR would let
+/// another socket bind the same port and take its connections.
+pub fn listen(ip: IpAddr, port: u16, backlog: i32) -> std::io::Result<TcpListener> {
     static STARTED: std::sync::Once = std::sync::Once::new();
     let error = || std::io::Error::from_raw_os_error(unsafe { ws::WSAGetLastError() });
     unsafe {
@@ -44,20 +45,36 @@ pub fn listen(ip: Ipv4Addr, port: u16, backlog: i32) -> std::io::Result<TcpListe
             ws::WSAStartup(0x202, &mut data);
         });
         // not inherited by child processes, as SOCK_CLOEXEC on Linux; overlapped, as std makes its sockets
-        let s = ws::WSASocketW(ws::AF_INET as i32, ws::SOCK_STREAM, ws::IPPROTO_TCP, std::ptr::null(), 0,
+        let family = if ip.is_ipv4() { ws::AF_INET } else { ws::AF_INET6 };
+        let s = ws::WSASocketW(family as i32, ws::SOCK_STREAM, ws::IPPROTO_TCP, std::ptr::null(), 0,
                                ws::WSA_FLAG_OVERLAPPED | ws::WSA_FLAG_NO_HANDLE_INHERIT);
         if s == ws::INVALID_SOCKET {
             return Err(error());
         }
         let listener = TcpListener::from_raw_socket(s as u64); // closes s on the error paths below
         let one: i32 = 1;
-        let mut sa: ws::SOCKADDR_IN = std::mem::zeroed();
-        sa.sin_family = ws::AF_INET;
-        sa.sin_port = port.to_be();
-        sa.sin_addr.S_un.S_addr = u32::from(ip).to_be();
-        if ws::setsockopt(s, ws::SOL_SOCKET, ws::SO_EXCLUSIVEADDRUSE, (&one as *const i32).cast(), std::mem::size_of::<i32>() as i32) != 0
-            || ws::bind(s, (&sa as *const ws::SOCKADDR_IN).cast(), std::mem::size_of::<ws::SOCKADDR_IN>() as i32) != 0
-            || ws::listen(s, backlog) != 0 {
+        let (one_ptr, int) = ((&one as *const i32).cast(), std::mem::size_of::<i32>() as i32);
+        if ws::setsockopt(s, ws::SOL_SOCKET, ws::SO_EXCLUSIVEADDRUSE, one_ptr, int) != 0
+            || (ip.is_ipv6() && ws::setsockopt(s, ws::IPPROTO_IPV6, ws::IPV6_V6ONLY, one_ptr, int) != 0) {
+            return Err(error());
+        }
+        let bound = match ip {
+            IpAddr::V4(v4) => {
+                let mut sa: ws::SOCKADDR_IN = std::mem::zeroed();
+                sa.sin_family = ws::AF_INET;
+                sa.sin_port = port.to_be();
+                sa.sin_addr.S_un.S_addr = u32::from(v4).to_be();
+                ws::bind(s, (&sa as *const ws::SOCKADDR_IN).cast(), std::mem::size_of::<ws::SOCKADDR_IN>() as i32)
+            }
+            IpAddr::V6(v6) => {
+                let mut sa: ws::SOCKADDR_IN6 = std::mem::zeroed();
+                sa.sin6_family = ws::AF_INET6;
+                sa.sin6_port = port.to_be();
+                sa.sin6_addr.u.Byte = v6.octets();
+                ws::bind(s, (&sa as *const ws::SOCKADDR_IN6).cast(), std::mem::size_of::<ws::SOCKADDR_IN6>() as i32)
+            }
+        };
+        if bound != 0 || ws::listen(s, backlog) != 0 {
             return Err(error());
         }
         Ok(listener)
