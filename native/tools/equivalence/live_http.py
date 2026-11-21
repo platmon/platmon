@@ -60,14 +60,15 @@ PATHS = ["/api/stats", "/api/status", "/api/observations", "/api/history", "/api
          "/assets/brand/favicon.svg", "/assets/brand/platmon-logo-dark.svg", "/nothing", "/text", "/text?x"]
 WEB = ["/", "/index.html", "/app.js", "/styles.css", "/assets/brand/favicon.svg", "/assets/brand/platmon-logo-dark.svg"]
 JSON, HTML, ERROR = "application/json", "text/html; charset=utf-8", "text/html;charset=utf-8"
-EXPECTED = {  # path: (code, Content-Type, Cache-Control no-store), as the Python service answered
+EXPECTED = {  # path: (code, Content-Type, Cache-Control no-store), as the Python service answered, except
+    # that a query string on a fixed endpoint is ignored since #199 (the Python service answered 404)
     "/api/stats": (200, JSON, True), "/api/status": (200, JSON, True), "/api/observations": (200, JSON, True),
     "/api/history": (200, JSON, True), "/api/samples": (200, JSON, True),
-    "/api/observation-samples?group=storage": (200, JSON, True), "/api/stats?x=1": (404, ERROR, False),
+    "/api/observation-samples?group=storage": (200, JSON, True), "/api/stats?x=1": (200, JSON, True),
     "/": (200, HTML, False), "/index.html": (200, HTML, False), "/app.js": (200, "text/javascript; charset=utf-8", False),
     "/styles.css": (200, "text/css; charset=utf-8", False), "/assets/brand/favicon.svg": (200, "image/svg+xml", False),
     "/assets/brand/platmon-logo-dark.svg": (200, "image/svg+xml", False), "/nothing": (404, ERROR, False),
-    "/text": (200, "text/plain; charset=utf-8", True), "/text?x": (404, ERROR, False),
+    "/text": (200, "text/plain; charset=utf-8", True), "/text?x": (200, "text/plain; charset=utf-8", True),
 }
 HISTORY = {"schema_version": 1, "retention_s": 600.0, "interval_ms": 1000.0}  # the defaults' history
 HISTORY_KEYS = ["schema_version", "instance_id", "retention_s", "interval_ms", "dropped_series", "series",
