@@ -8,6 +8,12 @@ API schema versions are independent of release versions.
 
 Draft for the next release; the version and date replace this heading when it is tagged.
 
+- **Experimental (Windows):** an installer, `platmon-VERSION-windows-x86_64.msi`, beside the zip. It installs
+  the server, `platmon.ini` (127.0.0.1), the web page and the `platmon` command in `C:\Program Files\platmon`,
+  the service `platmon` with the guide's recovery actions, the event log source and the folder on the system
+  `PATH`; a newer one upgrades it keeping an edited `platmon.ini`, an older one refuses, and removal leaves
+  `platmon.ini`. It is built with Windows Installer itself (`scripts/packaging/package_msi.py`), not WiX, and
+  is not signed. CI installs, upgrades, downgrades and removes it on its Windows runner.
 - Prometheus (#198): `scripts/prometheus_exporter.py`, a standard-library exporter outside the server, reads
   `/api/stats` and `/api/observations` at each scrape and answers `/metrics` (`platmon_*`: CPU, GPU, NPU,
   memory, temperatures, power rails, fans, network and disk counters, PSI, filesystems, Wi-Fi, batteries,

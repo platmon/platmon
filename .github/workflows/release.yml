@@ -73,14 +73,20 @@ jobs:
         with:
           name: platmon-server-windows
           path: native/target/release
+      # Its installer, built and smoke-tested on the same Windows runner (package_msi.py).
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-msi-windows
+          path: native/target/msi
       - name: Install rpmbuild and the package policy checker
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm lintian
       - name: Build fixed-version release files
         env:
+          VERSION: ${{ steps.version.outputs.version }}
           REVISION: ${{ steps.version.outputs.revision }}
         run: |
           python3 scripts/packaging/package.py --revision "$REVISION"
-          python3 scripts/packaging/package_windows.py
+          python3 scripts/packaging/package_windows.py --msi "native/target/msi/platmon-$VERSION-windows-x86_64.msi"
           # The .rpm packages of the same servers, beside the .deb ones and in the same SHA256SUMS.
           python3 scripts/packaging/package_rpm.py --release "$REVISION" --output "$RUNNER_TEMP/rpm"
           (cd "$RUNNER_TEMP/rpm" && sha256sum -c SHA256SUMS)
@@ -132,6 +138,7 @@ jobs:
             dist/*.rpm
             dist/*.tar.gz
             dist/*.zip
+            dist/*.msi
       - uses: actions/upload-artifact@v4
         with:
           name: release
@@ -164,5 +171,5 @@ jobs:
           end = text.find("\n## ", start + 1)
           print(text[start:end if end != -1 else None].strip())
           PY
-          gh release create "$GITHUB_REF_NAME" release/*.deb release/*.rpm release/*.tar.gz release/*.zip release/BUILD.json release/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" release/*.deb release/*.rpm release/*.tar.gz release/*.zip release/*.msi release/BUILD.json release/SHA256SUMS \
             --verify-tag --draft --title "platmon $GITHUB_REF_NAME" --notes-file notes.md

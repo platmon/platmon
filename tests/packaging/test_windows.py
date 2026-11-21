@@ -87,6 +87,23 @@ def test_zip_contents_and_checksum(tmp_path, exe):
         ["0" * 64 + "  platmon-x.tar.gz", f"{sha(out / 'BUILD.json')}  BUILD.json", f"{sha(target)}  {target.name}"]
 
 
+def test_the_installer_is_added_beside_the_zip(tmp_path, exe):
+    release = version()
+    msi = tmp_path / "built" / f"platmon-{release}-windows-x86_64.msi"
+    msi.parent.mkdir()
+    msi.write_bytes(b"an installer")
+    out = output_with_sums(tmp_path / "dist")
+    target = build(out, exe, msi=msi)
+    assert (out / msi.name).read_bytes() == b"an installer"
+    lines = (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+    assert lines[-2:] == [f"{hashlib.sha256(target.read_bytes()).hexdigest()}  {target.name}",
+                          f"{hashlib.sha256(b'an installer').hexdigest()}  {msi.name}"]
+    wrong = tmp_path / "built" / "platmon-0.0.1-windows-x86_64.msi"
+    wrong.write_bytes(b"another release")
+    with pytest.raises(ValueError, match="not the installer of"):
+        build(output_with_sums(tmp_path / "dist2"), exe, msi=wrong)
+
+
 def test_repeated_builds_match(tmp_path, exe):
     first = build(output_with_sums(tmp_path / "a"), exe)
     second = build(output_with_sums(tmp_path / "b"), exe, epoch=packaging_epoch())

@@ -25,6 +25,10 @@
   port 9797: start.cmd serves; install-service.cmd installs the service "platmon" in %ProgramFiles%\\platmon,
   which serves, then upgrades it keeping an edited platmon.ini; uninstall-service.cmd removes the service and
   its files but platmon.ini. Skipped where port 9797, a "platmon" service or that folder is already there.
+- the installer (package_msi.py), built for VERSION and for the next patch release: msiexec installs the service
+  (automatic, the guide's command line and recovery actions, the failure-actions flag), the event log source
+  and the folder on the system PATH, and it serves; the next release upgrades it keeping an edited platmon.ini;
+  the older package is refused (1603); removal leaves platmon.ini only. Skipped as the scripts are.
 The INI files serve and the service read (platmon-smoke.ini, platmon-service.ini, in the current directory)
 and the zip's folders are removed after each part, whatever its result."""
 import json
@@ -43,6 +47,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from scripts.packaging.package import version  # noqa: E402
 from scripts.packaging.package_windows import CRT_DLL, imported_dlls, members  # noqa: E402
+from scripts.packaging.package_msi import build_msi, tables  # noqa: E402
 
 TIMEOUT = 30
 INSTANCE = "00000000-0000-4000-8000-000000000000"
@@ -275,6 +280,7 @@ def main(binary):
         sc("delete", name)
         os.remove(ini)
     zip_scripts(binary, check, sc)
+    msi_installer(binary, check, sc)
     if failures:
         sys.exit(f"{len(failures)} failed: {', '.join(failures)}")
     print("all passed")
@@ -343,6 +349,75 @@ def zip_scripts(binary, check, sc):
               and get(port, "/api/status") == (None, None) and (dest / "platmon.ini").is_file()
               and sorted(p.name for p in dest.iterdir()) == ["platmon.ini"], r.stdout + sc("query", "platmon").stdout)
     finally:
+        sc("stop", "platmon")
+        sc("delete", "platmon")
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def msi_installer(binary, check, sc):
+    """The installer (package_msi.py) for this binary, as VERSION and as the next patch release: install, the
+    service with its recovery actions, the event log source and the PATH entry; an upgrade keeping an edited
+    platmon.ini; the older package refused; removal leaving platmon.ini only."""
+    port, dest = 9797, Path(os.environ["ProgramFiles"]) / "platmon"
+    if get(port, "/api/status") != (None, None) or sc("query", "platmon").returncode == 0 or dest.exists():
+        print(f"skip  the installer: port {port}, a platmon service or {dest} is already there")
+        return
+    import winreg
+    release = version(ROOT)
+    major, minor, patch = release.split(".")
+    newer = f"{major}.{minor}.{int(patch) + 1}"
+    server = Path(binary).read_bytes()
+    folder = Path(tempfile.mkdtemp(prefix="platmon-msi-"))
+    packages = {r: folder / f"platmon-{r}.msi" for r in (release, newer)}
+    codes = {r: dict(tables(members(ROOT, server, r), r)["Property"])["ProductCode"] for r in packages}
+    key = r"SYSTEM\CurrentControlSet\Services\EventLog\Application\platmon"
+
+    def msiexec(*args):
+        return subprocess.run(["msiexec.exe", *args, "/qn", "/l*v", str(folder / f"msiexec-{time.monotonic_ns()}.log")],
+                              capture_output=True, timeout=10 * TIMEOUT).returncode
+
+    def event_source():
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as k:
+                return winreg.QueryValueEx(k, "EventMessageFile")
+        except OSError:
+            return None
+
+    def on_path():
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as k:
+            return str(dest).lower() in [p.rstrip("\\").lower() for p in winreg.QueryValueEx(k, "Path")[0].split(";")]
+
+    try:
+        for r, path in packages.items():
+            build_msi(path, members(ROOT, server, r), r, "0" * 64)
+        code = msiexec("/i", str(packages[release]))
+        config, failure = sc("qc", "platmon").stdout, sc("qfailure", "platmon").stdout
+        status = ready(port)
+        check("installer: install", code == 0 and "AUTO_START" in config
+              and f'"{dest}\\platmon-server.exe" service "{dest}\\platmon.ini" --web "{dest}\\web"' in config
+              and bool(status) and status.get("ready") is True
+              and re.findall(r"Delay = (\d+)", failure) == ["5000", "5000", "60000"]
+              and "TRUE" in sc("qfailureflag", "platmon").stdout
+              and event_source() == (r"%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll", winreg.REG_EXPAND_SZ)
+              and on_path() and (dest / "platmon.cmd").is_file() and (dest / "cli.py").is_file()
+              and not (dest / "install-service.cmd").exists(), f"exit {code}\n" + config + failure + json.dumps(status))
+        with open(dest / "platmon.ini", "a") as f:
+            f.write("; edited\n")
+        code = msiexec("/i", str(packages[newer]))
+        status = ready(port)
+        check("installer: upgrade", code == 0 and (dest / "platmon.ini").read_text().endswith("; edited\n")
+              and bool(status) and status.get("ready") is True and sc("query", "platmon").returncode == 0,
+              f"exit {code}\n" + json.dumps(status))
+        code = msiexec("/i", str(packages[release]))
+        check("installer: an older package refused", code == 1603 and (ready(port) or {}).get("ready") is True, f"exit {code}")
+        code = msiexec("/x", str(packages[newer]))
+        check("installer: removal", code == 0 and sc("query", "platmon").returncode != 0
+              and get(port, "/api/status") == (None, None) and event_source() is None and not on_path()
+              and sorted(p.name for p in dest.iterdir()) == ["platmon.ini"], f"exit {code}")
+    finally:
+        for c in codes.values():
+            msiexec("/x", c)
         sc("stop", "platmon")
         sc("delete", "platmon")
         shutil.rmtree(dest, ignore_errors=True)
