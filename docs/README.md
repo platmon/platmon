@@ -17,6 +17,8 @@ document for implementation and validation evidence.
   thresholds, data coverage and the HTTP entry points.
 - [Deployment and operations](guides/deployment.md) — package versus source/systemd versus
   Docker, upgrades, troubleshooting, networking and image licensing.
+- [Prometheus](guides/prometheus.md) — scraping platmon with the exporter in `scripts/`, and its
+  metrics.
 
 ## Reference
 

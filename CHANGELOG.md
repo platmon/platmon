@@ -8,6 +8,11 @@ API schema versions are independent of release versions.
 
 Draft for the next release; the version and date replace this heading when it is tagged.
 
+- Prometheus (#198): `scripts/prometheus_exporter.py`, a standard-library exporter outside the server, reads
+  `/api/stats` and `/api/observations` at each scrape and answers `/metrics` (`platmon_*`: CPU, GPU, NPU,
+  memory, temperatures, power rails, fans, network and disk counters, PSI, filesystems, Wi-Fi, batteries,
+  the probe). The server serves no `/metrics`; the decision, the metrics and a systemd unit are in
+  `docs/guides/prometheus.md`.
 - IPv6 is served (#197): `[http] bind` takes an IPv6 address (`::` for every IPv6 interface, `::1`, or one of
   the device's addresses, without brackets), where `config-check` refused it with "IPv6 is not served". An
   IPv6 `bind` serves IPv6 only, on Linux and Windows alike (`IPV6_V6ONLY`); the default stays `0.0.0.0`.

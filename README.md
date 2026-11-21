@@ -119,7 +119,9 @@ built in. It is not a metrics platform.
 | License | Apache-2.0 | AGPL-3.0 | LGPL-3.0 | MIT | Apache-2.0 |
 
 Pick something else when you need to **control** a Jetson (jtop), per-container statistics or accounts and
-alerts out of the box (Beszel), or you already run Prometheus and Grafana (node_exporter).
+alerts out of the box (Beszel), or you already run Prometheus and Grafana (node_exporter). To scrape what
+platmon adds there (Jetson GPU, NPU, power rails, PSI, battery, Wi-Fi, the probe), use its
+[exporter](docs/guides/prometheus.md).
 
 ## Compatibility
 
