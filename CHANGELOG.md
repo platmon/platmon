@@ -8,6 +8,11 @@ API schema versions are independent of release versions.
 
 Draft for the next release; the version and date replace this heading when it is tagged.
 
+- IPv6 is served (#197): `[http] bind` takes an IPv6 address (`::` for every IPv6 interface, `::1`, or one of
+  the device's addresses, without brackets), where `config-check` refused it with "IPv6 is not served". An
+  IPv6 `bind` serves IPv6 only, on Linux and Windows alike (`IPV6_V6ONLY`); the default stays `0.0.0.0`.
+  `platmon-server health` asks `::1` for `bind = ::`, and the server's messages write the address as
+  `[::]:9797`. A link-local address with a zone (`fe80::1%eth0`) is refused.
 - A query string on a path that takes no parameters is ignored (#199): `/api/stats?x=1`, `/api/status?pretty`,
   `/text?x` and the web page's files answer as without it, where they answered 404. Tools that add one to
   bypass a cache or to tag a request get the reading. `/api/history` and the replay endpoints still answer 400

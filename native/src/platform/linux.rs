@@ -1,5 +1,5 @@
 //! Linux: clock_gettime, getrandom, a raw socket and SIGTERM.
-use std::net::{Ipv4Addr, TcpListener};
+use std::net::{IpAddr, TcpListener};
 use std::os::fd::FromRawFd;
 
 fn os_clock(id: libc::clockid_t) -> Option<i64> {
@@ -23,23 +23,40 @@ pub fn random_bytes(b: &mut [u8]) -> bool {
     n == b.len() as isize
 }
 
-/// A listening IPv4 socket with SO_REUSEADDR and the given backlog.
-pub fn listen(ip: Ipv4Addr, port: u16, backlog: i32) -> std::io::Result<TcpListener> {
+/// A listening socket with SO_REUSEADDR and the given backlog; on an IPv6 address IPv6 only (IPV6_V6ONLY,
+/// whatever net.ipv6.bindv6only says), as on Windows.
+pub fn listen(ip: IpAddr, port: u16, backlog: i32) -> std::io::Result<TcpListener> {
+    let int = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
     unsafe {
-        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
+        let family = if ip.is_ipv4() { libc::AF_INET } else { libc::AF_INET6 };
+        let fd = libc::socket(family, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
         if fd < 0 {
             return Err(std::io::Error::last_os_error());
         }
         let listener = TcpListener::from_raw_fd(fd); // closes fd on the error paths below
         let one: libc::c_int = 1;
-        let mut sa: libc::sockaddr_in = std::mem::zeroed();
-        sa.sin_family = libc::AF_INET as libc::sa_family_t;
-        sa.sin_port = port.to_be();
-        sa.sin_addr.s_addr = u32::from(ip).to_be();
-        if libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_REUSEADDR, (&one as *const libc::c_int).cast(),
-                            std::mem::size_of::<libc::c_int>() as libc::socklen_t) != 0
-            || libc::bind(fd, (&sa as *const libc::sockaddr_in).cast(), std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t) != 0
-            || libc::listen(fd, backlog) != 0 {
+        let one_ptr = (&one as *const libc::c_int).cast();
+        if libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_REUSEADDR, one_ptr, int) != 0
+            || (ip.is_ipv6() && libc::setsockopt(fd, libc::IPPROTO_IPV6, libc::IPV6_V6ONLY, one_ptr, int) != 0) {
+            return Err(std::io::Error::last_os_error());
+        }
+        let bound = match ip {
+            IpAddr::V4(v4) => {
+                let mut sa: libc::sockaddr_in = std::mem::zeroed();
+                sa.sin_family = libc::AF_INET as libc::sa_family_t;
+                sa.sin_port = port.to_be();
+                sa.sin_addr.s_addr = u32::from(v4).to_be();
+                libc::bind(fd, (&sa as *const libc::sockaddr_in).cast(), std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
+            }
+            IpAddr::V6(v6) => {
+                let mut sa: libc::sockaddr_in6 = std::mem::zeroed();
+                sa.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+                sa.sin6_port = port.to_be();
+                sa.sin6_addr.s6_addr = v6.octets();
+                libc::bind(fd, (&sa as *const libc::sockaddr_in6).cast(), std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t)
+            }
+        };
+        if bound != 0 || libc::listen(fd, backlog) != 0 {
             return Err(std::io::Error::last_os_error());
         }
         Ok(listener)

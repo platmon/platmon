@@ -125,20 +125,29 @@ fn host_allowed(value: &str, own: &str, extra: &[String]) -> bool {
     name == "localhost" || (!own.is_empty() && (name == own || name == format!("{}.local", own))) || extra.contains(&name)
 }
 
-/// An IPv4 listening socket as Python's HTTPServer makes it: a backlog of 5 (and SO_REUSEADDR on Linux).
+/// A listening socket as Python's HTTPServer makes it: a backlog of 5 (and SO_REUSEADDR on Linux); on an
+/// IPv6 address IPv6 only (platform::listen).
 pub fn bind(addr: &str, port: u16) -> std::io::Result<TcpListener> {
-    let ip: std::net::Ipv4Addr = addr.parse().map_err(|_| std::io::Error::other(format!("not an IPv4 address: {}", addr)))?;
+    let ip: std::net::IpAddr = addr.parse().map_err(|_| std::io::Error::other(format!("not an IP address: {}", addr)))?;
     crate::platform::listen(ip, port, 5)
+}
+
+/// address:port as a URL writes it: [::1]:9797 for an IPv6 address.
+pub fn shown(addr: &str, port: u16) -> String {
+    match addr.parse::<std::net::IpAddr>() {
+        Ok(ip) => std::net::SocketAddr::new(ip, port).to_string(),
+        Err(_) => format!("{}:{}", addr, port),
+    }
 }
 
 /// The status code of GET path on host:port, everything within timeout (the health command's check).
 pub fn get_status(host: &str, port: u16, path: &str, timeout: Duration) -> std::io::Result<u16> {
-    let ip: std::net::Ipv4Addr = host.parse().map_err(|_| std::io::Error::other(format!("not an IPv4 address: {}", host)))?;
+    let ip: std::net::IpAddr = host.parse().map_err(|_| std::io::Error::other(format!("not an IP address: {}", host)))?;
     let deadline = std::time::Instant::now() + timeout;
     let left = || deadline.saturating_duration_since(std::time::Instant::now()).max(Duration::from_millis(1));
     let mut s = TcpStream::connect_timeout(&(ip, port).into(), timeout)?;
     s.set_write_timeout(Some(left()))?;
-    s.write_all(format!("GET {} HTTP/1.0\r\nHost: {}:{}\r\n\r\n", path, host, port).as_bytes())?;
+    s.write_all(format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", path, shown(host, port)).as_bytes())?;
     let mut head = Vec::new();
     let mut buf = [0u8; 512];
     while !head.windows(2).any(|w| w == b"\r\n") { // the status line is enough
@@ -692,6 +701,29 @@ mod tests {
         let rounds = t0.elapsed().as_secs_f64() / 0.05;
         let collected = (calls.load(Ordering::SeqCst) - before) as f64;
         assert!(collected <= rounds + 2.0, "{} collections in {} intervals for 400 requests", collected, rounds);
+    }
+
+    #[test]
+    fn an_ipv6_address_is_served_ipv6_only() {
+        // IPv6 only (IPV6_V6ONLY): IPv4 on the same port stays free for another socket; dual stack would hold it
+        let any = match bind("::", 0) {
+            Ok(l) => l,
+            Err(e) => return eprintln!("no IPv6 here ({}): skipped", e), // a container without IPv6
+        };
+        let port = any.local_addr().unwrap().port();
+        assert!(bind("0.0.0.0", port).is_ok(), "port {} taken for IPv4 too", port);
+        assert_eq!(shown("::", port), format!("[::]:{}", port));
+        drop(any);
+        // served over IPv6 loopback, with the Host header bracketed
+        let Ok(listener) = bind("::1", 0) else { return eprintln!("no IPv6 loopback here: skipped") };
+        let port = listener.local_addr().unwrap().port();
+        let sampler = Arc::new(Sampler::new(0.05, None, "test".into(), "boottime"));
+        let obs = Arc::new(Observations { groups: vec![], instance_id: "test".into(), clock_source: "boottime" });
+        let mut srv = Server::new(sampler, obs, None, "0".into(), Value::obj());
+        srv.hosts = Some(vec![]); // the Host check on: "[::1]:port" is an address
+        let srv = Arc::new(srv);
+        std::thread::spawn(move || srv.serve(listener));
+        assert_eq!(get_status("::1", port, "/api/status", Duration::from_secs(4)).unwrap(), 200);
     }
 
     #[test]

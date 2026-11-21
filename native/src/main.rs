@@ -131,17 +131,22 @@ fn config_check(args: &[String]) {
     }
 }
 
-/// health [CONFIG]: GET /api/stats where serve would listen with CONFIG (127.0.0.1 for 0.0.0.0), within 4 s.
+/// health [CONFIG]: GET /api/stats where serve would listen with CONFIG (127.0.0.1 for 0.0.0.0, ::1 for ::),
+/// within 4 s.
 fn health(path: Option<&str>) {
     let cfg = config::load(path, None).unwrap_or_else(|e| { eprintln!("platmon-server health: error: {}", e); std::process::exit(2) });
     let bind = cfg.text("http", "bind");
-    let host = if bind == "0.0.0.0" { "127.0.0.1".to_string() } else { bind };
+    let host = match bind.parse::<std::net::IpAddr>() { // every interface: this host's loopback of that family
+        Ok(std::net::IpAddr::V4(ip)) if ip.is_unspecified() => "127.0.0.1".to_string(),
+        Ok(std::net::IpAddr::V6(ip)) if ip.is_unspecified() => "::1".to_string(),
+        _ => bind,
+    };
     let port = cfg.int("http", "port");
     println!("{} {}", host, port);
     match http::get_status(&host, port as u16, "/api/stats", std::time::Duration::from_secs(4)) {
         Ok(200) => {}
         Ok(code) => { eprintln!("platmon-server health: /api/stats answered {}", code); std::process::exit(1) }
-        Err(e) => { eprintln!("platmon-server health: {}:{}: {}", host, port, e); std::process::exit(1) }
+        Err(e) => { eprintln!("platmon-server health: {}: {}", http::shown(&host, port as u16), e); std::process::exit(1) }
     }
 }
 
@@ -197,7 +202,7 @@ fn serve(args: &[String]) {
                                                                 clock_source: source });
     let levels = config::levels_for(&cfg, c.platform);
     let (bind, port) = (cfg.text("http", "bind"), cfg.int("http", "port") as u16);
-    let listener = http::bind(&bind, port).unwrap_or_else(|e| platform::fatal(1, &format!("platmon-server: cannot listen on {}:{}: {}", bind, port, e)));
+    let listener = http::bind(&bind, port).unwrap_or_else(|e| platform::fatal(1, &format!("platmon-server: cannot listen on {}: {}", http::shown(&bind, port), e)));
     let s = sampler.clone();
     std::thread::Builder::new().name("sampler".into()).spawn(move || {
         static STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -206,7 +211,7 @@ fn serve(args: &[String]) {
     for g in &groups {
         g.start(observe::reader(&g.name, &cfg));
     }
-    println!("platmon http on {}:{}", bind, port);
+    println!("platmon http on {}", http::shown(&bind, port));
     let web = cfg.flag("http", "web").then_some(web_dir.clone()).flatten();
     match (&web, cfg.flag("http", "web")) {
         (Some(dir), _) => println!("platmon web page at / from {}", dir),
