@@ -116,14 +116,41 @@ the plan, not a decision. Each step that changes the release or the support scop
 - The `platmon` command crashed when piped on a non-UTF-8 code page; fixed in #213. Windows still has no
   way to install the command.
 
+**Steps 1 and 2 on the same laptop (2026-11-16 to 18):**
+
+- Failures (#216): a refused configuration or a panic goes to the event log (source `platmon`) and the
+  service reports its stop with the error; the guide's `sc.exe failure` line restarts it after a crash.
+  Restarting Windows logged the service as ended unexpectedly (event 7034) and counted a failure; fixed in
+  #221, not yet seen across a real restart.
+- `native/tools/deploy/windows_check.py` (#217) runs `deploy_check.py`'s checks on a candidate service
+  plus an upgrade from 1.8.2, and its soak, judged by `deploy_check.py report`'s rules (private bytes as
+  PSS, handles as fds). The checks passed 9 of 9 on each build below. In elevated runs, starting
+  `taskkill` was refused (WinError 5) in 5 of 8, cause unknown; the crash check then ends the process
+  with `TerminateProcess` (#223).
+- The accelerated soak (`soak --accel --hours 20`, about 6 h: 3 rounds of 4 concurrent pollers each hour,
+  a restart at hour 10), as the owner chose instead of 24 h:
+  - The default heap (`main` before #222): cut at hour 15 by a Windows Update restart, and already failing
+    the settled PSS rule. Settled private bytes moved between 32.9 and 63.7 MiB under the same load,
+    growing 653 and 3156 KiB per round against 64. The data held was constant and the peak flat, so it
+    was the heap keeping freed memory, not growth; a test program reproduced it, and the segment heap
+    did not. #222 asks for the segment heap.
+  - With the segment heap (`a34e4d8`), twice. Settled private bytes stayed between 25.6 and 27.9 MiB
+    in both; threads 10 to 14, handles 208 or 210, no lost or failed requests.
+    - Run 1 (2026-11-17/18) failed the rule by a hair: 15 KiB per round in hours 0 to 9, 66 in hours 10
+      to 19 (limit 64), from a rise of about 1.2 MiB over hours 15 to 19.
+    - Run 2 (2026-11-18), the same build and settings: passed, 24 and 5 KiB per round.
+    - The rule stays as set before the runs: run 2 shows no repeated growth, so run 1's rise reads as
+      noise.
+- Not done yet: `hub_check.py` on Windows, a 24 h soak.
+
 **What a supported platform lacks, against the Linux gate:**
 
 | | Linux (the release gate) | Windows now |
 | --- | --- | --- |
 | devices | x86_64 PC, Orin Nano, Raspberry Pi 4 | one laptop (Intel, Windows 11 26H2) |
-| deployment checks | `deploy_check.py checks`: restart, crash recovery, failed start and the rest (9) | none |
-| soak | `deploy_check.py soak --hours 24`: concurrent pollers, Hub-like requests, settled PSS rule | the ad-hoc 12 h run above |
-| failures | systemd `Restart=`, the journal | no recovery action, no log: a configuration error only stops the service |
+| deployment checks | `deploy_check.py checks`: restart, crash recovery, failed start and the rest (9) | `windows_check.py checks`: the same 9 with an upgrade, passed (above) |
+| soak | `deploy_check.py soak --hours 24`: concurrent pollers, Hub-like requests, settled PSS rule | `windows_check.py soak --accel` (about 6 h) passed once with the segment heap; no 24 h run, no `hub_check.py` |
+| failures | systemd `Restart=`, the journal | `sc.exe failure` (the guide), the event log (#216) |
 | install, upgrade, removal | apt, the edited `platmon.ini` kept | copied by hand and `sc.exe`; an upgrade never tried |
 | `platmon` command | `platmon-cli` package | none |
 | unchecked | named in native/README.md | Windows 10, more than 64 CPUs, a discrete GPU's temperature, S3 and hibernation |
