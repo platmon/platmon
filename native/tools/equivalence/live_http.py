@@ -19,12 +19,14 @@ the process it started is stopped (and restarted once), by its own handle.
 - replay from the start, page by page, as walk.py checks it: one instance and stream, ids rising strictly,
   every page explaining exactly the ids it moves the cursor over, the cursor moving while has_more and
   ending at latest_id; a walk that does not end within 50 pages fails
-- 16 clients × 20 requests at once: all 320 answers verified (200, JSON, a sample), no client error, one
+- 4 clients × 80 requests at once (each may hold two connections for a moment, its last and its next: one
+  address's share of 8): all 320 answers verified (200, JSON, a sample), no client error, one
   instance, sequences never going back, and no more collections than intervals (requests do not collect).
   A self-test runs first (`--self-test` alone): fake answers that time out, are not JSON, have no sample,
   are a 503 or go back after a client's first answer must each fail the check; walk.py's own self-test too
-- 40 idle connections, opened 20 ms apart: 32 held, the rest closed without an answer, a request refused
-  while 32 are held and answered after they close
+- idle connections, opened 20 ms apart: 10 from 127.0.0.1, of which 8 held and 2 closed without an answer,
+  while a request from 127.0.0.2 is answered; then 10 from each of 127.0.0.2 to 127.0.0.5, 32 held in all,
+  a request from 127.0.0.6 refused while 32 are held, and answered after they close
 - a request line cut off: the connection closed after the 10 s request timeout
 - 200 connections at once: handler threads stay within 32 more than before, the server answers again
   once they close, and its threads go back
@@ -115,7 +117,7 @@ def endpoints(port):
     return out
 
 
-def concurrent(port, interval, clients=16, requests=20, get=fetch):
+def concurrent(port, interval, clients=4, requests=80, get=fetch):
     """clients × requests /api/stats at once. Each answer is verified (HTTP 200, JSON, a sample with an int
     sequence and an instance id, the sequence not going back for its client); anything a client raises is
     collected, never lost in its thread. Passes only with every answer verified and no error."""
@@ -223,24 +225,60 @@ def closed(sock, wait):
         return False
 
 
-def connection_limit(port, total=40):
-    """Connections 20 ms apart: a burst meets the listen backlog of 5 first, and how its overflow is
-    accepted later depends on timing, not on the limit (the Python server then answered a request while
-    the client held 40 connections)."""
-    socks = []
-    for _ in range(total):
-        socks.append(socket.create_connection(("127.0.0.1", port)))
-        time.sleep(0.02)
-    time.sleep(0.5)
-    shut = sum(closed(s, 0.2) for s in socks)
-    extra = socket.create_connection(("127.0.0.1", port))
+def connection_limit(port, each=10, addresses=5):
+    """Idle connections 20 ms apart from loopback source addresses (Linux routes all of 127/8 to lo): a burst
+    meets the listen backlog of 5 first, and how its overflow is accepted later depends on timing, not on
+    the limits. First 127.0.0.1 alone, over its share of 8, while 127.0.0.2 asks; then the other addresses
+    until all 32 are held, while one more address asks."""
+    def connect(source):
+        return socket.create_connection(("127.0.0.1", port), source_address=(source, 0))
+
+    def shut(s):
+        """Closed by the server (EOF or reset) by now, without an answer: not waited for one by one, which
+        would let the first connections reach the 10 s request deadline before the last are opened."""
+        s.setblocking(False)
+        try:
+            return s.recv(1) == b""
+        except BlockingIOError:
+            return False
+        except ConnectionResetError:
+            return True
+
+    def opened(source):
+        socks = []
+        for _ in range(each):
+            socks.append(connect(source))
+            time.sleep(0.02)
+        time.sleep(0.5)
+        return socks, sum(shut(s) for s in socks)
+
+    def answered(source):
+        s = connect(source)
+        s.sendall(b"GET /api/status HTTP/1.0\r\n\r\n")
+        s.settimeout(5)
+        try:
+            return s.recv(12).startswith(b"HTTP/1.0 200")
+        except OSError:
+            return False
+        finally:
+            s.close()
+
+    socks, closed_one = opened("127.0.0.1")
+    other_answered = answered("127.0.0.2")
+    closed_all = closed_one
+    for i in range(2, addresses + 1):
+        more, closed_here = opened(f"127.0.0.{i}")
+        socks += more
+        closed_all += closed_here
+    extra = connect(f"127.0.0.{addresses + 1}")
     extra.sendall(b"GET /api/status HTTP/1.0\r\n\r\n")
     refused = closed(extra, 1.0)
     for s in socks + [extra]:
         s.close()
     time.sleep(0.5)
     after = fetch(port, "/api/status")[0]
-    return {"connections": total, "closed": shut, "refused_while_full": refused, "after": after}
+    return {"connections": each * addresses, "closed_from_one": closed_one, "other_answered": other_answered,
+            "closed": closed_all, "refused_while_full": refused, "after": after}
 
 
 def request_timeout(port):
@@ -459,7 +497,8 @@ def problems(r, stopped, restarted):
     out += [f"replay walk: {p}" for p in r["replay"]["problems"]]
     out += [f"concurrent: {p}" for p in r["concurrent"]["problems"]]
     lim = r["connection_limit"]
-    if lim["closed"] != lim["connections"] - 32 or not lim["refused_while_full"] or lim["after"] != 200:
+    if (lim["closed_from_one"] != 10 - 8 or not lim["other_answered"] or lim["closed"] != lim["connections"] - 32
+            or not lim["refused_while_full"] or lim["after"] != 200):
         out.append(f"connection limit: {lim}")
     rt = r["request_timeout"]
     if rt["answered"] or not 9.5 <= rt["closed_after_s"] <= 11.5:

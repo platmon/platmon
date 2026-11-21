@@ -4,7 +4,7 @@
 > - `/api/stats` is the latest snapshot (503 before the first one), `/api/status` the runtime state
 >   (always 200: check `ready`); `/api/observations`, `/api/history`, `/api/samples` and `/text` cover the
 >   rest.
-> - Requests never trigger a collection; at most 32 connections, 10 s to send the whole request (line and
+> - Requests never trigger a collection; at most 32 connections and 8 from one address, 10 s to send the whole request (line and
 >   headers), 10 s without progress per response write, no authentication.
 > - A request whose `Host` header names neither an address nor the device answers 421
 >   ([Host header](#host-header)).
@@ -31,8 +31,10 @@ One background thread collects a snapshot every `interval`; HTTP requests only r
 never collect on their own. `/api/stats` and `/text` wait up to 5 s for the first snapshot after the
 service starts; `/api/status` never waits.
 
-The HTTP server allows at most 32 active connections. Excess connections are closed before a request
-thread is created; clients can retry after an active connection finishes. Request reads time out after
+The HTTP server allows at most 32 active connections, and at most 8 of them from one client address, so
+that one host holding idle connections cannot keep the others out. Excess connections are closed before a
+request thread is created; clients can retry after an active connection finishes. Clients behind one
+address (a NAT, a proxy) share its 8. Request reads time out after
 10 s without input. Response writes time out after 10 s without send progress; a steadily transferring
 response may take longer overall. Disconnected or stalled clients release their connection slots.
 
