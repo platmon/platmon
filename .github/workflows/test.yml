@@ -79,11 +79,20 @@ jobs:
         run: cargo build --release --locked --no-default-features
       - name: Smoke test
         run: python tools/windows_smoke.py target/release/platmon-server.exe
-      # The experimental zip packages this binary (scripts/packaging/package_windows.py).
+      # The installer of this binary, with Windows Installer itself (scripts/packaging/package_msi.py); the smoke
+      # test installed, upgraded and removed packages built the same way.
+      - name: Installer
+        run: python ../scripts/packaging/package_msi.py --binary target/release/platmon-server.exe --output target/msi
+      # The zip packages this binary (scripts/packaging/package_windows.py), the installer beside it.
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server-windows
           path: native/target/release/platmon-server.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platmon-msi-windows
+          path: native/target/msi/*.msi
           if-no-files-found: error
 
   package:
@@ -102,10 +111,14 @@ jobs:
         with:
           name: platmon-server-windows
           path: native/target/release
+      - uses: actions/download-artifact@v4
+        with:
+          name: platmon-msi-windows
+          path: native/target/msi
       - name: Install package policy checker
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lintian
       - run: python3 scripts/packaging/package.py --output dist/first
-      - run: python3 scripts/packaging/package_windows.py --output dist/first
+      - run: python3 scripts/packaging/package_windows.py --output dist/first --msi native/target/msi/platmon-$(cat VERSION)-windows-x86_64.msi
       - run: python3 scripts/packaging/package.py --revision 2 --output dist/second
       - name: Check package policy
         run: lintian --no-cfg --info --pedantic --fail-on error,warning dist/first/*.deb dist/second/*.deb

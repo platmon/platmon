@@ -218,6 +218,10 @@ the plan, not a decision. Each step that changes the release or the support scop
    (`ServiceInstall`, `ServiceControl`, `Environment`), no custom action DLLs, so that none of WiX's code
    ships in it; WiX's license (MS-RL) is to be checked against the dependency rules first. An unsigned
    installer meets SmartScreen warnings: signing needs a certificate and its key in CI (owner).
+   **Decided (owner, 2026-11-21):** an MSI, unsigned. WiX is MS-RL, outside the dependency rules, and its
+   binaries carry a separate maintenance-fee agreement (OSMF), so the MSI is built with Windows Installer
+   itself (`msi.dll` through ctypes, `makecab.exe`; `scripts/packaging/package_msi.py`) from MSI's own
+   tables, no custom actions. Step 3 needs no further device unless a user asks for one (owner, 2026-11-21).
 5. **The switch:** the support table, native/README.md, the zip's name and README, and the release check
    that requires "experimental" changed together, with the supported scope and its known gaps (no CPU
    temperature among them) stated (owner).

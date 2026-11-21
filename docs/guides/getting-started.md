@@ -116,8 +116,18 @@ Since 1.8.0 each release also has `platmon-<version>-windows-x86_64-experimental
 Windows 11 x86_64 (Windows 10 was not checked). From the release after 1.9.0 the server links the C runtime
 statically and needs nothing installed first; the 1.8.0 to 1.9.0 zips need the
 [Visual C++ 2015-2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe), which the zip
-does not include; without it the server does not start (`vcruntime140.dll` was not found). There is no
-installer.
+does not include; without it the server does not start (`vcruntime140.dll` was not found).
+
+From the release after 1.9.0 there is also an installer, `platmon-<version>-windows-x86_64.msi`. Check it
+against `SHA256SUMS`, then double-click it (it asks for administrator rights) or, in an administrator shell,
+`msiexec /i platmon-<version>-windows-x86_64.msi /qn`. It puts the server, `platmon.ini` (listening on
+`127.0.0.1`), the web page and the `platmon` command in `C:\Program Files\platmon`, adds that folder to the
+system `PATH`, registers the event log source and installs and starts the service `platmon` with the recovery
+actions below. A newer installer upgrades it and keeps an edited `platmon.ini`; an older one refuses to install
+over a newer version. Remove it in Settings > Apps, or with `msiexec /x` and the same file; `platmon.ini` stays.
+A service installed by `install-service.cmd` (below) is removed with `uninstall-service.cmd` first: the
+installer cannot take over a service it did not create. The installer is not signed, so SmartScreen may show
+"Windows protected your PC" (More info, Run anyway) after you have compared its hash.
 
 Download the zip and `SHA256SUMS` from [GitHub Releases](https://github.com/platmon/platmon/releases), compare
 the hash in PowerShell, and unpack it:

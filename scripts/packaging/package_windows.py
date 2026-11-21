@@ -5,7 +5,7 @@ platmon-VERSION-windows-x86_64-experimental.zip: the server built by CI's native
 runtime linked statically, so it needs no Visual C++ Redistributable), the web page, platmon.ini listening on
 127.0.0.1 only, the licenses, a README, the terminal client (cli.py, run by platmon.cmd with the Python on PATH)
 and packaging/windows's scripts: start.cmd (serve as the user, open the browser) and install-service.cmd /
-uninstall-service.cmd (the service, in Program Files). No installer (the owner's decisions,
+uninstall-service.cmd (the service, in Program Files). The installer is package_msi.py's (the owner's decisions,
 docs/development/remaining-work.md, "Windows build"). Its checksum is added to the SHA256SUMS package.py
 wrote, and the server's to its BUILD.json (whose own checksum line follows).
 """
@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import time
 import zipfile
 
@@ -220,9 +221,10 @@ def check_changelog(text, release):
         raise ValueError(f"the {release} changelog entry must call the Windows zip experimental")
 
 
-def build(output, binary=None, root=ROOT, epoch=None):
+def build(output, binary=None, root=ROOT, epoch=None, msi=None):
     """Write the zip into `output` (package.py's directory, with its SHA256SUMS and BUILD.json), add its
-    checksum and the server's."""
+    checksum and the server's; with msi (package_msi.py's installer of the same release, built on Windows),
+    copy it there too and add its checksum."""
     release = version(root)
     epoch = packaging_epoch(root) if epoch is None else epoch
     # zip times are local DOS times from 1980; the UTC fields of the epoch keep repeat builds equal
@@ -249,7 +251,14 @@ def build(output, binary=None, root=ROOT, epoch=None):
     sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
     lines = [f"{sha(manifest)}  BUILD.json" if line.endswith("  BUILD.json") else line
              for line in sums.read_text(encoding="utf-8").splitlines()]
-    sums.write_bytes("".join(f"{line}\n" for line in lines + [f"{sha(target)}  {target.name}"]).encode())
+    added = [target]
+    if msi is not None:
+        msi = Path(msi)
+        if msi.name != f"platmon-{release}-windows-x86_64.msi" or not msi.is_file():
+            raise ValueError(f"{msi}: not the installer of {release} (platmon-{release}-windows-x86_64.msi)")
+        added.append(output / msi.name)
+        shutil.copyfile(msi, added[-1])
+    sums.write_bytes("".join(f"{line}\n" for line in lines + [f"{sha(p)}  {p.name}" for p in added]).encode())
     return target
 
 
@@ -257,11 +266,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", default=str(ROOT / "dist"), help="package.py's output directory (default dist)")
     parser.add_argument("--binary", help="the Windows server (default native/target/release/platmon-server.exe)")
+    parser.add_argument("--msi", help="package_msi.py's installer of this release, to add beside the zip")
     parser.add_argument("--version", action="version", version=version())
     args = parser.parse_args()
     try:
         value = os.environ.get("SOURCE_DATE_EPOCH")
-        target = build(args.output, args.binary, epoch=int(value) if value is not None else None)
+        target = build(args.output, args.binary, epoch=int(value) if value is not None else None, msi=args.msi)
     except (ValueError, OSError) as e:
         parser.exit(1, f"Windows zip build failed: {e}\n")
     print(target)

@@ -703,8 +703,17 @@ and their status: [remaining work](../docs/development/remaining-work.md#windows
 `platmon.ini` with `bind = 127.0.0.1`, `LICENSE`, `LICENSE-MIT` (the Rust standard library and the crates),
 a `README.txt` (running it, the service, what was and was not checked) and `packaging/windows/`'s scripts:
 `start.cmd` (serve as the user, open the browser), `install-service.cmd` and `uninstall-service.cmd`
-(administrator: the service `platmon` in `C:\Program Files\platmon`, an edited `platmon.ini` kept). No
-installer. Since the release after 1.9.0 the binary links the C runtime statically (CI's
+(administrator: the service `platmon` in `C:\Program Files\platmon`, an edited `platmon.ini` kept). Beside
+it, from the release after 1.9.0, `platmon-VERSION-windows-x86_64.msi`: `scripts/packaging/package_msi.py`
+builds it on CI's Windows runner with Windows Installer itself (`msi.dll` through ctypes, `makecab.exe`), no
+WiX (MS-RL, outside the dependency rules) and no custom actions: MSI's own tables install the same files
+(not the zip's scripts and README), the service with the guide's recovery actions (the failure-actions
+flag through `MsiServiceConfig`; the restarts through the guide's `sc.exe failure` line, one deferred action
+from System32, as `MsiServiceConfigFailureActions` fails with access denied for restart actions), the event log source
+(`Registry`) and the folder on the system `PATH` (`Environment`); `platmon.ini` is permanent and never
+overwritten, so an edit survives upgrades and removal. Each version is a major upgrade (one `UpgradeCode`);
+an older package refuses to install over a newer one. Unsigned. `tools/windows_smoke.py` installs, upgrades,
+downgrades (refused) and removes packages built the same way. Since the release after 1.9.0 the binary links the C runtime statically (CI's
 `RUSTFLAGS="-C target-feature=+crt-static"`), so it needs no Visual C++ Redistributable; the packager refuses
 one that imports the runtime's DLLs (the owner's decision, 2026-11-14). `src/platform/`
 holds what the service needs from the OS outside the collectors: the elapsed clocks, random bytes for the
@@ -811,8 +820,8 @@ On `x86_64-pc-windows-msvc`:
   found, and `Get-WinEvent -LogName Application -FilterXPath "*[System[Provider[@Name='platmon']]]"` reads
   it as `Properties[0]`. Restarting is the service control manager's recovery actions, set with
   `sc.exe failure` (a crash) and `sc.exe failureflag` (an error exit too), as the guide shows; with them a
-  crash restarts it as `Restart=on-failure` does on Linux. Not provided: an installer and a default
-  configuration path. CI's smoke test creates and starts it, kills it and sees it restarted, stops it, and
+  crash restarts it as `Restart=on-failure` does on Linux; the installer sets them itself. Not provided: a
+  default configuration path. CI's smoke test creates and starts it, kills it and sees it restarted, stops it, and
   starts it with a configuration it refuses.
 - Exposure: as on Linux, the API has no authentication and `[http] bind` defaults to `0.0.0.0`, so a
   service started with the defaults answers every host that can reach port 9797, with the host name, model
