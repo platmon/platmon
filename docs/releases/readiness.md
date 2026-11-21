@@ -4,8 +4,8 @@
 > - Release gates and evidence per version, newest first (1.10.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.10.0, Windows 11 supported with an installer, IPv6, a per-address connection limit, query strings
->   ignored on fixed paths and a Prometheus exporter: being prepared (2026-11-21); the evidence so far and what
->   is open are in its gate below.
+>   ignored on fixed paths and a Prometheus exporter: being prepared (2026-11-21). Its CI packages passed the
+>   Orin's package smoke and live HTTP (2026-11-21); the rest of the evidence and what is open are in its gate.
 > - 1.9.0, the experimental Windows service's failures, shutdown and memory and two fixes on every platform:
 >   published 2026-11-18 and in the APT repository. Its Windows service passed `windows_check.py checks` and an
 >   accelerated soak on the test laptop; the release workflow ran the Linux checks. The Windows 24 h soak and
@@ -56,11 +56,11 @@ Verified for this release so far:
 | `bind = ::` (WSL2) | IPv6 answered, IPv4 refused, `health` asks `::1` |
 | the installer on the desktop (Core i5-13600KF, Windows 11 25H2), 1.9.0's server with the static runtime | install, upgrade to a 1.9.1 build, the older package refused (1603), removal, reinstall; recovery 5/5/60 s and the failure flag, event source, PATH, an edited `platmon.ini` kept |
 | the Windows promotion evidence (#228; remaining-work.md) | the desktop's checks 9/9, `hub_check.py`, S3, hibernation, Windows restarts, 24 h soak PASS (1.9.0's server) |
+| on the Jetson Orin Nano (L4T R36.5.2, Ubuntu 22.04.5, Python 3.10), in a temporary directory beside the production 1.8.2 service, 2026-11-21 15:30 KST | the CI packages of `b7466cc` (checksums matched): `check_package.py` on `platmon_1.10.0-1_arm64.deb` and platmon-cli: smoke passed (server, CLI, API, web and SVG); the deb's aarch64 server (`9a245c44896afc39`, the same as CI's artifact): `live_http.py` no differences, the connection limit (8 from one address, another answered, 32 in all, then refused), `/api/stats?x=1` 200, 320 of 320 concurrent answers verified, a burst of 200: threads 5 → 13 → 5; the production service untouched (active, `NRestarts=0`) |
 
-Not verified, and therefore open: the release's own Linux packages on the Orin (package smoke, live HTTP), a 24 h
-soak of this release's server on Linux or Windows (the last ones ran 1.8.1 on the Orin and 1.9.0 on the
-desktop), the release's own zip and installer on a real PC (CI ran them on its runner), armhf on a real
-device. The tag waits for the owner.
+Not verified, and therefore open: a 24 h soak of this release's server on Linux or Windows (the last ones ran
+1.8.1 on the Orin and 1.9.0 on the desktop), the release's own zip and installer on a real PC (CI ran them on
+its runner), armhf on a real device. The tag waits for the owner.
 
 ## 1.9.0 release gate (2026-11-18)
 
