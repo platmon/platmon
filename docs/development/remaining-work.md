@@ -7,9 +7,11 @@
 >   `.rpm` release files and battery follow-ups; 1.8.1, the frontends' design on its server, released
 >   2026-11-13; its root candidate unit passed the checks, `hub_check.py` and a 24 h soak on the Orin.
 > - Windows: the real-PC checks passed on 2026-11-01 except two without the hardware, accepted as known
->   gaps. Linux: armhf on a real device, a remote probe target.
-> - Windows as a supported platform: proposed 2026-11-16 after a 12 h run of 1.8.2's service; the plan and
->   what it lacks against the Linux gate are [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16).
+>   gaps; one of them, a discrete GPU's temperature, passed on a desktop on 2026-11-19. Linux: armhf on a
+>   real device, a remote probe target.
+> - Windows as a supported platform: proposed 2026-11-16 after a 12 h run of 1.8.2's service; steps 1 and 2
+>   of its plan are done (on a desktop, 2026-11-19 to 21: `hub_check.py`, a 24 h soak, S3 and hibernation);
+>   the plan and what it lacks against the Linux gate are [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16).
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
 > - Also recorded, not started: a desktop tray frontend and a separate network process (deferred; no
 >   Unix socket).
@@ -75,7 +77,7 @@ language, non-admin unless stated). CI runs on a VM, which has none of these dev
 | CPU clock against Task Manager's formula | passed after #115 | the registry base was wrong on hybrid CPUs (P-cores up to 5.85 GHz); now `% Processor Performance × Processor Frequency` |
 | GPU usage and clocks | passed (#116) | usage near the busiest-engine counter; clocks 650–750 MHz / 2.25 GHz when the driver reports them |
 | drive temperature | passed (2026-11-01) | administrator shell: `Get-StorageReliabilityCounter` 64 and 63 °C before and after, platmon 64.0 °C between (SN810); the card reader reports 0 and platmon leaves it out |
-| GPU temperature | **not checked: known gap** | an integrated GPU reports none (as in Task Manager); needs a discrete GPU |
+| GPU temperature | **not checked: known gap**; passed on a desktop (2026-11-19, [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16)) | an integrated GPU reports none (as in Task Manager); needs a discrete GPU |
 | disk counters without admin | passed | |
 | storage, battery, Wi-Fi against Windows's own tools | passed (#120, #121, #123) | `Get-Volume` / `Get-Partition`, WMI battery classes, `netsh wlan` |
 | history on a laptop | passed after #124 | 48 series, nothing dropped |
@@ -122,7 +124,7 @@ the plan, not a decision. Each step that changes the release or the support scop
 - Failures (#216): a refused configuration or a panic goes to the event log (source `platmon`) and the
   service reports its stop with the error; the guide's `sc.exe failure` line restarts it after a crash.
   Restarting Windows logged the service as ended unexpectedly (event 7034) and counted a failure; fixed in
-  #221, not yet seen across a real restart.
+  #221, seen across real restarts on the desktop below.
 - `native/tools/deploy/windows_check.py` (#217) runs `deploy_check.py`'s checks on a candidate service
   plus an upgrade from 1.8.2, and its soak, judged by `deploy_check.py report`'s rules (private bytes as
   PSS, handles as fds). The checks passed 9 of 9 on each build below. In elevated runs, starting
@@ -142,19 +144,58 @@ the plan, not a decision. Each step that changes the release or the support scop
     - Run 2 (2026-11-18), the same build and settings: passed, 24 and 5 KiB per round.
     - The rule stays as set before the runs: run 2 shows no repeated growth, so run 1's rise reads as
       noise.
-- Not done yet: `hub_check.py` on Windows, a 24 h soak.
+- `hub_check.py` on Windows and a 24 h soak: done on the desktop below.
+
+**A second device: a desktop (2026-11-19 to 21, 1.9.0's zip):**
+
+- Intel Core i5-13600KF (hybrid, 20 threads), NVIDIA GeForce RTX 4070 Ti (driver 32.0.16.1088), two NVMe
+  drives (WD_BLACK SN850X, Samsung 980 PRO), two SATA drives (Samsung 850 EVO, a WD20EZRZ hard disk), Intel
+  Wi-Fi 6 AX201, no battery; Windows 11 Home 25H2 (10.0.26200), Korean display language; WSL2 with mirrored
+  networking and Docker Desktop installed.
+- Installed as documented: checksum, `sc.exe create`, the recovery actions, the event log source, the user
+  `PATH`. A platmon running in WSL2 held port 9797, since mirrored networking shares the host's ports: the
+  service could not listen (event 1, exit code 1) and the recovery actions started it once that platmon was
+  stopped.
+- Against Windows's own tools, 12 readings 5 s apart: the GPU's temperature 40.1–41.8 °C against
+  `nvidia-smi`'s 40–42, its clock the same as `nvidia-smi`'s at the same moment (210 MHz in P8, 2610 MHz in
+  P0), the Wi-Fi signal within 2 dB of `netsh wlan`'s RSSI (−60 to −64 dBm), the NVMe drives' temperatures
+  as `Get-StorageReliabilityCounter`'s (44 and 45 °C). The SATA drives answer
+  `StorageDeviceTemperatureProperty` with `ERROR_INVALID_FUNCTION`, so platmon reports no temperature for
+  them (`not_exposed`); in an administrator shell Windows shows the hard disk's 31 °C from SMART, which
+  would be a new source.
+- Real restarts: Windows Update restarted the PC three times between 02:48 and 02:50 on 2026-11-20, with
+  the service running since the evening before. The System log has no 7034 or 7031 for `platmon`, and it
+  was running after: #221 across a real restart.
+- Sleep and resume while serving, woken by a wake timer, with an ad-hoc script polling every 0.5 s (kept
+  with the records below), same instance throughout:
+  - S3 (hybrid sleep, this desktop's setting), asleep 127 s: uptime +128.0 s for +125.6 s of wall time
+    between the polls around it. The first two answers `stale` (data age 127 s, `/api/stats` 503), ready
+    1.0 s after resume with gap readings for one second, then none in 159 polls.
+  - Hibernation, asleep 197 s: uptime +196.7 s for +195.5 s; ready at once with one gap reading, then none
+    in 161 polls.
+- `windows_check.py checks --previous` 1.8.2's binary: 9 of 9 (`taskkill` started this time; back in
+  5.35 s).
+- `hub_check.py` in its Windows mode (#227) with platmon-hub 1.2.0 against 1.9.0 as the candidate service,
+  the full 13 min: passed. 4 of 4 instances stored, `agent_restart_unknown_extent` 3 per stream, 56 core
+  publications from the Hub's 60 s down stored after it, the core cursor at the agent's latest id.
+- `windows_check.py soak --hours 24` (the full phases, not `--accel`; 2026-11-20/21, the PC kept awake
+  by the tool's wrapper): **PASS**. Settled private bytes 24.3 to 25.7 MiB, −32 and −28 KiB per round in
+  hours 0 to 11 and 12 to 23 (limit 64); concurrency peaks 54 to 78 MiB; threads 9 to 11, handles 167 to
+  169; CPU 1.3 to 1.7 % of a core per hour (one hour without a reading); no loss, no automatic restart.
+- Raw records on that PC: `%LOCALAPPDATA%\platmon-measure\windows-desktop-1.9.0-20261119\` (SHA256SUMS
+  there).
 
 **What a supported platform lacks, against the Linux gate:**
 
 | | Linux (the release gate) | Windows now |
 | --- | --- | --- |
-| devices | x86_64 PC, Orin Nano, Raspberry Pi 4 | one laptop (Intel, Windows 11 26H2) |
-| deployment checks | `deploy_check.py checks`: restart, crash recovery, failed start and the rest (9) | `windows_check.py checks`: the same 9 with an upgrade, passed (above) |
-| soak | `deploy_check.py soak --hours 24`: concurrent pollers, Hub-like requests, settled PSS rule | `windows_check.py soak --accel` (about 6 h) passed once with the segment heap; no 24 h run, no `hub_check.py` |
+| devices | x86_64 PC, Orin Nano, Raspberry Pi 4 | a laptop (Intel, Windows 11 26H2) and a desktop (Intel, NVIDIA GPU, Windows 11 25H2) |
+| deployment checks | `deploy_check.py checks`: restart, crash recovery, failed start and the rest (9) | `windows_check.py checks`: the same 9 with an upgrade, passed on both (above) |
+| soak | `deploy_check.py soak --hours 24`: concurrent pollers, Hub-like requests, settled PSS rule | `windows_check.py soak --hours 24` and `hub_check.py` passed on the desktop (1.9.0); `--accel` on the laptop |
 | failures | systemd `Restart=`, the journal | `sc.exe failure` (the guide), the event log (#216) |
-| install, upgrade, removal | apt, the edited `platmon.ini` kept | copied by hand and `sc.exe`; an upgrade never tried |
-| `platmon` command | `platmon-cli` package | none |
-| unchecked | named in native/README.md | Windows 10, more than 64 CPUs, a discrete GPU's temperature, S3 and hibernation |
+| install, upgrade, removal | apt, the edited `platmon.ini` kept | copied by hand and `sc.exe`; the binary replaced under the service by `windows_check.py`'s upgrade check, no installer |
+| `platmon` command | `platmon-cli` package | in the zip from 1.9.0 (#219), with Python 3.9+ on `PATH`; no installer |
+| unchecked | named in native/README.md | Windows 10, more than 64 CPUs, an AMD CPU, SATA drives' temperatures (SMART) |
 
 **Plan, in order:**
 
@@ -174,7 +215,8 @@ the plan, not a decision. Each step that changes the release or the support scop
    that requires "experimental" changed together, with the supported scope and its known gaps (no CPU
    temperature among them) stated (owner).
 
-Steps 1 and 2 can be done on this laptop; step 3 needs the hardware; 4 and 5 follow their results.
+Steps 1 and 2 are done (above). Step 3 has a desktop with a discrete GPU; whether an AMD CPU or Windows 10
+is also needed is the owner's call. 4 and 5 follow.
 
 ## Linux releases
 
