@@ -669,7 +669,9 @@ mod tests {
 
     #[test]
     fn concurrent_reads_never_collect() {
-        let (addr, calls) = server(|s| s.max_per_address = 16); // its 16 clients are all 127.0.0.1
+        // its 16 clients are all 127.0.0.1, and one may open its next connection before the server has given
+        // back the slot of its last: the share is the whole, as before the per-address limit
+        let (addr, calls) = server(|s| s.max_per_address = s.max_connections);
         std::thread::sleep(Duration::from_millis(100));
         let t0 = std::time::Instant::now();
         let before = calls.load(Ordering::SeqCst);

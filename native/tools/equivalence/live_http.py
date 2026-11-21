@@ -19,7 +19,8 @@ the process it started is stopped (and restarted once), by its own handle.
 - replay from the start, page by page, as walk.py checks it: one instance and stream, ids rising strictly,
   every page explaining exactly the ids it moves the cursor over, the cursor moving while has_more and
   ending at latest_id; a walk that does not end within 50 pages fails
-- 8 clients × 40 requests at once (one address's share of connections): all 320 answers verified (200, JSON, a sample), no client error, one
+- 4 clients × 80 requests at once (each may hold two connections for a moment, its last and its next: one
+  address's share of 8): all 320 answers verified (200, JSON, a sample), no client error, one
   instance, sequences never going back, and no more collections than intervals (requests do not collect).
   A self-test runs first (`--self-test` alone): fake answers that time out, are not JSON, have no sample,
   are a 503 or go back after a client's first answer must each fail the check; walk.py's own self-test too
@@ -116,7 +117,7 @@ def endpoints(port):
     return out
 
 
-def concurrent(port, interval, clients=8, requests=40, get=fetch):
+def concurrent(port, interval, clients=4, requests=80, get=fetch):
     """clients × requests /api/stats at once. Each answer is verified (HTTP 200, JSON, a sample with an int
     sequence and an instance id, the sequence not going back for its client); anything a client raises is
     collected, never lost in its thread. Passes only with every answer verified and no error."""
