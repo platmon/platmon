@@ -5,7 +5,8 @@
 >   Debian-derived host with systemd; the `platmon` command (`platmon-cli`, installed with it) needs Python 3.9+.
 > - Then run `platmon`, open `http://<device>:9797`, or `curl` `/api/status`.
 > - Settings live in `/etc/platmon/platmon.ini`; the API has no authentication.
-> - Windows 11 (x86_64) has an experimental, unsupported zip of the server: [Windows (experimental)](#windows-experimental).
+> - Windows 11 (x86_64) has an experimental, unsupported zip of the server; from the release after 1.9.0,
+>   double-click `start.cmd`: [Windows (experimental)](#windows-experimental).
 
 platmon is a device-side monitor: one background service reads host metrics and publishes
 snapshots. The `platmon` terminal client, web dashboard and HTTP clients all read the same
@@ -112,7 +113,8 @@ on another computer. Which Hub release reads which platmon release, and what che
 Since 1.8.0 each release also has `platmon-<version>-windows-x86_64-experimental.zip`: the server
 (`platmon-server.exe`), the web page, a `platmon.ini` that listens on `127.0.0.1` only, the licenses and a
 `README.txt`. It is **not supported**: it was checked in CI and on one Windows 11 laptop. It needs
-Windows 11 x86_64 (Windows 10 was not checked) and the
+Windows 11 x86_64 (Windows 10 was not checked). From the release after 1.9.0 the server links the C runtime
+statically and needs nothing installed first; the 1.8.0 to 1.9.0 zips need the
 [Visual C++ 2015-2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe), which the zip
 does not include; without it the server does not start (`vcruntime140.dll` was not found). There is no
 installer.
@@ -130,6 +132,19 @@ cd .\platmon-<version>-windows-x86_64
 
 Then open `http://127.0.0.1:9797/`; Ctrl+C stops it. `.\platmon-server.exe config-check platmon.ini` prints
 the settings it would use.
+
+From the release after 1.9.0 the zip has scripts for both:
+
+- **Try it:** double-click `start.cmd`. It serves the folder's `platmon.ini` (listening on 127.0.0.1 only)
+  and web page as your user and opens `http://127.0.0.1:9797/`; closing its window stops it.
+- **Keep it running:** right-click `install-service.cmd`, *Run as administrator*. It copies the server,
+  `platmon.ini`, the web page and the `platmon` command to `C:\Program Files\platmon`, creates the Windows
+  service `platmon` with the recovery actions below, registers the event log source and starts it; it starts
+  with Windows. Run it again from a newer zip to upgrade; it keeps the `platmon.ini` there.
+  `uninstall-service.cmd`, also as administrator, removes the service, its files but `platmon.ini`, and the
+  event log source.
+
+The rest of this section is what those scripts do, by hand, and what the earlier zips need.
 
 To run it as a Windows service, first copy the folder's contents to `C:\Program Files\platmon`. The service
 runs as LocalSystem, so it must not run from a folder your user can write (Downloads, Desktop): a program
