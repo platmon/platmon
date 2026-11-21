@@ -6,11 +6,13 @@ is built; tables() is plain data and is tested on any platform.
 
   package_msi.py --binary platmon-server.exe --output DIR [--version X.Y.Z]
 
-What it installs, with MSI's own tables only (no custom actions): the zip's server, platmon.ini (listening on
+What it installs, with MSI's own tables and no custom action DLL: the zip's server, platmon.ini (listening on
 127.0.0.1), the web page, the licenses and the platmon command (cli.py, platmon.cmd) in
-C:\\Program Files\\platmon; the service platmon (LocalSystem, automatic) with the guide's recovery actions
-(MsiServiceConfigFailureActions, MsiServiceConfig's failure-actions flag), started at the end; the event log
-source (Registry); the folder on the system PATH (Environment). An edited platmon.ini is kept on upgrade and
+C:\\Program Files\\platmon; the service platmon (LocalSystem, automatic) with the guide's recovery actions,
+started at the end; the event log source (Registry); the folder on the system PATH (Environment). The
+failure-actions flag is MsiServiceConfig's; the restart actions are the guide's sc.exe failure line, run by
+one deferred action from System32 (MsiServiceConfigFailureActions fails with access denied for restart
+actions: Windows Installer opens the service without SERVICE_START, which ChangeServiceConfig2 needs for them). An edited platmon.ini is kept on upgrade and
 left on removal. Each version is a major upgrade of the earlier ones (the same UpgradeCode); a newer one
 installed refuses an older package."""
 import argparse
@@ -58,10 +60,7 @@ SCHEMA = {  # table: (columns as IDT types, primary key columns); the Windows In
                         ("Wait", "I2"), ("Component_", "s72")], ["ServiceControl"]),
     "MsiServiceConfig": ([("MsiServiceConfig", "s72"), ("Name", "l255"), ("Event", "i2"), ("ConfigType", "i4"),
                           ("Argument", "L0"), ("Component_", "s72")], ["MsiServiceConfig"]),
-    "MsiServiceConfigFailureActions": ([("MsiServiceConfigFailureActions", "s72"), ("Name", "l255"), ("Event", "i2"),
-                                        ("ResetPeriod", "I4"), ("RebootMessage", "L255"), ("Command", "L255"),
-                                        ("Actions", "S255"), ("DelayActions", "S255"), ("Component_", "s72")],
-                                       ["MsiServiceConfigFailureActions"]),
+    "CustomAction": ([("Action", "s72"), ("Type", "i2"), ("Source", "S72"), ("Target", "S255")], ["Action"]),
     "Registry": ([("Registry", "s72"), ("Root", "i2"), ("Key", "l255"), ("Name", "L255"), ("Value", "L0"),
                   ("Component_", "s72")], ["Registry"]),
     "Environment": ([("Environment", "s72"), ("Name", "l255"), ("Value", "L255"), ("Component_", "s72")], ["Environment"]),
@@ -78,7 +77,7 @@ EXECUTE = [("FindRelatedProducts", 25), ("LaunchConditions", 100), ("CostInitial
            ("ProcessComponents", 1600), ("StopServices", 1900), ("DeleteServices", 2000), ("RemoveRegistryValues", 2600),
            ("RemoveEnvironmentStrings", 3300), ("RemoveFiles", 3500), ("InstallFiles", 4000), ("WriteRegistryValues", 5000),
            ("WriteEnvironmentStrings", 5200), ("InstallServices", 5800), ("MsiConfigureServices", 5850),
-           ("StartServices", 5900), ("RegisterProduct", 6100), ("PublishFeatures", 6300), ("PublishProduct", 6400),
+           ("ConfigureRecovery", 5860), ("StartServices", 5900), ("RegisterProduct", 6100), ("PublishFeatures", 6300), ("PublishProduct", 6400),
            ("InstallFinalize", 6600)]
 UI = [("FindRelatedProducts", 25), ("LaunchConditions", 100), ("CostInitialize", 800), ("FileCost", 900),
       ("CostFinalize", 1000), ("ExecuteAction", 1300)]
@@ -111,7 +110,7 @@ def tables(files, release):
     dirs = {"": "INSTALLDIR"}
     t = {name: [] for name in SCHEMA}
     t["Directory"] += [("TARGETDIR", None, "SourceDir"), ("ProgramFiles64Folder", "TARGETDIR", "."),
-                       ("INSTALLDIR", "ProgramFiles64Folder", "platmon")]
+                       ("INSTALLDIR", "ProgramFiles64Folder", "platmon"), ("System64Folder", "TARGETDIR", ".")]
     for n, (path, body) in enumerate(f for f in files if f[0] not in LEFT_OUT):
         folder, _, name = path.rpartition("/")
         parent = ""
@@ -142,9 +141,10 @@ def tables(files, release):
                                 "platmon, a lightweight platform monitor"))
     # start on install (1), stop on install (2) and removal (32), delete on removal (128); wait for each
     t["ServiceControl"].append(("platmon", "platmon", 1 | 2 | 32 | 128, None, 1, server))
-    # the guide's sc.exe failure ... restart/5000/restart/5000/restart/60000, reset after a day, on install
-    t["MsiServiceConfigFailureActions"].append(("platmon_failure", "platmon", 1, 86400, None, None,
-                                                "1[~]1[~]1", "5000[~]5000[~]60000", server))
+    # the guide's sc.exe failure line, from System32 after the service is installed: an executable in a directory
+    # (34), deferred (1024), as LocalSystem (2048); a failure fails the installation
+    t["CustomAction"].append(("ConfigureRecovery", 34 | 1024 | 2048, "System64Folder",
+                              '"[System64Folder]sc.exe" failure platmon reset= 86400 actions= restart/5000/restart/5000/restart/60000'))
     # sc.exe failureflag platmon 1: also after an error exit, not only a crash (SERVICE_CONFIG_FAILURE_ACTIONS_FLAG)
     t["MsiServiceConfig"].append(("platmon_failureflag", "platmon", 1, 4, "1", server))
     # HKLM (2); "#%": REG_EXPAND_SZ, so %SystemRoot% stays for Windows to expand
@@ -156,7 +156,8 @@ def tables(files, release):
                      (UPGRADE_CODE, release, None, None, 2, None, "NEWERFOUND")]
     t["LaunchCondition"] += [("VersionNT64", "platmon needs 64-bit Windows."),
                              ("NOT NEWERFOUND", "A newer platmon is already installed.")]
-    t["InstallExecuteSequence"] += [(a, None, s) for a, s in EXECUTE]
+    when = {"ConfigureRecovery": 'NOT REMOVE~="ALL"'}  # not on removal: the service is being deleted
+    t["InstallExecuteSequence"] += [(a, when.get(a), s) for a, s in EXECUTE]
     t["InstallUISequence"] += [(a, None, s) for a, s in UI]
     return t
 

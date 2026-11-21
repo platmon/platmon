@@ -707,8 +707,9 @@ a `README.txt` (running it, the service, what was and was not checked) and `pack
 it, from the release after 1.9.0, `platmon-VERSION-windows-x86_64.msi`: `scripts/packaging/package_msi.py`
 builds it on CI's Windows runner with Windows Installer itself (`msi.dll` through ctypes, `makecab.exe`), no
 WiX (MS-RL, outside the dependency rules) and no custom actions: MSI's own tables install the same files
-(not the zip's scripts and README), the service with the guide's recovery actions
-(`MsiServiceConfigFailureActions`, `MsiServiceConfig`'s failure-actions flag), the event log source
+(not the zip's scripts and README), the service with the guide's recovery actions (the failure-actions
+flag through `MsiServiceConfig`; the restarts through the guide's `sc.exe failure` line, one deferred action
+from System32, as `MsiServiceConfigFailureActions` fails with access denied for restart actions), the event log source
 (`Registry`) and the folder on the system `PATH` (`Environment`); `platmon.ini` is permanent and never
 overwritten, so an edit survives upgrades and removal. Each version is a major upgrade (one `UpgradeCode`);
 an older package refuses to install over a newer one. Unsigned. `tools/windows_smoke.py` installs, upgrades,

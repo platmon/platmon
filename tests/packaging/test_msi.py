@@ -35,7 +35,7 @@ def test_every_table_fits_its_schema_and_its_references_resolve():
     assert all(r[1] in dirs for r in t["Directory"] if r[1]) and all(c[2] in dirs for c in components.values())
     assert {r[1] for r in t["File"]} == set(components) == {r[1] for r in t["FeatureComponents"]}
     assert all(components[r[1]][5] == r[0] for r in t["File"])  # each component's key path is its file
-    for table in ("ServiceInstall", "ServiceControl", "MsiServiceConfig", "MsiServiceConfigFailureActions", "Registry", "Environment"):
+    for table in ("ServiceInstall", "ServiceControl", "MsiServiceConfig", "Registry", "Environment"):
         assert all(r[-1] in components or r[-2] in components for r in t[table]), table
 
 
@@ -60,7 +60,13 @@ def test_the_service_its_recovery_the_event_log_and_path():
     assert svc[1:6] == ("platmon", "platmon", 16, 2, 1) and svc[8] is None  # own process, automatic, LocalSystem
     assert svc[10] == 'service "[INSTALLDIR]platmon.ini" --web "[INSTALLDIR]web"' and svc[11] == "C_platmon_server_exe"
     assert t["ServiceControl"] == [("platmon", "platmon", 1 | 2 | 32 | 128, None, 1, "C_platmon_server_exe")]
-    assert t["MsiServiceConfigFailureActions"][0][3:8] == (86400, None, None, "1[~]1[~]1", "5000[~]5000[~]60000")
+    # the restart actions: the guide's sc.exe line from System32, deferred and as LocalSystem, not on removal
+    assert t["CustomAction"] == [("ConfigureRecovery", 34 | 1024 | 2048, "System64Folder",
+                                  '"[System64Folder]sc.exe" failure platmon reset= 86400 actions= restart/5000/restart/5000/restart/60000')]
+    assert ("System64Folder", "TARGETDIR", ".") in t["Directory"]
+    seq = {r[0]: r for r in t["InstallExecuteSequence"]}
+    assert seq["ConfigureRecovery"][1] == 'NOT REMOVE~="ALL"'
+    assert seq["InstallServices"][2] < seq["ConfigureRecovery"][2] < seq["StartServices"][2]
     assert t["MsiServiceConfig"][0][2:5] == (1, 4, "1")  # the failure-actions flag
     (reg,) = t["Registry"]
     assert reg[1] == 2 and reg[2].endswith(r"EventLog\Application\platmon") and reg[4].startswith("#%%SystemRoot%\\")
