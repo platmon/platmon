@@ -27,6 +27,11 @@ a request without a version (HTTP/0.9) answers 400 and another version 505.
 | `/text` | the `platmon` terminal screen as plain text; 503 when there is no current snapshot, 500 when the snapshot has a value the screen cannot show (`/api/stats` still has it) |
 | `/` | the web page (only with `web = yes`) |
 
+`/api/history`, `/api/samples` and `/api/observation-samples` take query parameters and answer 400 to ones
+they do not know. The other paths take none: a query string on them is ignored, so `/api/stats?_=1700000000`
+answers as `/api/stats` (some tools add one to bypass a cache or to tag a request). Any other path answers
+404.
+
 One background thread collects a snapshot every `interval`; HTTP requests only read the latest one and
 never collect on their own. `/api/stats` and `/text` wait up to 5 s for the first snapshot after the
 service starts; `/api/status` never waits.

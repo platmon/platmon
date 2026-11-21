@@ -412,49 +412,49 @@ impl Server {
             body.set("series_intervals_ms", intervals);
             return x.reply(path, 200, body.to_py().as_bytes(), "application/json");
         }
-        match full {
+        match path { // the fixed endpoints and the page's files take no parameters: a query string is ignored
             "/api/status" => { // never waits for the first snapshot; 200 even when not ready
                 let (_, mut status) = self.sampler.view(self.clock);
                 status.set("levels", self.levels.clone());
-                x.reply(full, 200, status.to_py().as_bytes(), "application/json")
+                x.reply(path, 200, status.to_py().as_bytes(), "application/json")
             }
-            "/api/observations" => x.reply(full, 200, self.observations.view(self.clock).to_py().as_bytes(), "application/json"),
+            "/api/observations" => x.reply(path, 200, self.observations.view(self.clock).to_py().as_bytes(), "application/json"),
             "/api/stats" => {
                 self.sampler.wait_ready(self.first_wait);
                 match self.sampler.view(self.clock) {
-                    (Some(stats), _) => x.reply(full, 200, stats.as_bytes(), "application/json"),
+                    (Some(stats), _) => x.reply(path, 200, stats.as_bytes(), "application/json"),
                     (None, status) => { // the last good sample's identity and age, never its values
                         let mut body = Value::obj();
                         body.set("error", "no current data (not collected yet, or collection keeps failing)".into());
                         for k in ["schema_version", "code", "instance_id", "sample"] {
                             body.set(k, if k == "code" { "no_current_data".into() } else { status.get(k).cloned().unwrap_or_default() });
                         }
-                        x.reply(full, 503, body.to_py().as_bytes(), "application/json")
+                        x.reply(path, 503, body.to_py().as_bytes(), "application/json")
                     }
                 }
             }
             "/text" => { // the platmon command's screen, for curl and watch
                 self.sampler.wait_ready(self.first_wait);
                 let Some(stats) = self.sampler.current_value(self.clock) else {
-                    return x.reply(full, 503, b"no current data (not collected yet, or collection keeps failing)\n", "text/plain; charset=utf-8");
+                    return x.reply(path, 503, b"no current data (not collected yet, or collection keeps failing)\n", "text/plain; charset=utf-8");
                 };
                 let obs = self.observations.view(self.clock);
                 match crate::render::render(&stats, Some(&obs)) {
-                    Ok(text) => x.reply(full, 200, (text + "\n").as_bytes(), "text/plain; charset=utf-8"),
+                    Ok(text) => x.reply(path, 200, (text + "\n").as_bytes(), "text/plain; charset=utf-8"),
                     // a value the screen has no form for (the platmon command fails on the same snapshot)
-                    Err(()) => x.reply(full, 500, b"this snapshot cannot be shown as the screen; /api/stats has it\n",
+                    Err(()) => x.reply(path, 500, b"this snapshot cannot be shown as the screen; /api/stats has it\n",
                                        "text/plain; charset=utf-8"),
                 }
             }
             "/" | "/index.html" if self.web.is_some() => {
                 let page = std::fs::read_to_string(format!("{}/index.html", self.web.as_ref().unwrap()))?;
                 let page = page.replace("@VERSION@", &self.version).replace("@LEVELS@", &self.levels.to_py());
-                x.reply_with(full, 200, page.as_bytes(), "text/html; charset=utf-8", &PAGE_HEADERS)
+                x.reply_with(path, 200, page.as_bytes(), "text/html; charset=utf-8", &PAGE_HEADERS)
             }
-            _ => match WEB.iter().find(|(p, _, _)| *p == full).filter(|_| self.web.is_some()) {
+            _ => match WEB.iter().find(|(p, _, _)| *p == path).filter(|_| self.web.is_some()) {
                 Some((_, file, ctype)) => {
                     let body = std::fs::read(format!("{}/{}", self.web.as_ref().unwrap(), file))?;
-                    x.reply_with(full, 200, &body, ctype, &PAGE_HEADERS)
+                    x.reply_with(path, 200, &body, ctype, &PAGE_HEADERS)
                 }
                 None => x.error(404, None),
             },
@@ -777,11 +777,28 @@ mod tests {
     }
 
     #[test]
+    fn a_query_string_on_a_fixed_endpoint_is_ignored() {
+        let web = web_dir("query-string", &[("index.html", b"page"), ("app.js", b"js")]);
+        let (addr, _) = server(|s| s.web = Some(web));
+        let head = |r: &str| r.split("\r\n\r\n").next().unwrap().to_string();
+        for (path, query) in [("/api/status", "?pretty"), ("/api/stats", "?x=1"), ("/api/observations", "?_=1700000000"),
+                              ("/text", "?x"), ("/", "?v=2"), ("/app.js", "?v=2")] {
+            let (plain, asked) = (get(addr, &format!("GET {} HTTP/1.0\r\n\r\n", path)), get(addr, &format!("GET {}{} HTTP/1.0\r\n\r\n", path, query)));
+            // never 404: the same status line and headers as without it (but the date and length), Cache-Control:
+            // no-store on the live answers included; /text answers 500 here, its test snapshot has no screen
+            assert!(!asked.starts_with("HTTP/1.0 404"), "{}{}: {}", path, query, &asked[..asked.len().min(200)]);
+            let strip = |h: String| h.lines().filter(|l| !l.starts_with("Date:") && !l.starts_with("Content-Length:")).collect::<Vec<_>>().join("\n");
+            assert_eq!(strip(head(&asked)), strip(head(&plain)), "{}{}", path, query);
+        }
+        // the endpoints that take parameters still check theirs (replay_http_rejects_invalid_queries_and_needs_a_group)
+    }
+
+    #[test]
     fn answers_at_the_protocols_edges() {
         let (addr, _) = server(|_| {});
         let status = |r: &str| r.lines().next().unwrap_or("").to_string();
         assert_eq!(status(&get(addr, "GET /nothing HTTP/1.0\r\n\r\n")), "HTTP/1.0 404 Not Found");
-        assert_eq!(status(&get(addr, "GET /api/stats?x HTTP/1.0\r\n\r\n")), "HTTP/1.0 404 Not Found"); // whole path
+        assert_eq!(status(&get(addr, "GET /nothing?x HTTP/1.0\r\n\r\n")), "HTTP/1.0 404 Not Found");
         assert_eq!(status(&get(addr, "POST /api/stats HTTP/1.0\r\n\r\n")), "HTTP/1.0 501 Unsupported method ('POST')");
         assert_eq!(status(&get(addr, "get / HTTP/1.0\r\n\r\n")), "HTTP/1.0 501 Unsupported method ('get')");
         // errors about the request line: a status line and headers too (no HTTP/0.9)

@@ -8,6 +8,10 @@ API schema versions are independent of release versions.
 
 Draft for the next release; the version and date replace this heading when it is tagged.
 
+- A query string on a path that takes no parameters is ignored (#199): `/api/stats?x=1`, `/api/status?pretty`,
+  `/text?x` and the web page's files answer as without it, where they answered 404. Tools that add one to
+  bypass a cache or to tag a request get the reading. `/api/history` and the replay endpoints still answer 400
+  to parameters they do not know.
 - The HTTP server takes at most 8 of its 32 connections from one client address (#196): a host that opened
   32 idle connections held every slot until their 10 s deadline, closing the web page's, the `platmon`
   command's and platmon-hub's connections meanwhile. Hub polls a node with at most two connections at once.
