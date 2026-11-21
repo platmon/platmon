@@ -363,9 +363,9 @@ directories are never automatically deleted by subsequent updates or uninstall.
    the dpkg lifecycle check (amd64, against a next-revision fixture that is not released),
    `rpmlint`, the rpm lifecycle check (x86_64, against a next-release fixture) and
    `SHA256SUMS`. It records a GitHub build provenance attestation for the
-   `.deb`, `.rpm`, source archive and Windows zip, and creates a **draft** GitHub Release with
-   them, `BUILD.json`, `SHA256SUMS` and the version's `CHANGELOG.md` section as notes. Before building it
-   refuses a tag whose `CHANGELOG.md` section has no entry calling the Windows zip experimental. Review the attached bytes, acceptance
+   `.deb`, `.rpm`, source archive, Windows zip and Windows installer (`.msi`), and creates a **draft** GitHub
+   Release with them, `BUILD.json`, `SHA256SUMS` and the version's `CHANGELOG.md` section as notes. Before
+   building it refuses a tag without a `CHANGELOG.md` section for its version. Review the attached bytes, acceptance
    evidence and notes before publishing the draft. Do not distribute a container image;
    the repository's existing image licensing policy still applies.
 5. After the release is published, add it to the APT repository: run the `apt` workflow of

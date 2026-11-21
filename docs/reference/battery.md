@@ -127,7 +127,7 @@ near the driver's 1 s cache, where every read pays the full firmware call.
 
 ## Windows
 
-The Windows build of the native server (experimental, from 1.8.0; native/README.md, Windows) reads each battery
+The Windows build of the native server (from 1.8.0, supported after 1.9.0; native/README.md, Windows) reads each battery
 device interface Windows lists (`GUID_DEVICE_BATTERY`) through the battery class's IOCTLs — what Windows's
 own battery meter asks — with a read-only handle, and the AC line from `GetSystemPowerStatus`. Provider
 `ioctl_battery`:

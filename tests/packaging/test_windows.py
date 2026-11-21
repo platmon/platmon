@@ -1,4 +1,4 @@
-"""The experimental Windows zip (scripts/packaging/package_windows.py); no Windows needed."""
+"""The Windows zip (scripts/packaging/package_windows.py); no Windows needed."""
 import hashlib
 import json
 import re
@@ -50,7 +50,7 @@ def test_zip_contents_and_checksum(tmp_path, exe):
     out = output_with_sums(tmp_path / "dist")
     target = build(out, exe)
     release = version()
-    assert target.name == f"platmon-{release}-windows-x86_64-experimental.zip"
+    assert target.name == f"platmon-{release}-windows-x86_64.zip"
     top = f"platmon-{release}-windows-x86_64/"
     with zipfile.ZipFile(target) as z:
         names = z.namelist()
@@ -64,7 +64,8 @@ def test_zip_contents_and_checksum(tmp_path, exe):
         ini = z.read(top + "platmon.ini").decode("utf-8")
         assert "\r\nbind = 127.0.0.1\r\n" in ini and "0.0.0.0" not in ini.split("[http]", 1)[1].split("[", 1)[0]
         readme = z.read(top + "README.txt").decode("utf-8")
-        assert f"platmon {release} for Windows" in readme and "EXPERIMENTAL" in readme and "vc_redist" not in readme
+        assert f"platmon {release} for Windows" in readme and "EXPERIMENTAL" not in readme and "vc_redist" not in readme
+        assert f"platmon-{release}-windows-x86_64.msi" in readme and "Supported on Windows 11" in readme
         # the service runs as LocalSystem: its files only where administrators alone can write
         assert "\\Program Files\\platmon\\platmon-server.exe" in readme and "Windows 10 was not checked" in readme
         assert "platmon.cmd runs cli.py" in readme and "EventLogMessages.dll" in readme
@@ -130,15 +131,11 @@ def test_refusals(tmp_path):
         build(out, tmp_path / "ok.exe")
 
 
-def test_the_changelog_must_call_the_zip_experimental():
-    """The release workflow refuses a release whose entry does not (the owner's decision)."""
-    head = "# Changelog\n\n## 2.0.0 — 2026-11-10\n\n"
-    check_changelog(head + "- A Windows x86_64 zip, experimental: one laptop only.\n- rpm.\n", "2.0.0")
-    check_changelog(head + "- rpm.\n- The zip for\n  Windows is **experimental**.\n\n## 1.0.0 — x\n", "2.0.0")
-    for text, message in ((head + "- A Windows zip.\n- An experimental flag.\n", "must call"),
-                          (head + "- rpm.\n\n## 1.9.0 — x\n- Windows, experimental.\n", "must call"),
-                          (head, "must call"), ("# Changelog\n", "no changelog entry")):
-        with pytest.raises(ValueError, match=message):
+def test_the_release_needs_a_changelog_entry():
+    """The release workflow refuses a release without one; Windows need not be called experimental any more."""
+    check_changelog("# Changelog\n\n## 2.0.0 — 2026-11-10\n\n- The Windows zip and installer.\n", "2.0.0")
+    for text in ("# Changelog\n", "# Changelog\n\n## Unreleased\n\n- x\n", "# Changelog\n\n## 1.9.0 — x\n- y\n"):
+        with pytest.raises(ValueError, match="no changelog entry"):
             check_changelog(text, "2.0.0")
 
 

@@ -1,5 +1,5 @@
 @echo off
-rem platmon, experimental Windows zip: stop and remove the Windows service "platmon" and its files in
+rem platmon, Windows zip: stop and remove the Windows service "platmon" and its files in
 rem %ProgramFiles%\platmon, keeping platmon.ini there (delete the folder to remove it too).
 rem Run as administrator (right-click, Run as administrator).
 setlocal

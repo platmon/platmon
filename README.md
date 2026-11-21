@@ -5,8 +5,9 @@
   <img src="frontends/web/assets/brand/platmon-logo-light.svg" alt="platmon" width="440">
 </picture>
 
-**A 1.5 MB monitor for Jetson, Raspberry Pi and other Linux boards.** One background service reads the
-device once a second and serves the same snapshot to a terminal client, a web dashboard and an HTTP API.
+**A 1.5 MB monitor for Jetson, Raspberry Pi and other Linux boards, and Windows 11 PCs.** One background
+service reads the device once a second and serves the same snapshot to a terminal client, a web
+dashboard and an HTTP API.
 
 | Web dashboard | Terminal client |
 | --- | --- |
@@ -57,10 +58,10 @@ The service starts with the install. Other ways in, all running the same server:
 | No APT repository access | the `.deb` files and `SHA256SUMS` from [GitHub Releases](https://github.com/platmon/platmon/releases) ([steps](docs/guides/getting-started.md#requirements-and-installation)) |
 | Fedora or Enterprise Linux 9+ | the `.rpm` packages ([RPM packages](docs/reference/packaging.md#rpm-packages)) |
 | Another Linux, or a change to try | a [source installation or a locally built container](docs/guides/deployment.md) |
-| Windows 11 (x86_64) | the experimental, unsupported zip ([Windows (experimental)](docs/guides/getting-started.md#windows-experimental)) |
+| Windows 11 (x86_64) | the installer `platmon-<version>-windows-x86_64.msi` from [GitHub Releases](https://github.com/platmon/platmon/releases) ([Windows](docs/guides/getting-started.md#windows)) |
 | A headless device without Python | `sudo apt install --no-install-recommends platmon`, then the web page or the API |
 | A PC that only watches other devices | the terminal client alone: `scripts/install-cli.sh --user` from a checkout |
-| Windows 11 (x86_64), to try it | the experimental zip from [GitHub Releases](https://github.com/platmon/platmon/releases): unzip, double-click `start.cmd` ([Windows](docs/guides/getting-started.md#windows-experimental)); not supported |
+| Windows 11 (x86_64), to try it | the zip from [GitHub Releases](https://github.com/platmon/platmon/releases): unzip, double-click `start.cmd` ([Windows](docs/guides/getting-started.md#windows)) |
 
 ## Use
 
@@ -97,7 +98,8 @@ flowchart LR
 | x86-64 PC | Ubuntu 24.04 | development baseline |
 | amd64 and arm64 containers | Ubuntu 22.04, 24.04, 26.04 | every commit: package lifecycle and the service under systemd |
 | armhf | Debian 13, Ubuntu 24.04 under QEMU | package lifecycle only; **not yet on a real 32-bit board** |
-| Windows 11 laptop | experimental zip, from 1.8.0 | the real-PC checks (2026-11-01); not supported |
+| Windows 11 laptop | Windows 11 26H2, Intel Core Ultra 7, Arc iGPU | the real-PC checks (2026-11-01); the service's checks and an accelerated soak (1.8.2 to 1.9.0); experimental zip 1.8.0 to 1.9.0 |
+| Windows 11 desktop | Windows 11 25H2, Intel Core i5-13600KF, GeForce RTX 4070 Ti | 1.9.0: readings against Windows's tools, the service's checks, `hub_check.py`, S3 and hibernation, a 24 h soak; the installer |
 
 Not on the list does not mean not working: unknown hardware gets the generic `/proc` and `/sys` readers.
 If you run platmon on another board, a
@@ -113,7 +115,7 @@ built in. It is not a metrics platform.
 | --- | --- | --- | --- | --- | --- |
 | Shape | service + terminal + web + API | terminal + Python library | terminal + web + API | hub + agents | metrics endpoint |
 | Runs as | one static binary | Python | Python | Go binaries | Go binary |
-| Boards | Jetson, Raspberry Pi, any Linux | Jetson only | any | any | any |
+| Boards | Jetson, Raspberry Pi, any Linux, Windows 11 | Jetson only | any | any | any |
 | Board power, fans, power mode | read | read and control | partly | partly | partly |
 | Long-term history, alerts | in platmon-hub | no | through exports | yes | through Prometheus |
 | License | Apache-2.0 | AGPL-3.0 | LGPL-3.0 | MIT | Apache-2.0 |

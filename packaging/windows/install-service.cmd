@@ -1,5 +1,5 @@
 @echo off
-rem platmon, experimental Windows zip: install or upgrade the Windows service "platmon".
+rem platmon, Windows zip: install or upgrade the Windows service "platmon".
 rem Run as administrator (right-click, Run as administrator). The service runs as LocalSystem and starts
 rem with Windows, so its files go to %ProgramFiles%\platmon, which only administrators can change:
 rem platmon-server.exe and the web page are replaced, an existing platmon.ini is kept.
@@ -27,7 +27,7 @@ if defined EXISTS (
 ) else (
   sc.exe create platmon start= auto DisplayName= platmon binPath= "%BIN%" >nul || (pause & exit /b 1)
 )
-sc.exe description platmon "platmon, a lightweight platform monitor (experimental on Windows)" >nul
+sc.exe description platmon "platmon, a lightweight platform monitor" >nul
 rem the guide's recovery actions: after a crash or an error exit, restart in 5 s twice, then every minute
 sc.exe failure platmon reset= 86400 actions= restart/5000/restart/5000/restart/60000 >nul || (pause & exit /b 1)
 sc.exe failureflag platmon 1 >nul || (pause & exit /b 1)

@@ -1,5 +1,5 @@
 @echo off
-rem platmon, experimental Windows zip: serve this folder's platmon.ini and web page as your user and open
+rem platmon, Windows zip: serve this folder's platmon.ini and web page as your user and open
 rem the page in the browser once the server answers. Ctrl+C or closing this window stops it.
 setlocal
 cd /d "%~dp0"
