@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn concurrent_reads_never_collect() {
-        let (addr, calls) = server(|_| {});
+        let (addr, calls) = server(|s| s.max_per_address = 16); // its 16 clients are all 127.0.0.1
         std::thread::sleep(Duration::from_millis(100));
         let t0 = std::time::Instant::now();
         let before = calls.load(Ordering::SeqCst);
