@@ -1,7 +1,7 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-11-18 (1.9.0 released); the evidence for
+> - What is still open, checked against the repository on 2026-11-21 (1.9.0 released, 1.10.0 being prepared); the evidence for
 >   each release is in [release readiness](../releases/readiness.md).
 > - 1.8.0 (owner, 2026-11-03 and 2026-11-12), released 2026-11-12: the experimental Windows zip together with
 >   `.rpm` release files and battery follow-ups; 1.8.1, the frontends' design on its server, released
@@ -49,6 +49,10 @@ Published 2026-11-14, in the APT repository, the Orin upgraded with a whole-syst
 of the promotion plan (Windows stays experimental); its gate is in
 [release readiness](../releases/readiness.md#190-release-gate-2026-11-18).
 Published 2026-11-18, in the APT repository.
+
+1.10.0 (owner, 2026-11-21) releases what `main` gained after 1.9.0: Windows 11 supported with the installer,
+and the HTTP issues #196 to #199; its gate is in
+[release readiness](../releases/readiness.md#1100-release-gate-2026-11-21). The tag waits for the owner.
 
 ## Windows build (2026-10-26)
 

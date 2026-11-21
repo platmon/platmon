@@ -1,8 +1,11 @@
 # Release readiness
 
 > **TL;DR**
-> - Release gates and evidence per version, newest first (1.9.0 at the top).
+> - Release gates and evidence per version, newest first (1.10.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
+> - 1.10.0, Windows 11 supported with an installer, IPv6, a per-address connection limit, query strings
+>   ignored on fixed paths and a Prometheus exporter: being prepared (2026-11-21). Its CI packages passed the
+>   Orin's package smoke and live HTTP (2026-11-21); the rest of the evidence and what is open are in its gate.
 > - 1.9.0, the experimental Windows service's failures, shutdown and memory and two fixes on every platform:
 >   published 2026-11-18 and in the APT repository. Its Windows service passed `windows_check.py checks` and an
 >   accelerated soak on the test laptop; the release workflow ran the Linux checks. The Windows 24 h soak and
@@ -29,6 +32,35 @@
 >   After publishing, the Orin went from 1.6.0 to 1.7.0 with `apt install platmon` (2026-11-03).
 >   Not verified for 1.7.0: the root unit's soak and its sandbox, `hub_check.py`, armhf on a real device
 >   under systemd, `apt upgrade` to it on a real device.
+
+## 1.10.0 release gate (2026-11-21)
+
+Changes since 1.9.0 (CHANGELOG.md): on every platform, at most 8 connections from one client address (#229,
+issue #196), a query string ignored on paths without parameters (#230, #199), IPv6 in `[http] bind` (#231,
+#197), and `scripts/prometheus_exporter.py` outside the server (#232, #198); on Windows, the zip's start and
+service scripts with the C runtime linked statically (#211), the MSI installer built with Windows Installer
+itself (#233), and Windows 11 x86_64 supported (#234), the promotion plan done (`hub_check.py` on Windows,
+#227; the desktop's checks, #228).
+
+The HTTP API's schema versions and the `platmon.ini` keys and defaults are unchanged from 1.9.0. Answers change
+for a query string on a fixed path (200 where it was 404) and for a ninth concurrent connection from one
+address (closed, as a 33rd was); `config-check` accepts IPv6 `bind` values and words its refusals as "not an IP
+address".
+
+Verified for this release so far:
+
+| check | result |
+| --- | --- |
+| CI on each merged PR (#211, #227 to #234) | Python 3.8 to 3.14, `native` (build, equivalence, `live_http.py`, `hub_contract.py` with platmon-hub 1.2.0), `native-windows` (unit tests, the smoke test with the zip's scripts and the installer's install, upgrade, refused downgrade and removal), packages, userspace containers: all passed |
+| `live_http.py` against this branch's server (WSL2, x86_64 musl), with #229 | no differences; connection limit: 8 held from one address while another is answered, 32 in all, then refused |
+| `bind = ::` (WSL2) | IPv6 answered, IPv4 refused, `health` asks `::1` |
+| the installer on the desktop (Core i5-13600KF, Windows 11 25H2), 1.9.0's server with the static runtime | install, upgrade to a 1.9.1 build, the older package refused (1603), removal, reinstall; recovery 5/5/60 s and the failure flag, event source, PATH, an edited `platmon.ini` kept |
+| the Windows promotion evidence (#228; remaining-work.md) | the desktop's checks 9/9, `hub_check.py`, S3, hibernation, Windows restarts, 24 h soak PASS (1.9.0's server) |
+| on the Jetson Orin Nano (L4T R36.5.2, Ubuntu 22.04.5, Python 3.10), in a temporary directory beside the production 1.8.2 service, 2026-11-21 15:30 KST | the CI packages of `b7466cc` (checksums matched): `check_package.py` on `platmon_1.10.0-1_arm64.deb` and platmon-cli: smoke passed (server, CLI, API, web and SVG); the deb's aarch64 server (`9a245c44896afc39`, the same as CI's artifact): `live_http.py` no differences, the connection limit (8 from one address, another answered, 32 in all, then refused), `/api/stats?x=1` 200, 320 of 320 concurrent answers verified, a burst of 200: threads 5 → 13 → 5; the production service untouched (active, `NRestarts=0`) |
+
+Not verified, and therefore open: a 24 h soak of this release's server on Linux or Windows (the last ones ran
+1.8.1 on the Orin and 1.9.0 on the desktop), the release's own zip and installer on a real PC (CI ran them on
+its runner), armhf on a real device. The tag waits for the owner.
 
 ## 1.9.0 release gate (2026-11-18)
 
