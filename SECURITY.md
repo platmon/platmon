@@ -53,7 +53,7 @@ Not collected or served: command lines, environment variables, file contents, IP
 serial numbers.
 
 The packaged service runs as a systemd dynamic user with `ProtectSystem=strict`, `ProtectHome=yes` and
-`NoNewPrivileges=yes`. The server accepts at most 32 connections, gives a request 10 s in all, and limits
+`NoNewPrivileges=yes`. The server accepts at most 32 connections and 8 from one address, gives a request 10 s in all, and limits
 a line to 64 KiB and a request to 100 headers.
 
 ## What counts as a vulnerability

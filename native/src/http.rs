@@ -1,6 +1,6 @@
 //! The live HTTP API. Requests only read the latest publication (runtime::Sampler,
-//! slow::Observations) and never collect. HTTP/1.0, one request per connection, at most 32 connections
-//! (excess ones are closed before a thread is started for them), 10 s to send the request line and
+//! slow::Observations) and never collect. HTTP/1.0, one request per connection, at most 32 connections and
+//! 8 from one address (excess ones are closed before a thread is started for them), 10 s to send the request line and
 //! headers in all (a client trickling bytes cannot hold a connection), 10 s without progress per response
 //! write. A request whose Host header names neither this device nor an address is refused (421): a web page
 //! elsewhere cannot read the device through a name it points here (DNS rebinding).
@@ -14,10 +14,10 @@ use crate::config::{py_float, py_repr};
 use crate::replay::Refused;
 use crate::runtime::Sampler;
 use crate::slow::Observations;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::net::{IpAddr, Shutdown, TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const LIVE: [&str; 7] = ["/api/stats", "/api/status", "/api/observations", "/api/history", "/api/samples",
@@ -48,6 +48,8 @@ pub struct Server {
     pub request_timeout: Duration,
     pub write_timeout: Duration,
     pub max_connections: usize,
+    /// of max_connections, how many one peer address may hold, so that one host cannot take every slot
+    pub max_per_address: usize,
     /// how long /api/stats waits for the first snapshot
     pub first_wait: Duration,
     /// the elapsed clock answers are aged on (the runtime script sets its own)
@@ -55,7 +57,27 @@ pub struct Server {
     /// [http] hosts, the names a Host header may carry besides the device's own (host_allowed); None
     /// leaves Host unchecked (the runtime script's servers, which only local tools reach)
     pub hosts: Option<Vec<String>>,
-    active: AtomicUsize,
+    /// the open connections: in all, and per peer address
+    active: Mutex<(usize, HashMap<IpAddr, usize>)>,
+}
+
+/// A connection's slot, given back when it is dropped.
+struct Slot {
+    server: Arc<Server>,
+    peer: IpAddr,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        let mut a = self.server.active.lock().unwrap_or_else(|e| e.into_inner());
+        a.0 -= 1;
+        if let Some(n) = a.1.get_mut(&self.peer) {
+            *n -= 1;
+            if *n == 0 {
+                a.1.remove(&self.peer);
+            }
+        }
+    }
 }
 
 /// Sent with the web page and its files: no other site may frame the page, and the page loads and
@@ -269,28 +291,38 @@ fn read_line(r: &mut impl BufRead, limit: usize) -> std::io::Result<Vec<u8>> {
 impl Server {
     pub fn new(sampler: Arc<Sampler>, observations: Arc<Observations>, web: Option<String>, version: String, levels: Value) -> Server {
         Server { sampler, observations, web, version, levels, request_timeout: Duration::from_secs(10),
-                 write_timeout: Duration::from_secs(10), max_connections: 32, first_wait: Duration::from_secs(5), clock: metadata::clock,
-                 hosts: None, active: AtomicUsize::new(0) }
+                 write_timeout: Duration::from_secs(10), max_connections: 32, max_per_address: 8,
+                 first_wait: Duration::from_secs(5), clock: metadata::clock, hosts: None,
+                 active: Mutex::new((0, HashMap::new())) }
     }
 
-    /// Accepts connections forever: one thread each, up to max_connections; an excess one is closed at once.
+    /// A slot for a connection from peer, or None when every slot, or the peer's share of them, is taken.
+    fn admit(self: &Arc<Self>, peer: IpAddr) -> Option<Slot> {
+        let mut a = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        let mine = a.1.get(&peer).copied().unwrap_or(0);
+        if a.0 >= self.max_connections || mine >= self.max_per_address {
+            return None;
+        }
+        a.0 += 1;
+        a.1.insert(peer, mine + 1);
+        Some(Slot { server: self.clone(), peer })
+    }
+
+    /// Accepts connections forever: one thread each, up to max_connections and max_per_address from one peer;
+    /// an excess one is closed at once.
     pub fn serve(self: Arc<Self>, listener: TcpListener) {
         for conn in listener.incoming() {
             let Ok(stream) = conn else { continue };
-            if self.active.fetch_add(1, Ordering::SeqCst) >= self.max_connections {
-                self.active.fetch_sub(1, Ordering::SeqCst);
-                let _ = stream.shutdown(Shutdown::Write);
+            let Some(slot) = stream.peer_addr().ok().and_then(|p| self.admit(p.ip())) else {
+                let _ = stream.shutdown(Shutdown::Write); // full, or the peer already gone
                 continue;
-            }
-            let s = self.clone();
-            let started = std::thread::Builder::new().name("http".into()).stack_size(256 * 1024).spawn(move || {
-                let _ = s.handle(&stream); // a stalled or disconnected peer: the connection just closes
+            };
+            // the slot moves into the thread and is given back when it ends, or here if it cannot start
+            let _ = std::thread::Builder::new().name("http".into()).stack_size(256 * 1024).spawn(move || {
+                let _ = slot.server.handle(&stream); // a stalled or disconnected peer: the connection just closes
                 let _ = stream.shutdown(Shutdown::Write);
-                s.active.fetch_sub(1, Ordering::SeqCst);
+                drop(slot);
             });
-            if started.is_err() {
-                self.active.fetch_sub(1, Ordering::SeqCst);
-            }
         }
     }
 
@@ -543,7 +575,7 @@ mod tests {
     use super::*;
     use crate::json;
     use crate::runtime::Collection;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     static STOP: AtomicBool = AtomicBool::new(false);
 
@@ -672,6 +704,41 @@ mod tests {
         drop(held);
         std::thread::sleep(Duration::from_millis(100));
         assert!(get(addr, "GET /api/status HTTP/1.0\r\n\r\n").starts_with("HTTP/1.0 200 OK"));
+    }
+
+    #[test]
+    fn one_address_cannot_hold_every_connection() {
+        // all from 127.0.0.1: its share (3) taken by idle connections, a fourth is closed though slots are free
+        let (addr, _) = server(|s| { s.max_connections = 8; s.max_per_address = 3; });
+        let held: Vec<TcpStream> = (0..3).map(|_| TcpStream::connect(addr).unwrap()).collect();
+        std::thread::sleep(Duration::from_millis(100));
+        let mut extra = TcpStream::connect(addr).unwrap();
+        extra.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut buf = [0u8; 16];
+        assert_eq!(extra.read(&mut buf).unwrap(), 0); // closed without an answer
+        drop(held);
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(get(addr, "GET /api/status HTTP/1.0\r\n\r\n").starts_with("HTTP/1.0 200 OK"));
+    }
+
+    #[test]
+    fn another_address_is_admitted_while_one_holds_its_share() {
+        let sampler = Arc::new(Sampler::new(0.05, None, "test".into(), "boottime"));
+        let obs = Arc::new(Observations { groups: vec![], instance_id: "test".into(), clock_source: "boottime" });
+        let mut srv = Server::new(sampler, obs, None, "0".into(), Value::obj());
+        (srv.max_connections, srv.max_per_address) = (5, 2);
+        let srv = Arc::new(srv);
+        let (a, b, c): (IpAddr, IpAddr, IpAddr) = ("192.0.2.1".parse().unwrap(), "192.0.2.2".parse().unwrap(), "2001:db8::1".parse().unwrap());
+        let a_slots: Vec<_> = (0..2).map(|_| srv.admit(a).unwrap()).collect();
+        assert!(srv.admit(a).is_none()); // a's share is taken
+        let b_slots: Vec<_> = (0..2).map(|_| srv.admit(b).unwrap()).collect(); // b is still answered
+        let c_slot = srv.admit(c).unwrap();
+        assert!(srv.admit("192.0.2.3".parse().unwrap()).is_none()); // every slot taken
+        drop(a_slots);
+        assert!(srv.admit(a).is_some()); // given back
+        assert_eq!(srv.active.lock().unwrap().1.get(&a), None); // and the address forgotten when it has none
+        drop((b_slots, c_slot));
+        assert_eq!(srv.active.lock().unwrap().0, 0);
     }
 
     #[test]

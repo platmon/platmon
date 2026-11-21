@@ -8,6 +8,10 @@ API schema versions are independent of release versions.
 
 Draft for the next release; the version and date replace this heading when it is tagged.
 
+- The HTTP server takes at most 8 of its 32 connections from one client address (#196): a host that opened
+  32 idle connections held every slot until their 10 s deadline, closing the web page's, the `platmon`
+  command's and platmon-hub's connections meanwhile. Hub polls a node with at most two connections at once.
+
 - **Experimental:** the Windows x86_64 zip is easier to start. `platmon-server.exe` links the C runtime
   statically, so the Visual C++ Redistributable is no longer needed. The zip adds `start.cmd`, which serves
   the folder's `platmon.ini` and web page as the user and opens the page in the browser, and
