@@ -1,12 +1,91 @@
-"""The live terminal view (screen()): fits the terminal, levels like the web page, plain without color."""
+"""The platmon command's live terminal view (screen()): fits the terminal, levels like the web page, plain without
+color. Run through the binary's hidden --screen-script (native/frontend/src/bin/platmon/main.rs), so it needs
+the binary native/build.sh builds (PLATMON_COMMAND names another); without one these tests are skipped (CI's
+native job runs them). The functions behind the screens (attention, the server's levels, the tab bar, the
+styles) are the Rust unit tests' (screen.rs), and render() the shared crate's (shared/src/render.rs)."""
+import json
+import os
 import re
+import socket
+import subprocess
+from pathlib import Path
 
 import pytest
 
-from frontends import cli
-from frontends.cli import (ANSI, BOTTOM, LIMITS, VIEWS, Style, attention, busiest_first, data_age, fit,
-                           make_style, next_offset, next_view, render, screen, tabbar, use_levels, vlen)
-from tests.frontends.test_cli import FULL
+ROOT = Path(__file__).resolve().parents[2]
+COMMAND = Path(os.environ.get("PLATMON_COMMAND", ROOT / "native/target/x86_64-unknown-linux-musl/release/platmon"))
+pytestmark = pytest.mark.skipif(not COMMAND.is_file(), reason=f"needs the platmon command ({COMMAND}, native/build.sh)")
+
+VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+VIEWS = [v["id"] for v in json.loads((ROOT / "frontends/ui-spec.json").read_text(encoding="utf-8"))["views"]]
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+BOTTOM = 1 << 30  # the end of a view (screen.rs BOTTOM)
+G = 2**30
+FULL = {
+    "platform": "Jetson Orin", "model": "Test Board", "uptime": 90061, "power_mode": "MAXN_SUPER",
+    "system": {"os": "Ubuntu 22.04.5 LTS", "kernel": "5.15.199-tegra", "arch": "aarch64", "hostname": "orin",
+               "l4t": "R36.5.2"},
+    "cpu": [{"id": 0, "usage": 12.5, "freq": 1728000000}, {"id": 2, "usage": 0.0, "freq": 729600000}],
+    "gpu": {"usage": 50.0, "freq": 306000000, "max_freq": 1020000000},
+    "memory": {"total": 8 * G, "used": 2 * G, "swap_total": 4 * G, "swap_used": 0},
+    "disk": {"total": 100 * G, "used": 25 * G},
+    "temperature": {"cpu": 51.2},
+    "power": {"VDD_IN": 4.82},
+    "fans": [{"name": "pwmfan", "rpm": None, "percent": 31}, {"name": "pwm_tach", "rpm": 1741, "percent": None}],
+}
+SCRIPT = []  # the --screen-script process, started on first use
+
+
+def ask(request):
+    if not SCRIPT:
+        SCRIPT.append(subprocess.Popen([str(COMMAND), "--screen-script"], stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, encoding="utf-8"))
+    SCRIPT[0].stdin.write(json.dumps(request) + "\n")
+    SCRIPT[0].stdin.flush()
+    return json.loads(SCRIPT[0].stdout.readline())
+
+
+def teardown_module():
+    for proc in SCRIPT:
+        proc.stdin.close()
+        proc.wait(timeout=10)
+
+
+def Style(color=True, utf8=True):
+    return {"color": color, "utf8": utf8}
+
+
+def scrolled(stats, obs, width, height, style, status, view="overview", offset=0, levels=None):
+    """screen()'s lines and its scroll ([offset, page]: what was drawn)."""
+    answer = ask(dict(style, stats=stats, obs=obs, width=width, height=height, status=status, view=view,
+                      offset=offset, levels=levels))
+    return answer["lines"], answer["scroll"]
+
+
+def screen(*args, **kwargs):
+    return scrolled(*args, **kwargs)[0]
+
+
+def next_view(keys, view):
+    return ask({"keys": keys, "view": view, "offset": 0, "page": 0})["view"]
+
+
+def next_offset(keys, offset, page):
+    return ask({"keys": keys, "view": "overview", "offset": offset, "page": page})["offset"]
+
+
+def vlen(line):
+    return len(ANSI.sub("", line))
+
+
+def explain(addr):
+    """The binary's own message for a service that does not answer: the banner the live view shows."""
+    with socket.socket() as s:  # a port nothing listens on
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    r = subprocess.run([str(COMMAND), f"localhost:{port}", "--once"], capture_output=True, text=True, timeout=20)
+    return r.stderr.strip().replace(f"localhost:{port}", addr)
+
 
 HOT = dict(FULL, cpu=[{"id": 0, "usage": 12.5, "freq": 1728000000}, {"id": 7, "usage": 91.4, "freq": 1728000000}],
            temperature={"cpu": 51.2, "tj": 86.2})
@@ -46,8 +125,7 @@ def test_ascii_without_utf8():
 
 
 def test_attention_follows_the_web_levels():
-    # CPU mean 52 % is fine; tj 86.2 °C is a warning on Jetson Orin (85/95), not critical
-    assert attention(HOT, None) == [("tj", "86.2 °C", "warn")]
+    # CPU mean 52 % is fine; tj 86.2 °C is a warning by the generic level (85/95), not critical
     assert "NEEDS ATTENTION" in "\n".join(plain(screen(HOT, None, 119, 40, Style(), LIVE)))
     assert "NEEDS ATTENTION" not in "\n".join(plain(screen(FULL, None, 119, 40, Style(), LIVE)))
 
@@ -66,23 +144,11 @@ def test_too_short_says_what_was_left_out_and_how_to_reach_it():
     assert re.search(r"\d+ below", out[-3]) and "PgUp/PgDn" in out[-3]  # what is out of sight, and the keys for it
 
 
-def test_fit_keeps_escapes_and_resets():
-    st = Style()
-    cut = fit(st("abcdef", "warn") + "ghij", 4)
-    assert vlen(cut) == 4 and cut.endswith("\033[0m")
-
-
-def test_server_levels_replace_the_defaults(monkeypatch):
-    """/api/status "levels" ([thresholds]) as the web page uses them; bad or missing ones keep the defaults."""
-    monkeypatch.setattr(cli, "LIMITS", dict(LIMITS))
-    use_levels({"temperature": [80, 90], "memory": [10, 20], "cpu": [90, 80], "gpu": "x", "swap": [1, 2]})
-    assert cli.LIMITS["memory"] == (10, 20) and cli.LIMITS["cpu"] == (80, 90) and cli.LIMITS["gpu"] == (80, 90)
-    assert "swap" not in cli.LIMITS
-    assert attention(HOT, None) == [("RAM", "25.0 %", "crit"), ("tj", "86.2 °C", "warn")]  # 80/90 replaces Orin's 85/95
-    use_levels({"temperature": None})
-    assert attention(HOT, None)[1] == ("tj", "86.2 °C", "warn")  # null: the board default again (85/95)
-    use_levels(None)  # an older server
-    assert cli.LIMITS["memory"] == (10, 20)
+def test_server_levels_reach_the_screen():
+    """/api/status "levels" ([thresholds]): RAM at 25 % is critical with memory [10, 20]."""
+    levels = {"temperature": [80, 90], "memory": [10, 20]}
+    assert "RAM" in " ".join(plain(screen(HOT, None, 119, 40, Style(), LIVE, levels=levels))[3:5])
+    assert "RAM" not in " ".join(plain(screen(HOT, None, 119, 40, Style(), LIVE))[3:5])
 
 
 def test_wifi_signal_bar_uses_the_web_scale():
@@ -119,20 +185,14 @@ def test_wifi_names_never_run_into_the_signal(width):
     assert rows["wlan1"][column:].startswith("signal 40"), rows
 
 
-def test_low_levels_attention_and_colors(monkeypatch):
-    """Battery charge and Wi-Fi signal: at or below a level, the opposite of the other readings; only from a
-    current observation, and never from an empty bay or a disconnected interface."""
+def test_low_levels_attention_and_colors():
+    """Battery charge and Wi-Fi signal at a critical level: in the critical color and the status slot, only from
+    a current observation (the levels themselves are screen.rs's low_levels test)."""
     import copy
-    monkeypatch.setattr(cli, "LIMITS", dict(LIMITS))
     obs = copy.deepcopy(OBSERVED)
     bat, wlan = obs["groups"]["battery"]["data"]["batteries"][0], obs["groups"]["wifi"]["data"]["interfaces"][0]
-    obs["groups"]["battery"]["data"]["batteries"].append(dict(bat, name="BAT2", present=False, percent=3))
-    obs["groups"]["wifi"]["data"]["interfaces"].append(dict(wlan, name="wlan1", connected=False, signal_dbm=-99))
-    assert attention(FULL, obs) == []  # 89 % and -47 dBm are fine
-    bat["percent"], wlan["signal_dbm"] = 20, -70
-    assert attention(FULL, obs) == [("BAT1", "20 %", "warn"), ("wlan0", "-70 dBm", "warn")]
+    assert "NEEDS ATTENTION" not in "\n".join(plain(screen(FULL, obs, 119, 40, Style(), LIVE)))  # 89 % and -47 dBm
     bat["percent"], wlan["signal_dbm"] = 10, -81
-    assert attention(FULL, obs) == [("BAT1", "10 %", "crit"), ("wlan0", "-81 dBm", "crit")]
     power = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, "power"))
     network = "\n".join(screen(RICH, obs, 119, 90, Style(), LIVE, "network"))
     crit = r"\033\[31(;1)?m"  # the critical color, bold or not
@@ -140,16 +200,7 @@ def test_low_levels_attention_and_colors(monkeypatch):
     assert "NEEDS ATTENTION" in "\n".join(plain(screen(FULL, obs, 119, 40, Style(), LIVE)))
     obs["groups"]["battery"]["observation"]["stale"] = True
     obs["groups"]["wifi"]["observation"]["stale"] = True
-    assert attention(FULL, obs) == []  # not a current reading
-    # the server's levels: low ones arrive warning above critical; the wrong order keeps the default
-    use_levels({"battery": [30, 15], "wifi": [-80, -70]})
-    assert cli.LIMITS["battery"] == (30, 15) and cli.LIMITS["wifi"] == (-70, -80)
-
-
-def test_data_age_is_the_servers_plus_time_since():
-    assert data_age({"sample": {"data_age_ms": 1500}}, got=10.0, now=12.0) == 3.5
-    assert data_age({}, got=10.0, now=12.0) == 2.0  # an older server: the time since its answer
-    assert data_age({"sample": {"data_age_ms": None}}, got=10.0, now=10.5) == 0.5
+    assert "NEEDS ATTENTION" not in "\n".join(plain(screen(FULL, obs, 119, 40, Style(), LIVE)))  # not current
 
 
 def test_busiest_interfaces_first():
@@ -157,20 +208,8 @@ def test_busiest_interfaces_first():
                                    "rates": {"rx_bytes_per_s": rx, "tx_bytes_per_s": tx,
                                              "rx_packets_per_s": 0, "tx_packets_per_s": 0}}
     items = [rate("br0", 0), {"name": "wlan1", "rates": None, "reason": "warmup"}, rate("eth0", 10, 5), rate("can0", 0)]
-    assert [i["name"] for i in busiest_first(items)] == ["eth0", "br0", "can0", "wlan1"]
     narrow = plain(screen(dict(FULL, network={"interfaces": items}), None, 70, 40, Style(), LIVE))
     assert any(line.strip().startswith("NET") and "eth0" in line for line in narrow)  # the busy one comes first
-
-
-def test_ascii_on_request():
-    assert make_style({}, "utf-8").full == "█"
-    assert make_style({"PLATMON_ASCII": "1"}, "utf-8").full == "#"
-    assert make_style({}, "ascii").full == "#" and make_style({"NO_COLOR": "1"}, "UTF-8").color is False
-
-
-def test_render_is_unchanged_by_the_live_view():
-    """--once, pipes and /text keep the plain screen."""
-    assert "\033" not in render(HOT)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -248,14 +287,9 @@ def test_the_battery_section_is_absent_without_the_observation():
 
 
 def test_the_tab_bar_names_every_view_and_marks_the_active_one():
-    bar = tabbar(Style(color=False), 119, "network")
+    """The tab bar under the header (its narrower forms are screen.rs's test)."""
+    bar = plain(screen(FULL, None, 119, 40, Style(color=False), LIVE, "network"))[2]
     assert "[3 Network]" in bar and "1 Overview" in bar and f"{len(VIEWS)} System" in bar
-    assert "5 Temperature" in bar and "6 Power & battery" in bar  # the two the thermal view was split into
-    narrow = tabbar(Style(color=False), 44, "network")  # shorter labels, still every view
-    assert "[3 Ne]" in narrow and vlen(narrow) <= 44
-    assert all(str(n) in narrow for n in range(1, len(VIEWS) + 1))
-    tiny = tabbar(Style(color=False), 24, "system")  # no room for seven labels: the position instead
-    assert tiny.strip().startswith(f"{len(VIEWS)}/{len(VIEWS)} Sys") and vlen(tiny) <= 24
 
 
 def test_keys_switch_views():
@@ -344,9 +378,8 @@ def test_a_view_longer_than_the_terminal_scrolls():
     for keys in (None, "\033[B", "\033[6~", "\033[F", "\033[1~"):
         if keys is not None:
             offset = next_offset(keys, offset, page)
-        status = dict(LIVE)
-        lines = plain(screen(many, None, 79, 18, Style(), status, "thermal", offset))
-        offset, page = status["scroll"]
+        lines, (offset, page) = scrolled(many, None, 79, 18, Style(), LIVE, "thermal", offset)
+        lines = plain(lines)
         assert len(lines) <= 18 and all(vlen(line) <= 79 for line in lines)
         seen.add(offset)
         body = "\n".join(lines)
@@ -354,8 +387,7 @@ def test_a_view_longer_than_the_terminal_scrolls():
             assert f"{offset} above" in body
     assert seen == {0, 1, 11, 29}  # top, a line, a page, the end, back to the top
     # the end shows the last sensors, which "+N more lines" never reached (the server's order: sensor37 last)
-    status = dict(LIVE)
-    end = "\n".join(plain(screen(many, None, 79, 18, Style(), status, "thermal", BOTTOM)))
+    end = "\n".join(plain(screen(many, None, 79, 18, Style(), LIVE, "thermal", BOTTOM)))
     assert "sensor37" in end and "sensor00" not in end and "29 above" in end
 
 
@@ -366,9 +398,7 @@ def test_scroll_keys_and_clamping():
     assert next_offset("\033[1~", 9, 10) == 0 and next_offset("\033OF", 0, 10) == BOTTOM
     assert next_offset("x", 4, 10) == 4 and next_offset("3", 4, 10) == 4  # a view key does not scroll
     # a view that fits is never scrolled, and switching views starts at the top again
-    status = dict(LIVE)
-    screen(HOT, None, 119, 40, Style(), status, "system", 7)
-    assert status["scroll"][0] == 0
+    assert scrolled(HOT, None, 119, 40, Style(), LIVE, "system", 7)[1][0] == 0
 
 
 def test_the_overview_detail_is_never_cut_for_room_it_has():
@@ -427,7 +457,7 @@ def test_header_and_footer_say_only_what_is_not_said_elsewhere():
     wide = plain(screen(RICH, OBSERVED, 119, 40, Style(), LIVE))
     assert wide[0].rstrip().endswith("● LIVE") and "s ago" not in wide[0]
     assert "orin · MAXN_SUPER · up 1d 01:01" in wide[1] and "Ubuntu" not in wide[1]
-    assert wide[-1].rstrip().endswith("every 1 s") and "localhost" not in wide[-1] and cli.VERSION not in wide[-1]
+    assert wide[-1].rstrip().endswith("every 1 s") and "localhost" not in wide[-1] and VERSION not in wide[-1]
     late = plain(screen(RICH, OBSERVED, 119, 40, Style(), dict(LIVE, age=3.4)))
     assert "data 3 s old" in late[0]
     remote = plain(screen(RICH, OBSERVED, 119, 40, Style(), dict(LIVE, addr="192.168.55.53:9797")))
@@ -435,7 +465,7 @@ def test_header_and_footer_say_only_what_is_not_said_elsewhere():
     phone = plain(screen(RICH, OBSERVED, 45, 30, Style(), LIVE))
     assert phone[0].startswith(" p_  orin") and "platmon" not in phone[0] and phone[1].startswith("    Jetson Orin")
     system = "\n".join(plain(screen(RICH, OBSERVED, 79, 40, Style(), LIVE, "system")))
-    assert f"Version        {cli.VERSION}" in system and "localhost:9797 · every 1 s" in system
+    assert f"Version        {VERSION}" in system and "localhost:9797 · every 1 s" in system
 
 
 def test_detail_views_keep_their_order_and_say_a_shared_clock_once():
@@ -463,14 +493,14 @@ def test_power_sums_the_rails_and_draws_the_fans():
 def test_the_offline_banner_wraps_instead_of_losing_the_advice():
     """A cut banner loses the errno, the retry interval or the name of the script to run — the whole
     point of it. It needs 111 columns, so on anything narrower it wraps."""
-    error = cli.explain("localhost:9797", type("E", (OSError,), {"reason": "[Errno 111] refused"})())
+    error = explain("localhost:9797")
     down = dict(LIVE, state="offline", age=47, error=error)
     for width in (119, 79, 60, 44):
         lines = plain(screen(FULL, None, width, 24, Style(), down, "system"))
         assert all(vlen(line) <= width for line in lines)
         banner = " ".join(line.strip() for line in lines if "NOT CURRENT" in line
                           or line.startswith(" " * 17))
-        for word in ("[Errno 111] refused", "retrying every 1 s", "systemctl status platmon",
+        for word in ("[Errno 111] Connection refused", "retrying every 1 s", "systemctl status platmon",
                      "journalctl -u platmon", "deploy/systemd/start.sh", "deploy/docker/start.sh"):
             assert word in " ".join(banner.split()), (width, word, banner)
 

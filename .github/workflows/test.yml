@@ -22,9 +22,9 @@ jobs:
       - run: python -m pip install -r tests/requirements.txt
       - run: pytest -v
 
-  # The server: Rust tests and both static targets (native/build.sh), then the Python service's recorded
-  # answers (native/tools/equivalence/golden) on fake trees, configurations and the runtime, a live HTTP check, and
-  # the Rust platmon command against frontends/cli.py.
+  # The server and the platmon command: Rust tests and both static targets (native/build.sh), then the Python
+  # service's recorded answers (native/tools/equivalence/golden) on fake trees, configurations and the runtime, a
+  # live HTTP check, and the command's live screens (tests/frontends, through its --screen-script).
   native:
     runs-on: ubuntu-latest
     steps:
@@ -45,7 +45,11 @@ jobs:
           python3 native/tools/equivalence/runtime_fixture.py "$SERVER"
           native/tools/equivalence/fixture.sh
           python3 native/tools/equivalence/live_http.py "$SERVER"
-          python3 native/tools/equivalence/cli_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon
+      # the tests that run the binary (skipped in the test job, which has none)
+      - name: Check the platmon command's screens
+        run: |
+          python3 -m pip install -r tests/requirements.txt
+          python3 -m pytest tests/frontends/test_cli_screen.py tests/frontends/test_ui_spec.py
       # The released fleet server, pinned by hash, reads this server's answers (native/README.md)
       - name: Check the fleet server's contract (platmon-hub from PyPI)
         env:

@@ -1,8 +1,11 @@
 """frontends/ui-spec.json, the design tokens the frontends share: every adapter agrees with it, so the
 terminal and the web page cannot drift apart (views, levels, state colors), and the brand roles agree with
-the approved brand colors."""
+the approved brand colors. The terminal is the platmon command (native/frontend/src/bin/platmon/screen.rs),
+which reads its copy of the spec (UI_SPEC) for all of these; its source is checked here, and its attention
+list through the binary when native/build.sh has built it."""
 import html
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -10,12 +13,25 @@ from pathlib import Path
 
 import pytest
 
-from frontends import cli
-from tests.frontends.test_cli import FULL
-
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = json.loads((ROOT / "frontends/ui-spec.json").read_text(encoding="utf-8"))
 WEB = ROOT / "frontends/web"
+# the terminal's code, not its tests
+TERMINAL = (ROOT / "native/frontend/src/bin/platmon/screen.rs").read_text(encoding="utf-8").split("#[cfg(test)]")[0]
+COMMAND = Path(os.environ.get("PLATMON_COMMAND", ROOT / "native/target/x86_64-unknown-linux-musl/release/platmon"))
+G = 2**30
+FULL = {
+    "platform": "Jetson Orin", "model": "Test Board", "uptime": 90061, "power_mode": "MAXN_SUPER",
+    "system": {"os": "Ubuntu 22.04.5 LTS", "kernel": "5.15.199-tegra", "arch": "aarch64", "hostname": "orin",
+               "l4t": "R36.5.2"},
+    "cpu": [{"id": 0, "usage": 12.5, "freq": 1728000000}, {"id": 2, "usage": 0.0, "freq": 729600000}],
+    "gpu": {"usage": 50.0, "freq": 306000000, "max_freq": 1020000000},
+    "memory": {"total": 8 * G, "used": 2 * G, "swap_total": 4 * G, "swap_used": 0},
+    "disk": {"total": 100 * G, "used": 25 * G},
+    "temperature": {"cpu": 51.2},
+    "power": {"VDD_IN": 4.82},
+    "fans": [{"name": "pwmfan", "rpm": None, "percent": 31}, {"name": "pwm_tach", "rpm": 1741, "percent": None}],
+}
 
 
 def css_tokens():
@@ -24,10 +40,6 @@ def css_tokens():
     dark_at = css.index("@media (prefers-color-scheme: dark)")
     tokens = lambda text: dict(re.findall(r"--([\w-]+):\s*([^;]+);", text))
     return tokens(css[:dark_at]), tokens(css[dark_at:css.index("}", css.index("{", dark_at) + 1) + 1])
-
-
-def test_cli_copy_matches_the_spec():
-    assert cli.UI_SPEC == {key: value for key, value in SPEC.items() if key != "about"}
 
 
 def test_rust_command_copy_matches_the_spec():
@@ -47,8 +59,7 @@ def test_views_are_the_web_tabs_and_the_terminal_views():
     assert [(name, text(re.sub(r'<span class="narrow">.*?</span>', "", label))) for name, label in tabs] == labels
     assert [text(re.search(r'<span class="narrow">(.*?)</span>', label).group(1)) for _, label in tabs] == \
         [v["labels"][1] for v in SPEC["views"]]
-    assert list(cli.VIEWS) == [v["id"] for v in SPEC["views"]]
-    assert {name: list(texts) for name, texts in cli.VIEW_LABELS.items()} == {v["id"]: v["labels"] for v in SPEC["views"]}
+    assert re.search(r'spec\(\)\["views"\]', TERMINAL)  # the terminal's views and labels are its copy's
 
 
 def test_system_fields_are_the_web_rows_and_the_terminal_labels():
@@ -59,13 +70,14 @@ def test_system_fields_are_the_web_rows_and_the_terminal_labels():
     assert rows == ["model", "platform", "uptime"] + fields + ["version", "service"]
     app = (WEB / "app.js").read_text(encoding="utf-8")
     assert json.loads(re.search(r"const SYSTEM_FIELDS = (\[.*?\]);", app).group(1).replace("'", '"')) == fields
-    assert list(cli.SYSTEM_LABELS) == fields
+    rows = re.search(r"const SYSTEM_ROWS: .*? = \[(.*?)\];", TERMINAL).group(1)
+    assert re.findall(r'\("(\w+)", "', rows) == fields
 
 
 def test_bar_scales_are_the_web_pages_and_the_terminals():
     app = (WEB / "app.js").read_text(encoding="utf-8")
     assert json.loads(re.search(r"const WIFI_DBM = (\[.*?\]);", app).group(1)) == SPEC["scales"]["wifi_dbm"]
-    assert "UI_SPEC[\"scales\"][\"wifi_dbm\"]" in Path(cli.__file__).read_text(encoding="utf-8")
+    assert 'spec()["scales"]["wifi_dbm"]' in TERMINAL
 
 
 def test_level_defaults_are_the_servers_and_every_frontends():
@@ -86,9 +98,8 @@ def test_level_defaults_are_the_servers_and_every_frontends():
     assert re.search(r"LIMITS\.temperature \|\|= \[(-?\d+), (-?\d+)\]", app).groups() == \
         tuple(str(x) for x in levels["defaults"]["temperature"])
 
-    # the terminal leaves temperature to the server (its board's level) and falls back to the generic one
-    assert {**cli.LIMITS, "temperature": cli.temp_limits()} == {k: tuple(v) for k, v in levels["defaults"].items()}
-    assert list(cli.LOW) == levels["low_is_bad"]
+    # the terminal leaves temperature to the server (its board's level) and falls back to its copy's generic one
+    assert 'spec()["levels"]["defaults"]' in TERMINAL and 'spec()["levels"]["low_is_bad"]' in TERMINAL
 
 
 def test_low_is_bad_readings_get_their_level_from_the_spec():
@@ -97,24 +108,19 @@ def test_low_is_bad_readings_get_their_level_from_the_spec():
     low = SPEC["levels"]["low_is_bad"]
     app = (WEB / "app.js").read_text(encoding="utf-8")
     assert json.loads(re.search(r"const LOW_IS_BAD = (\[.*?\]);", app).group(1).replace("'", '"')) == low
-    terminal = Path(cli.__file__).read_text(encoding="utf-8")
     assert not re.findall(r".{20}\blowLevel\(", app)  # only levelOf picks lowLevel
-    assert not re.findall(r".{20}(?<!def )\blow_level\(", terminal)  # only level_of picks low_level
+    # only level_of picks low_level (its definition and that one call; the levels are screen.rs's low_levels test)
+    assert len(re.findall(r"\blow_level\(", TERMINAL)) == 2 and "if low(name) { low_level(" in TERMINAL
     # what else reads a low-is-bad reading's limits only draws its bar (the ticks), colored by the level given
     names = "|".join(low)
-    for line in re.findall(rf".*LIMITS\.(?:{names})\b.*", app) + re.findall(rf'.*LIMITS\["(?:{names})"\].*', terminal):
+    for line in re.findall(rf".*LIMITS\.(?:{names})\b.*", app) + re.findall(rf'.*lim\.get\("(?:{names})"\).*', TERMINAL):
         assert re.search(r"\b(?:bar|meter)\(.*\blv\b", line), line
-    for name in low:
-        warn, crit = SPEC["levels"]["defaults"][name]
-        assert [cli.level_of(name, v) for v in (warn + abs(warn - crit), warn, crit)] == ["ok", "warn", "crit"], name
 
 
 def test_roles_are_the_web_tokens_and_the_terminal_codes():
     light, dark = css_tokens()
     for role, value in SPEC["roles"].items():
         assert (light[role], dark[role]) == (value["light"], value["dark"]), role
-        if "ansi" in value:
-            assert cli.Style.CODES[role] == value["ansi"], role
     assert set(SPEC["levels"]["names"]) <= {role for role, value in SPEC["roles"].items() if "ansi" in value}
 
 
@@ -122,7 +128,8 @@ def test_states_color_the_status_the_same_way():
     css = (WEB / "styles.css").read_text(encoding="utf-8")
     web = dict(re.findall(r'#status\[data-state="(\w+)"\] \{ color: var\(--(\w+)-text\)', css))
     assert web == SPEC["states"]
-    assert re.search(r"color = UI_SPEC\[\"states\"\]\[state\]", Path(cli.__file__).read_text(encoding="utf-8"))
+    assert 'let color = s(&spec()["states"][state]);' in TERMINAL
+    assert 'role => spec()["roles"].get(role).and_then(|r| r.get("ansi"))' in TERMINAL  # the roles' ANSI codes
 
 
 def test_brand_roles_are_the_approved_brand_colors():
@@ -136,9 +143,9 @@ def test_brand_roles_are_the_approved_brand_colors():
 def test_units_follow_a_space_everywhere():
     """A reading and its unit are two words in every frontend: 91.4 %, 51.2 °C, as 918 MHz and -70 dBm."""
     read = lambda path: (ROOT / path).read_text(encoding="utf-8")
-    assert not re.findall(r".{20}\}(?:%|°C)", read("frontends/cli.py"))  # f"{v}%"
     assert not re.findall(r".{20}(?:\+ '(?:%|°C)'|\}(?:%(?![\";)])|°C))", read("frontends/web/app.js"))  # not CSS lengths
-    assert not re.findall(r".{20}\{\}(?:%|°C)", read("native/shared/src/render.rs"))  # format!("{}%")
+    for rust in ("native/shared/src/render.rs", "native/frontend/src/bin/platmon/screen.rs"):
+        assert not re.findall(r".{20}\{\}(?:%|°C)", read(rust)), rust  # format!("{}%")
 
 
 def observation(data, stale=False):
@@ -166,20 +173,25 @@ STALE = {"schema_version": 2, "groups": {name: observation(g["data"], stale=True
 
 @pytest.mark.parametrize("stats, obs", [(HOT, OBSERVED), (HOT, STALE), (FULL, OBSERVED), (FULL, None)],
                          ids=["hot", "stale-observations", "observations-only", "nothing"])
-def test_needs_attention_is_the_same_on_both(stats, obs, monkeypatch, tmp_path):
-    """The same snapshot raises the same entries, in the same order, on the web page and the terminal."""
+def test_needs_attention_is_the_same_on_both(stats, obs, tmp_path):
+    """The same snapshot raises the same entries, in the same order, on the web page and the terminal (the
+    binary's --screen-script answers with its attention list)."""
     node = shutil.which("node")
     if not node:
         pytest.skip("node not installed")
+    if not COMMAND.is_file():
+        pytest.skip(f"needs the platmon command ({COMMAND}, native/build.sh)")
     levels = {"cpu": [80, 90], "gpu": [80, 90], "memory": [80, 90], "filesystem": [80, 90],
               "temperature": [85, 95], "battery": [20, 10], "wifi": [-70, -80]}
     case = tmp_path / "case.json"
     case.write_text(json.dumps({"stats": stats, "observations": obs, "levels": levels}), encoding="utf-8")
     web = json.loads(subprocess.run([node, str(ROOT / "tests/frontends/web_attention_harness.js"), str(WEB / "app.js"),
                                      str(case)], check=True, capture_output=True, text=True, encoding="utf-8").stdout)
-    monkeypatch.setattr(cli, "LIMITS", dict(cli.LIMITS))
-    cli.use_levels(levels)
-    terminal = [list(entry) for entry in cli.attention(stats, obs)]
+    request = {"stats": stats, "obs": obs, "width": 119, "height": 40, "levels": levels,
+               "status": {"state": "live", "age": 0, "error": None, "addr": "localhost:9797", "interval": 1}}
+    answer = subprocess.run([str(COMMAND), "--screen-script"], input=json.dumps(request) + "\n", check=True,
+                            capture_output=True, text=True, encoding="utf-8").stdout
+    terminal = json.loads(answer)["attention"]
     assert [[html.unescape(name), value, lv] for name, value, lv in web] == terminal
 
 
@@ -217,20 +229,24 @@ def test_metric_and_column_labels_are_the_spec_on_both():
     assert js_object(app, "FORMATS") == SPEC["formats"]
     for long, _ in SPEC["columns"].values():
         assert app.count(f"'{long}'") == 1, long  # in COLUMNS only
-    terminal = Path(cli.__file__).read_text(encoding="utf-8")
-    body = terminal[terminal.index("# The shared defaults"):]  # after the UI_SPEC copy
+    body = TERMINAL[TERMINAL.index('"##;'):]  # after the UI_SPEC copy
     for _, short in SPEC["columns"].values():
         assert f'"{short}"' not in body, short
-    labels = [label for label, *_ in cli.metrics(FULL)]
-    assert [label for label in labels if label != "NPU"] == [m["labels"][1] for m in SPEC["metrics"]]
+    assert 'spec()["metrics"]' in TERMINAL and 'spec()["columns"]' in TERMINAL  # the Overview's labels are the copy's
 
 
-@pytest.mark.parametrize("fn, values", [
-    ("size", [0, 1023, 1024, 512 * 1024, 14.3 * 2**20, 102.4 * 2**20, 2**30, 45.1 * 2**30, 57 * 2**30]),
-    ("per_sec", [0, 0.4, 0.5, 1.5, 2.5, 912.4, 301.0])])
-def test_numbers_read_the_same_on_both(fn, values):
+# what the terminal writes for these (screen.rs's numbers_read_the_same_on_both test holds the same lists)
+NUMBERS = {
+    "size": ([0, 1023, 1024, 512 * 1024, 14.3 * 2**20, 102.4 * 2**20, 2**30, 45.1 * 2**30, 57 * 2**30],
+             ["0", "1023B", "1K", "512K", "14M", "102M", "1.0G", "45.1G", "57.0G"]),
+    "per_sec": ([0, 0.4, 0.5, 1.5, 2.5, 912.4, 301.0], ["0", "0", "1", "2", "3", "912", "301"])}
+
+
+@pytest.mark.parametrize("fn", sorted(NUMBERS))
+def test_numbers_read_the_same_on_both(fn):
     """Sizes in the unit that fits them and per-second counts rounded the same way: 14M on both, never
     0.0G, and 0.5 packets/s is 1 on both (Python formats half to even, JavaScript half up)."""
+    values, terminal = NUMBERS[fn]
     node = shutil.which("node")
     if not node:
         pytest.skip("node not installed")
@@ -239,5 +255,5 @@ def test_numbers_read_the_same_on_both(fn, values):
           + "const per_sec = v => v.toFixed(FORMATS.per_s_decimals);\n"
           + f"console.log(JSON.stringify({json.dumps(values)}.map({fn})));")
     web = json.loads(subprocess.run([node, "-e", js], check=True, capture_output=True, text=True).stdout)
-    assert web == [getattr(cli, fn)(v) for v in values]
+    assert web == terminal
     assert "toFixed(FORMATS.per_s_decimals)" in app

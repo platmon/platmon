@@ -12,8 +12,9 @@ difference, an early exit, a nonzero exit or a hang must fail.
 
 The recorded HTTP responses are unstamped (unstamped()), and so are the server's before they are compared.
 --bless runs the server alone and rewrites each scenario's file whose server answered every operation and
-exited with 0, from its answers, unstamped. With the text scenario, its /text answers are also checked
-against frontends/cli.py's render() of the same snapshots (screen_parity).
+exited with 0, from its answers, unstamped. The text scenario's /text answers were also checked against
+frontends/cli.py's render() of the same snapshots until cli.py was removed (screen_parity, in the git history);
+its recorded answers, which passed that check, are /text's regression data now (ADR 0002).
 
   runtime_fixture.py BINARY [--bless] [SCENARIO ...]
   runtime_fixture.py --self-test"""
@@ -27,8 +28,6 @@ import golden
 from fixture import Broken, ask, diff
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "frontends"))
-from cli import render  # noqa: E402  the terminal client, one standalone file
 GOLDEN = os.path.join(HERE, "golden", "runtime")
 TIMEOUT = 30
 S, MS = 1_000_000_000, 1_000_000
@@ -600,33 +599,6 @@ def compare(steps, py_cmd, rs_cmd, timeout=TIMEOUT, record=None):
     return problems, report
 
 
-def screen_parity(binary):
-    """The server's /text against frontends/cli.py's render() of the /api/stats and /api/observations answers
-    at the same moment, for every screen() of text_steps: 503 without a snapshot; else the same text, or 500
-    where render() raises. Problems, as text lines."""
-    record, out = [], []
-    problems, report = compare(text_steps(), None, [binary, "runtime-script"], record=record)
-    if problems:
-        return [f"text steps: {line}" for line in report]
-    answers = [(json.loads(request), answer.get("response", "")) for request, answer in record]
-    for i, (op, response) in enumerate(answers):
-        if not op.get("request", "").startswith("GET /text "):
-            continue
-        (_, stats), (_, obs) = answers[i + 1], answers[i + 2]
-        status, body = response.split("\r\n", 1)[0], response.partition("\r\n\r\n")[2]
-        if stats.startswith("HTTP/1.0 503"):
-            want = ("HTTP/1.0 503 Service Unavailable", None)
-        else:
-            try:
-                want = ("HTTP/1.0 200 OK", render(json.loads(stats.partition("\r\n\r\n")[2]),
-                                                   json.loads(obs.partition("\r\n\r\n")[2])) + "\n")
-            except Exception:  # what the platmon command would fail on
-                want = ("HTTP/1.0 500 Internal Server Error", None)
-        if status != want[0] or want[1] is not None and body != want[1]:
-            out.append(f"/text at {op['now']}: {status} {body[:120]!r}, frontends/cli.py: {want[0]} {(want[1] or '')[:120]!r}")
-    return out
-
-
 def run(name, binary, bless=False):
     """One scenario, against its recorded answers; bless: the server alone, its answers then recorded."""
     path = os.path.join(GOLDEN, f"{name}.jsonl")
@@ -692,11 +664,6 @@ def main():
     names = names or list(SCENARIOS)
     failed = sum(run(n, os.path.abspath(binary), bless) > 0 for n in names)
     print(f"{len(names) - failed}/{len(names)} scenarios {'blessed' if bless else 'equal'}")
-    if "text" in names:
-        parity = screen_parity(os.path.abspath(binary))
-        print(f"/text and frontends/cli.py: {'the same screens' if not parity else 'DIFFERENT'}")
-        print("\n".join(f"  {p}" for p in parity[:20]))
-        failed += bool(parity)
     sys.exit(1 if failed else 0)
 
 

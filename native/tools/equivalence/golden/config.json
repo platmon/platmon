@@ -711,7 +711,7 @@
  {
   "name": "removed section",
   "python": {
-   "error": "[terminal] is no longer supported: the terminal view is now the `platmon` command (frontends/cli.py); delete this section"
+   "error": "[terminal] is no longer supported: the terminal view is now the `platmon` command; delete this section"
   }
  },
  {

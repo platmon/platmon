@@ -155,15 +155,6 @@ def package(tmp_path, binaries):
     return build(tmp_path / "dist", binaries=binaries)
 
 
-def test_release_versions_match_and_cli_stays_standalone(tmp_path):
-    release = version()
-    cli = tmp_path / "platmon"
-    shutil.copyfile(ROOT / "frontends/cli.py", cli)
-    result = run(sys.executable, str(cli), "--version", cwd=tmp_path)
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == f"platmon {release}"
-
-
 @pytest.mark.parametrize("value", ["1.0", "01.0.0", "1.0.0-rc.1", "not-a-version"])
 def test_bad_version_refused(tmp_path, value):
     (tmp_path / "VERSION").write_text(value + "\n")

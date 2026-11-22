@@ -72,7 +72,7 @@ function activateTab(tab, save = true) {
   renderActive(); renderObservations(); renderHistory();
   pollObs(); pollHist();
 }
-// why CPU rows are missing: the service compares /proc/stat readings, so the first one has none (same as cli.py)
+// why CPU rows are missing: the service compares /proc/stat readings, so the first one has none (same as the platmon command)
 const CPU_REASONS = {warmup: 'warming up', counter_regressed: 'counter went backwards', no_ticks: 'no ticks counted',
   invalid_interval: 'invalid interval', gap: 'restarting after a gap'};
 function cpuNote(s) {
@@ -85,7 +85,7 @@ function cpuNote(s) {
     : whys.map(why => groups[why].join(' ') + ' ' + why).join('; '));
 }
 
-// network interfaces and disks with the rates the server computed (same wording as cli.py); a counter
+// network interfaces and disks with the rates the server computed (same wording as the platmon command); a counter
 // without a rate says why, it is never shown as 0. I/O time is the share of the window with I/O in flight.
 const RATE_REASONS = {warmup: 'warming up', gap: 'restarting after a gap', counter_regressed: 'counter went backwards',
   invalid_interval: 'invalid interval', identity_unavailable: 'identity unknown', namespace_changed: 'namespace changed'};
@@ -433,7 +433,7 @@ function psiRows(s) {
   return rows.length ? table('minmax(0, 1fr) 80px 80px', ['Resource', 'Some', 'Full'], rows) : '';
 }
 
-// optional groups that could not read everything, as in cli.py; nothing for absent sensors or older servers
+// optional groups that could not read everything, as in the platmon command; nothing for absent sensors or older servers
 function collectionNote(s) {
   const c = s.collectors && typeof s.collectors === 'object' ? s.collectors : {};
   return Object.entries(c).filter(([name, v]) => name !== 'core' && v && (v.state === 'partial' || v.state === 'error'))

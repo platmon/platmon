@@ -1,7 +1,8 @@
-//! frontends/cli.py's live terminal screen, screen() and what it draws with: the same data, wording and
-//! levels as the web page, one view at a time. Pure: lines of text from a snapshot, a width and a height;
-//! the terminal itself is term.rs's. Where cli.py would raise on a malformed answer (a key missing, None
-//! formatted as a number), this draws what it can instead (the plain screen, render.rs, still refuses).
+//! The live terminal screen, frontends/cli.py's screen() ported (cli.py is in the git history), and what it
+//! draws with: the same data, wording and levels as the web page, one view at a time. Pure: lines of text
+//! from a snapshot, a width and a height; the terminal itself is term.rs's. Where cli.py would raise on a
+//! malformed answer (a key missing, None formatted as a number), this draws what it can instead (the plain
+//! screen, render.rs, still refuses).
 use crate::json::{parse, Value};
 use crate::render::{collection_note, cpu_note, f, group, num, pad_right, per_s, rate_reason, s, truthy};
 use std::collections::HashMap;
@@ -1268,5 +1269,117 @@ mod tests {
                 assert!(lines.len() <= h && lines.iter().all(|l| vlen(l) <= w), "{} {}x{}", view, w, h);
             }
         }
+    }
+
+    // What tests/frontends/test_cli_screen.py checked of cli.py's attention(), use_levels(), make_style(),
+    // tabbar() and busiest_first(), kept when cli.py was removed; that file still checks the screens, through
+    // the binary's --screen-script.
+
+    const FULL: &str = r#"{"platform": "Jetson Orin", "model": "Test Board", "uptime": 90061, "power_mode": "MAXN_SUPER",
+        "system": {"os": "Ubuntu 22.04.5 LTS", "kernel": "5.15.199-tegra", "arch": "aarch64", "hostname": "orin", "l4t": "R36.5.2"},
+        "cpu": [{"id": 0, "usage": 12.5, "freq": 1728000000}, {"id": 7, "usage": 91.4, "freq": 1728000000}],
+        "gpu": {"usage": 50.0, "freq": 306000000, "max_freq": 1020000000},
+        "memory": {"total": 8589934592, "used": 2147483648, "swap_total": 4294967296, "swap_used": 0},
+        "disk": {"total": 107374182400, "used": 26843545600},
+        "temperature": {"cpu": 51.2, "tj": 86.2}, "power": {"VDD_IN": 4.82},
+        "fans": [{"name": "pwmfan", "rpm": null, "percent": 31}, {"name": "pwm_tach", "rpm": 1741, "percent": null}]}"#;
+
+    /// test_cli_screen.py's HOT: CPU7 at 91.4 %, tj at 86.2 °C.
+    fn hot() -> Value {
+        parse(FULL).unwrap()
+    }
+
+    fn found(a: Vec<(String, String, &'static str, &'static str)>) -> Vec<(String, String, &'static str)> {
+        a.into_iter().map(|(name, value, lv, _)| (name, value, lv)).collect()
+    }
+
+    fn one(name: &str, value: &str, lv: &'static str) -> (String, String, &'static str) {
+        (name.into(), value.into(), lv)
+    }
+
+    #[test]
+    fn attention_follows_the_web_levels() {
+        // the CPU mean, 52 %, is fine; tj at 86.2 °C is a warning by the generic level (85/95), not critical
+        assert_eq!(found(attention(&hot(), None, &Limits::new())), [one("tj", "86.2 °C", "warn")]);
+    }
+
+    #[test]
+    fn server_levels_replace_the_defaults() {
+        // /api/status "levels" ([thresholds]) as the web page uses them; bad or missing ones keep the defaults
+        let mut lim = Limits::new();
+        lim.use_levels(Some(&parse(r#"{"temperature": [80, 90], "memory": [10, 20], "cpu": [90, 80], "gpu": "x", "swap": [1, 2]}"#).unwrap()));
+        assert_eq!((lim.get("memory"), lim.get("cpu"), lim.get("gpu")), (Some((10.0, 20.0)), Some((80.0, 90.0)), Some((80.0, 90.0))));
+        assert!(!lim.0.iter().any(|(k, _)| k == "swap"));
+        assert_eq!(found(attention(&hot(), None, &lim)), [one("RAM", "25.0 %", "crit"), one("tj", "86.2 °C", "warn")]);
+        lim.use_levels(Some(&parse(r#"{"temperature": null}"#).unwrap()));
+        assert_eq!(found(attention(&hot(), None, &lim))[1], one("tj", "86.2 °C", "warn")); // null: the generic level again
+        lim.use_levels(None); // an older server
+        assert_eq!(lim.get("memory"), Some((10.0, 20.0)));
+    }
+
+    #[test]
+    fn low_levels() {
+        // battery charge and Wi-Fi signal: at or below a level, the opposite of the other readings; only from a
+        // current observation, and never from an empty bay or a disconnected interface
+        let calm = parse(r#"{"model": "M", "platform": "P", "uptime": 1, "power_mode": null, "cpu": [], "gpu": null,
+                             "memory": {"total": 100, "used": 1, "swap_total": 0, "swap_used": 0}, "disk": {"total": 10, "used": 1},
+                             "temperature": {}, "power": {}, "fans": []}"#).unwrap();
+        let obs = |percent: i64, dbm: i64, stale: bool| parse(&format!(r#"{{"groups": {{
+            "battery": {{"observation": {{"data_age_ms": 4200, "stale": {stale}}}, "data": {{"batteries": [
+                {{"name": "BAT1", "present": true, "percent": {percent}}}, {{"name": "BAT2", "present": false, "percent": 3}}], "external": []}}}},
+            "wifi": {{"observation": {{"data_age_ms": 4200, "stale": {stale}}}, "data": {{"interfaces": [
+                {{"name": "wlan0", "connected": true, "signal_dbm": {dbm}}}, {{"name": "wlan1", "connected": false, "signal_dbm": -99}}]}}}}}}}}"#)).unwrap();
+        let lim = Limits::new();
+        assert!(attention(&calm, Some(&obs(89, -47, false)), &lim).is_empty());
+        assert_eq!(found(attention(&calm, Some(&obs(20, -70, false)), &lim)), [one("BAT1", "20 %", "warn"), one("wlan0", "-70 dBm", "warn")]);
+        assert_eq!(found(attention(&calm, Some(&obs(10, -81, false)), &lim)), [one("BAT1", "10 %", "crit"), one("wlan0", "-81 dBm", "crit")]);
+        assert!(attention(&calm, Some(&obs(10, -81, true)), &lim).is_empty()); // not a current reading
+        // the server's levels: low ones arrive warning above critical; the wrong order keeps the default
+        let mut lim = Limits::new();
+        let wifi = lim.get("wifi");
+        lim.use_levels(Some(&parse(r#"{"battery": [30, 15], "wifi": [-80, -70]}"#).unwrap()));
+        assert_eq!((lim.get("battery"), lim.get("wifi")), (Some((30.0, 15.0)), wifi));
+        assert_eq!(wifi, Some((-70.0, -80.0)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ascii_on_request() {
+        assert_eq!(make_style(None, None, true).full, "█");
+        assert_eq!(make_style(None, Some("1"), true).full, "#");
+        assert_eq!(make_style(None, None, false).full, "#");
+        assert!(!make_style(Some("1"), None, true).color);
+    }
+
+    #[test]
+    fn the_tab_bar_names_every_view_and_marks_the_active_one() {
+        let st = Style::new(false, true);
+        let n = views().len();
+        let bar = tabbar(&st, 119, "network", &[]);
+        assert!(bar.contains("[3 Network]") && bar.contains("1 Overview") && bar.contains(&format!("{n} System")));
+        assert!(bar.contains("5 Temperature") && bar.contains("6 Power & battery")); // the two the thermal view was split into
+        let narrow = tabbar(&st, 44, "network", &[]); // shorter labels, still every view
+        assert!(narrow.contains("[3 Ne]") && vlen(&narrow) <= 44 && (1..=n).all(|i| narrow.contains(&i.to_string())));
+        let tiny = tabbar(&st, 24, "system", &[]); // no room for every label: the position instead
+        assert!(tiny.trim().starts_with(&format!("{n}/{n} Sys")) && vlen(&tiny) <= 24, "{tiny}");
+    }
+
+    #[test]
+    fn numbers_read_the_same_on_both() {
+        // the web page's results (tests/frontends/test_ui_spec.py NUMBERS holds the same lists)
+        let sizes = [0.0, 1023.0, 1024.0, 512.0 * 1024.0, 14.3 * 1048576.0, 102.4 * 1048576.0, 1073741824.0, 45.1 * 1073741824.0,
+                     57.0 * 1073741824.0];
+        assert_eq!(sizes.map(size), ["0", "1023B", "1K", "512K", "14M", "102M", "1.0G", "45.1G", "57.0G"]);
+        assert_eq!([0.0, 0.4, 0.5, 1.5, 2.5, 912.4, 301.0].map(per_sec), ["0", "0", "1", "2", "3", "912", "301"]);
+    }
+
+    #[test]
+    fn busiest_interfaces_first() {
+        let rate = |name: &str, rx: f64, tx: f64| parse(&format!(r#"{{"name": "{name}", "rates": {{"rx_bytes_per_s": {rx}, "tx_bytes_per_s": {tx},
+            "rx_packets_per_s": 0, "tx_packets_per_s": 0}}}}"#)).unwrap();
+        let items = [rate("br0", 0.0, 0.0), parse(r#"{"name": "wlan1", "rates": null, "reason": "warmup"}"#).unwrap(),
+                     rate("eth0", 10.0, 5.0), rate("can0", 0.0, 0.0)];
+        let order: Vec<String> = busiest_first(&items, &HashMap::new()).into_iter().map(|i| s(&i["name"])).collect();
+        assert_eq!(order, ["eth0", "br0", "can0", "wlan1"]);
     }
 }

@@ -1,6 +1,6 @@
-//! The platmon command: live view of a platmon service, this device's by default. The port of
-//! frontends/cli.py, with its options, exit codes, messages and screens (the versioning contract);
-//! cli.py stays the reference until it is removed (docs/development/remaining-work.md).
+//! The platmon command: live view of a platmon service, this device's by default. Ported from
+//! frontends/cli.py (removed once this was packaged in its place; in the git history), keeping its options,
+//! exit codes, messages and screens (the versioning contract); where this file names cli.py, it is that file.
 //!
 //!   platmon [host[:port]] [interval_sec] [--once | --view VIEW] [--version]   (default localhost:9797, 1 s)
 //!
@@ -10,9 +10,9 @@
 //! Test hook, not for users: `platmon --screen-script` reads one JSON request per stdin line
 //! ({"stats", "obs", "width", "height", "view", "offset", "status": {"state", "age", "error", "addr",
 //! "interval", "traffic"}, "color", "utf8", "levels"}) and answers each with one line,
-//! {"lines": screen(), "scroll": [offset, page]} ({"keys", "view", "offset", "page"}: {"view", "offset"} after
-//! those keys), so tools/equivalence/cli_fixture.py can compare frames
-//! with cli.py's screen() without a terminal.
+//! {"lines": screen(), "scroll": [offset, page], "attention": [[name, value, level], ...]} ({"keys", "view",
+//! "offset", "page"}: {"view", "offset"} after those keys), so tests/frontends/test_cli_screen.py can check
+//! frames without a terminal and test_ui_spec.py the attention list against the web page's.
 mod net;
 mod screen;
 #[cfg(unix)]
@@ -455,6 +455,9 @@ fn screen_script() {
                                              num(&r["offset"]) as i64, &lim);
         out.set("lines", Value::Arr(lines.into_iter().map(Value::Str).collect()));
         out.set("scroll", Value::Arr(vec![Value::Int(o), Value::Int(p)]));
+        let alerts = screen::attention(&r["stats"], obs, &lim).into_iter()
+            .map(|(name, value, lv, _)| Value::Arr(vec![Value::Str(name), Value::Str(value), Value::from(lv)])).collect();
+        out.set("attention", Value::Arr(alerts));
         print(&out.to_py(), true);
     }
 }
@@ -523,5 +526,15 @@ mod tests {
         assert_eq!(now["groups"]["wifi"]["observation"]["stale"], Value::Bool(true));
         assert_eq!(now["groups"]["wifi"]["state"], Value::from("stale"));
         assert_eq!(body["groups"]["wifi"]["observation"]["stale"], Value::Bool(false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn data_age_is_the_servers_plus_time_since() {
+        let got = Instant::now();
+        let at = |ms: u64| got + Duration::from_millis(ms);
+        assert_eq!(data_age(&json::parse(r#"{"sample": {"data_age_ms": 1500}}"#).unwrap(), got, at(2000)), 3.5);
+        assert_eq!(data_age(&Value::obj(), got, at(2000)), 2.0); // an older server: the time since its answer
+        assert_eq!(data_age(&json::parse(r#"{"sample": {"data_age_ms": null}}"#).unwrap(), got, at(500)), 0.5);
     }
 }

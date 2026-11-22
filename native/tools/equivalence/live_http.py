@@ -3,12 +3,12 @@ a local port and checks it. What does not depend on the host is checked against 
 service gave (recorded 2026-10-29, before its removal in 1.6.0, when this compared the two servers). Only
 the process it started is stopped (and restarted once), by its own handle.
 
-  python3 live_http.py PATH/TO/platmon-server [--json OUT]
+  python3 live_http.py PATH/TO/platmon-server [--json OUT]   (the platmon command beside it, when there)
 
 - every path: status code, Content-Type, Cache-Control as the Python service answered (PATHS); the web page
   and its files: the bytes of frontends/web (the page with the version filled in)
-- the /text screen: the sections frontends/cli.py's renderer gives for the same /api/stats and
-  /api/observations
+- the /text screen: the sections the platmon command (beside the server, as native/build.sh leaves it; skipped
+  without one) prints with --once for the same /api/stats and /api/observations, served to it by a stub
 - raw requests at the protocol's edges (HEAD, HTTP/0.9, versions, header and line limits): the answer's
   shape from its bytes (status line and headers or none, header names, a body or none), as the Python
   service gave it except where ADR 0002 changed it: every request but an empty line gets a status line,
@@ -52,9 +52,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, os.path.dirname(HERE))  # native/tools: walk.py, worker.py
 import walk  # noqa: E402
 import worker  # noqa: E402
-sys.path.insert(0, os.path.join(REPO, "frontends"))
-from cli import render  # noqa: E402  the terminal client, one standalone file
 
+COMMAND = None  # the platmon command beside the server (main)
 PATHS = ["/api/stats", "/api/status", "/api/observations", "/api/history", "/api/samples",
          "/api/observation-samples?group=storage", "/api/stats?x=1", "/", "/index.html", "/app.js", "/styles.css",
          "/assets/brand/favicon.svg", "/assets/brand/platmon-logo-dark.svg", "/nothing", "/text", "/text?x"]
@@ -456,6 +455,37 @@ def version():
         return f.read().strip()
 
 
+def once(command, bodies):
+    """The platmon command's --once output for these /api/stats and /api/observations answers, from a stub
+    server; None without the command."""
+    if not os.path.isfile(command):
+        return None
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Stub(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path not in ("/api/stats", "/api/observations"):
+                return self.send_error(404)
+            data = json.dumps(bodies[self.path]).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    stub = ThreadingHTTPServer(("127.0.0.1", 0), Stub)
+    threading.Thread(target=stub.serve_forever, daemon=True).start()
+    try:
+        return subprocess.run([command, f"127.0.0.1:{stub.server_address[1]}", "--once"], capture_output=True,
+                              text=True, encoding="utf-8", timeout=20, env={"LC_ALL": "C.UTF-8"}).stdout
+    finally:
+        stub.shutdown()
+        stub.server_close()
+
+
 def heads(text):
     """The /text screen's sections: the first word of each line that is not indented."""
     return [line.split()[0] for line in text.split("\n")[2:] if line and not line.startswith(" ")]
@@ -476,9 +506,9 @@ def problems(r, stopped, restarted):
         with open(f"{REPO}/frontends/web{path}", "rb") as f:
             if eps[path]["body"] != f.read():
                 out.append(f"{path}: not the bytes of frontends/web{path}")
-    a, b = heads(eps["/text"]["body"].decode()), heads(render(r["bodies"]["/api/stats"], r["bodies"]["/api/observations"]))
-    if a != b:
-        out.append(f"/text: sections {a} != {b} (frontends/cli.py)")
+    command = once(COMMAND, r["bodies"])
+    if command is not None and heads(eps["/text"]["body"].decode()) != heads(command):
+        out.append(f"/text: sections {heads(eps['/text']['body'].decode())} != {heads(command)} (the platmon command)")
     for name in RAW:
         if r["raw"][name] != RAW_EXPECTED[name]:
             out.append(f"raw {name}: {r['raw'][name]} != {RAW_EXPECTED[name]}")
@@ -520,7 +550,9 @@ def main():
     tested = self_test() & walk.self_test() & worker.self_test()
     if sys.argv[1:] == ["--self-test"] or not tested:
         sys.exit(0 if tested else 1)
+    global COMMAND
     binary, interval, port = os.path.abspath(sys.argv[1]), 1.0, free_port()
+    COMMAND = os.path.join(os.path.dirname(binary), "platmon")
     log = tempfile.TemporaryFile("w+")
     proc = start(binary, port, interval, log)
     try:
