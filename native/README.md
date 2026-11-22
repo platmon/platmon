@@ -40,7 +40,7 @@ The whole default service, with the output the Python one gave:
   and `--frontends` ([Runtime](#runtime))
 
 The `platmon` command is the workspace's second binary, `platmon` (`frontend/src/bin/platmon/`, sharing
-`shared/`; not part of `platmon-server`), packaged as `platmon-cli` and in the Windows zip and installer
+`shared/`; not part of `platmon-server`), packaged as `platmon-frontend` (with the web page) and in the Windows zip and installer
 (`platmon.exe`) after 1.10.0. It is the port of `frontends/cli.py` (removed then; in the git history): the
 same options, exit codes, messages, `--once` output and live screens, compared with `cli.py` byte for byte
 by `tools/equivalence/cli_fixture.py` (12 `--once` snapshots, 23 failures, 4552 screens, 350 key presses, a
@@ -99,7 +99,8 @@ restart, and moves the cursor on also when everything asked for has expired. Pub
 reused, but never a finished answer: ages and `stale` are computed per answer, also for replayed samples.
 
 `platmon-server serve [platmon.ini] [--frontends LIST] --web DIR [--app-version V]` (the version defaults to
-the repository's `VERSION`, read at build time; without `--web` the start log says the page is off;
+the repository's `VERSION`, read at build time; without `--web` the start log says the page is off, and
+with a directory that has no `index.html` that the page is not installed;
 `platmon-server --help` lists the commands):
 
 Publication and the live API (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
@@ -119,6 +120,13 @@ Publication and the live API (`src/runtime.rs`, `src/slow.rs`, `src/http.rs`):
   lines as `http.server` gives them; HEAD gets the 501's headers without its page; a request without a
   version (HTTP/0.9) gets 400 and a version other than 1.x 505, with a status line like every answer but an
   empty request line's ([ADR 0002](../docs/development/adr/0002-api-contract-not-python-answers.md)).
+- The web page: any regular file of the `--web` directory whose path is plain segments (ASCII letters,
+  digits, `-`, `_`, `.`; none empty or starting with `.`) and whose extension has a known type (`html`, `js`,
+  `css`, `svg`, `json`, `png`, `ico`, `woff2`), not through a symbolic link; everything else, `..` and `%`
+  included (nothing is decoded), is 404, and an unknown type is never sent as a generic one. No file list:
+  the core does not know the page's files, and fills nothing into them (the page reads `levels` and
+  `version` from `/api/status`). Without `index.html`, `/` answers 404 with one line naming
+  `platmon-frontend`.
 - Slow groups: one thread each, the next observation an interval after the last one started; their entries
   as `runtime/slow.py` writes them.
 

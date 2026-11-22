@@ -46,7 +46,9 @@ const obsAnswers = [];  // what /api/observations requests get, in order; a 404 
 let obsFetches = 0;
 const histAnswers = [];  // /api/history answers, in order; 404 (off, or an older server) when none is queued
 let histFetches = 0;
+let statusFetches = 0;  // /api/status, asked once at load: unreachable here, so the defaults and index.html's version stay
 global.fetch = (url, opts) => {
+  if (url === 'api/status') { statusFetches++; return Promise.reject(new TypeError('Failed to fetch')); }
   if (url === 'api/observations') { obsFetches++; return (obsAnswers.shift() || (() => Promise.resolve(reply(404, {}))))(); }
   if (url.startsWith('api/history')) { histFetches++; return (histAnswers.shift() || (() => Promise.resolve(reply(404, {}))))(); }
   fetches++; return answers.shift()((opts || {}).signal);
@@ -57,7 +59,7 @@ const report = step => { views = captureViews(); console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('status').title, status: el('status').textContent, err_age: el('err-age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
-  net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, batt: el('batt').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches, ...views,
+  net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, batt: el('batt').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches, status_fetches: statusFetches, version: el('system-version').textContent, ...views,
 })); };
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 

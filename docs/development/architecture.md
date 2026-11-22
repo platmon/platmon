@@ -102,12 +102,15 @@ server serves its files.
 
 ## Frontends
 
-`src/http.rs` serves the API, `/text`, the HTML page and an explicit allowlist of web assets.
-`frontends/web/index.html` owns markup and server-injected version/threshold values; `styles.css` owns
-styling and `app.js` owns polling, navigation and rendering. No JavaScript build step is required.
+`src/http.rs` serves the API, `/text` and the files of the web directory: any regular file of a known type
+(by extension) under it, without a list of names, and nothing that leaves it (no `..`, no `%` decoding, no
+hidden files or links); a missing `index.html` makes `/` a 404 that names `platmon-frontend`.
+`frontends/web/index.html` owns markup; `styles.css` owns styling and `app.js` owns polling, navigation and
+rendering, and reads the levels and the version from `/api/status` (the server fills nothing into the page).
+No JavaScript build step is required.
 
 The `platmon` command is `native/frontend/` (the `platmon-frontend` crate): a static binary that
-`platmon-cli` and `scripts/install-cli.sh` install on a client machine without the server. It depends on
+`platmon-frontend` (with the web page) and `scripts/install-cli.sh` install on a client machine without the server. It depends on
 `native/shared/` only, never on the server's modules, and reads `VERSION` at build time. It replaced
 `frontends/cli.py` (a standard-library Python file, in the git history) after 1.10.0.
 
@@ -157,7 +160,7 @@ build context and default INI file back to that root.
 `packaging/debian/` contains package metadata, the package's unit and lifecycle hooks. `scripts/packaging/`
 contains the builder, extracted-package smoke check and disposable-container lifecycle and systemd service
 checks. The Debian package contains the static server built from `native/` (`native/build.sh`, one package
-per architecture), the web files of `frontends/web/`, and `platmon-cli` the `platmon` command built beside it. The
+per architecture), and `platmon-frontend` the web files of `frontends/web/` and the `platmon` command built beside it. The
 source installation and the container install the same server and web files; `native/tools/` compares the
 server with the Python server's recorded answers. The source archive additionally includes `native/`,
 deployment files, build tools, tests and documentation.

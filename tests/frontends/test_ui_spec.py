@@ -94,9 +94,7 @@ def test_level_defaults_are_the_servers_and_every_frontends():
     app = (WEB / "app.js").read_text(encoding="utf-8")
     web = re.search(r"const LIMITS = \{(.*?)\};", app, re.S).group(1)
     assert {name: [int(warn), int(crit)] for name, warn, crit in re.findall(r"(\w+): \[(-?\d+), (-?\d+)\]", web)} \
-        == levels["defaults"]
-    assert re.search(r"LIMITS\.temperature \|\|= \[(-?\d+), (-?\d+)\]", app).groups() == \
-        tuple(str(x) for x in levels["defaults"]["temperature"])
+        == levels["defaults"]  # also what a null temperature from /api/status leaves (applyStatus takes lists only)
 
     # the terminal leaves temperature to the server (its board's level) and falls back to its copy's generic one
     assert 'spec()["levels"]["defaults"]' in TERMINAL and 'spec()["levels"]["low_is_bad"]' in TERMINAL

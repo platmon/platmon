@@ -13,9 +13,9 @@
 >   further device unless asked, an unsigned MSI, the switch in the next release): Windows 11 x86_64 is
 >   supported from the release after 1.9.0; the evidence is [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16).
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
-> - Decided (2026-11-22): the `platmon` command in Rust (step 1, done: the binary is `platmon-cli` and
->   `cli.py` is removed, #239 and this change), then the frontends in one package `platmon-frontend`, then a
->   tray on Linux and Windows; macOS planned ([below](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22)).
+> - Decided (2026-11-22): the `platmon` command in Rust (step 1, done: #239, #240, `cli.py` removed), then
+>   the frontends in one package `platmon-frontend` (step 2, done: this change, the web page moved from
+>   `platmon` and `platmon-cli` renamed), then a tray on Linux and Windows; macOS planned ([below](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22)).
 > - Also recorded, not started: a separate network process (deferred; no Unix socket).
 
 Merging, production rollout and releases always wait for the owner's approval. The staged plan of
@@ -340,7 +340,7 @@ the API without the page, this host only), on Linux and Windows alike; they are 
 
 ## Decided: the frontend package, the CLI in Rust and the tray (2026-11-22)
 
-Step 1 done (#239 and this change); steps 2 and 3 not started. Decided with the owner on 2026-11-22,
+Steps 1 (#239, #240) and 2 (this change) done; step 3 not started. Decided with the owner on 2026-11-22,
 replacing the tray plan of 2026-10-18; each step is its own change and release, and starting each is the
 owner's decision.
 
@@ -357,9 +357,13 @@ data (the web page, the `platmon` command, the tray) is a frontend, in one packa
 - `platmon-cli` is renamed `platmon-frontend` and takes the web page from `platmon`. platmon has no users
   outside the maintainer's devices yet (#181), so there is no transitional package: `platmon-frontend` only
   carries `Breaks`/`Replaces: platmon-cli` and `Replaces: platmon (<< that release)` (`Obsoletes`/`Provides` in
-  the `.rpm`), enough for the maintainer's devices to upgrade.
+  the `.rpm`), enough for the maintainer's devices to upgrade. As built: `Conflicts`/`Replaces: platmon-cli`
+  (Debian's relation for a renamed package, so that a plain `dpkg -i` removes it), `Breaks` too on `platmon
+  (<< that release)` (the old `platmon` without its page would be broken, Debian policy 7.6.1), every bound
+  that release's upstream version.
 - With `web = yes` and no page installed (`--no-install-recommends`), the server answers `/` with a 404 that
-  names `platmon-frontend`; today `native/src/http.rs` fails reading `index.html`.
+  names `platmon-frontend`; until step 2 `native/src/http.rs` failed reading `index.html` (the connection
+  closed without an answer).
 - Windows: unchanged, one MSI and one zip with everything. Docker: unchanged, built from the source.
 - A core-only host is still read by platmon-hub, a `platmon` command elsewhere, the Prometheus exporter
   and `curl`: the API is the core's.
@@ -404,11 +408,17 @@ or Jetson GNOME, the Windows laptop and desktop.
 
 1. The command in Rust, still as `platmon-cli`. **Done:** the binary (#239: compared with `cli.py` byte for
    byte on 12 `--once` snapshots, 23 failures, 4552 screens, 350 key presses, a pipe and two terminal
-   sessions), then this change: `native/` a Cargo workspace, `platmon-cli` per architecture without Python
+   sessions), then #240: `native/` a Cargo workspace, `platmon-cli` per architecture without Python
    (`.deb` amd64, arm64, armhf; `.rpm` x86_64, aarch64), `platmon.exe` in the zip and the MSI, `cli.py`
    removed and its tests moved to Rust tests and the binary. Accepted differences: no proxy, no NSS (mDNS
    `.local` names), one line where `cli.py` printed a traceback.
-2. The packages: `platmon-frontend` and the 404 for a missing page.
+2. The packages: `platmon-frontend` and the 404 for a missing page. **Done** (this change): `platmon-cli`
+   renamed `platmon-frontend` with the web page moved into it (`.deb` and `.rpm`; Windows and Docker
+   unchanged), `/` a 404 naming `platmon-frontend` when the page is not installed, the server serving its web
+   directory without a list, and the page reading `levels` and `version` (a new `/api/status` field) from
+   the API. Upgrades from 1.10.0 checked in containers with a local APT and DNF repository: `apt
+   full-upgrade`, `apt install platmon-frontend` and `dnf upgrade` move the page and replace `platmon-cli`;
+   `apt upgrade` and `apt-get upgrade` keep `platmon` back while `platmon-cli` is installed.
 3. The tray.
 
 ### macOS: planned
@@ -420,12 +430,11 @@ not). No tray (the menu bar needs the Objective-C runtime) and no server on macO
 
 ### One repository
 
-The frontends stay in this repository; the boundary is the package. The core is tied to them: the web
-files it serves are listed in `http.rs` (`WEB`), it fills `@VERSION@` and `@LEVELS@` into `index.html`,
-`/text` is the command's `render()`, the equivalence and packaging tools read `frontends/`, and the MSI
+The frontends stay in this repository; the boundary is the package. The core is tied to them: `/text` is
+the command's `render()`, the equivalence and packaging tools read `frontends/`, and the MSI
 holds both. Revisit when the frontends get their own contributors or release cadence, after: the core
-serving its web directory without a list and the page reading its version and levels from `/api/status`,
-`/text`'s owner decided, a compatibility table and CI pairing as with platmon-hub, and where the MSI is built.
+serving its web directory without a list and the page reading its version and levels from `/api/status`
+(both done in step 2), `/text`'s owner decided, a compatibility table and CI pairing as with platmon-hub, and where the MSI is built.
 
 Kept for such a split (step 1):
 
@@ -434,6 +443,6 @@ Kept for such a split (step 1):
   the frontend's: the compiler enforces the boundary a split would cut along.
 - `shared/` owns `/text`'s renderer (`render.rs`) and the JSON code both sides use; the server's `/text` and
   the command's `--once` are the same function, so `/text`'s owner is decided as that crate's.
-- Planned for step 2: the server serving its web directory without the `WEB` list in `http.rs`, and the page
-  reading its version and levels from `/api/status` instead of `@VERSION@` and `@LEVELS@` filled in by the
-  server.
+- Done in step 2: the server serves its web directory without the `WEB` list in `http.rs` (any regular file
+  of a known type), and the page reads its version and levels from `/api/status` instead of `@VERSION@` and
+  `@LEVELS@` filled in by the server: the first two prerequisites above are met.

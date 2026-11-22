@@ -168,7 +168,7 @@ def test_package_contents_and_config_ownership(package, binaries, tmp_path, arch
     metadata = run("dpkg-deb", "-f", str(package))
     assert metadata.returncode == 0
     assert f"Architecture: {arch}" in metadata.stdout and "python3" not in metadata.stdout
-    assert "Depends: systemd, init-system-helpers (>= 1.56)\nRecommends: platmon-cli\n" in metadata.stdout
+    assert "Depends: systemd, init-system-helpers (>= 1.56)\nRecommends: platmon-frontend\n" in metadata.stdout
     assert f"Version: {version()}-1" in metadata.stdout
     root = tmp_path / "extracted"
     assert run("dpkg-deb", "-R", str(package), str(root)).returncode == 0
@@ -180,13 +180,12 @@ def test_package_contents_and_config_ownership(package, binaries, tmp_path, arch
     server = root / "usr/lib/platmon/platmon-server"
     assert server.read_bytes() == binaries[arch].read_bytes() and os.access(server, os.X_OK)
     assert os.readlink(root / "usr/lib/platmon/platmon-native") == "platmon-server"  # the name up to 1.6.0
-    # No Python in the server package: the platmon command is platmon-cli's.
-    assert not (root / "usr/share/platmon/platmon.py").exists() and not list(root.rglob("*.py"))
-    assert (root / "usr/share/platmon/frontends/web/assets/brand/favicon.svg").is_file()
-    assert (root / "usr/share/platmon/frontends/web/index.html").is_file()
+    # No Python in the server package; the platmon command and the web page are platmon-frontend's.
+    assert not list(root.rglob("*.py"))
+    assert not (root / "usr/share/platmon").exists()
     assert not (root / "usr/local").exists()
     assert not list(root.rglob("*.pyc"))
-    assert not (root / "usr/bin").exists() and not (root / "usr/share/man").exists()  # in platmon-cli
+    assert not (root / "usr/bin").exists() and not (root / "usr/share/man").exists()
     for name in ("preinst", "postinst", "prerm", "postrm"):
         assert run("sh", "-n", str(root / "DEBIAN" / name)).returncode == 0
     doc = root / "usr/share/doc/platmon"
@@ -205,26 +204,35 @@ def test_package_contents_and_config_ownership(package, binaries, tmp_path, arch
 
 
 @pytest.mark.parametrize("arch", sorted(RELEASED))
-def test_cli_package_contents(package, binaries, tmp_path, arch):
-    cli = package[0].parent / f"platmon-cli_{version()}-1_{arch}.deb"
+def test_frontend_package_contents(package, binaries, tmp_path, arch):
+    cli = package[0].parent / f"platmon-frontend_{version()}-1_{arch}.deb"
     assert cli in package
     metadata = run("dpkg-deb", "-f", str(cli)).stdout
-    for field in ("Package: platmon-cli", "Source: platmon", f"Version: {version()}-1", f"Architecture: {arch}",
-                  "Breaks: platmon (<< 1.7.0)", "Replaces: platmon (<< 1.7.0)"):
+    # platmon-cli was its name (a rename: Conflicts, so that dpkg removes it), and platmon had the web page (and
+    # before 1.7.0 the command; Breaks, as files moved), up to this release
+    for field in ("Package: platmon-frontend", "Source: platmon", f"Version: {version()}-1", f"Architecture: {arch}",
+                  f"Breaks: platmon (<< {version()})", f"Conflicts: platmon-cli (<< {version()})",
+                  f"Replaces: platmon (<< {version()}), platmon-cli (<< {version()})"):
         assert field + "\n" in metadata, field
+    assert "\nProvides:" not in metadata  # no transitional package
     assert "\nDepends:" not in metadata and "python3 (" not in metadata  # one static binary
     root = tmp_path / "extracted"
     assert run("dpkg-deb", "-R", str(cli), str(root)).returncode == 0
     command = root / "usr/bin/platmon"
     assert os.access(command, os.X_OK) and command.read_bytes() == command_beside(binaries[arch]).read_bytes()
     assert not list(root.rglob("*.py"))
+    web = root / "usr/share/platmon/frontends/web"  # where platmon's unit points --web
+    assert {p.relative_to(web).as_posix() for p in web.rglob("*") if p.is_file()} == {
+        p.relative_to(ROOT / "frontends/web").as_posix() for p in (ROOT / "frontends/web").rglob("*")
+        if p.is_file() and p.suffix in (".html", ".css", ".js", ".svg", ".json")}
+    assert (web / "index.html").read_bytes() == (ROOT / "frontends/web/index.html").read_bytes()
     assert gzip.decompress((root / "usr/share/man/man1/platmon.1.gz").read_bytes()).startswith(b".TH PLATMON 1")
-    doc = root / "usr/share/doc/platmon-cli"
+    doc = root / "usr/share/doc/platmon-frontend"
     assert gzip.decompress((doc / "changelog.Debian.gz").read_bytes()).decode().startswith(f"platmon ({version()}-1) unstable;")
     assert "/usr/share/common-licenses/Apache-2.0" in (doc / "copyright").read_text()
-    overrides = (root / "usr/share/lintian/overrides/platmon-cli").read_text()
-    assert "platmon-cli [arm64 armhf]: statically-linked-binary [usr/bin/platmon]" in overrides
-    assert overrides.endswith("platmon-cli: initial-upload-closes-no-bugs\n")
+    overrides = (root / "usr/share/lintian/overrides/platmon-frontend").read_text()
+    assert "platmon-frontend [arm64 armhf]: statically-linked-binary [usr/bin/platmon]" in overrides
+    assert overrides.endswith("platmon-frontend: initial-upload-closes-no-bugs\n")
     assert sorted(p.name for p in (root / "DEBIAN").iterdir()) == ["control", "md5sums", "postinst"]
     assert run("sh", "-n", str(root / "DEBIAN/postinst")).returncode == 0
     assert run("md5sum", "--check", str(root / "DEBIAN/md5sums"), cwd=root).returncode == 0
@@ -237,7 +245,7 @@ def test_package_smoke_outside_checkout(package, binaries, tmp_path):
         pytest.skip(f"needs the {host} server from native/build.sh")
     package = package[sorted(binaries).index(host)]
     result = run(sys.executable, str(ROOT / "scripts/packaging/check_package.py"), str(package),
-                 str(package.parent / f"platmon-cli_{version()}-1_{host}.deb"), cwd=tmp_path)
+                 str(package.parent / f"platmon-frontend_{version()}-1_{host}.deb"), cwd=tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "package smoke passed" in result.stdout
 
@@ -245,7 +253,7 @@ def test_package_smoke_outside_checkout(package, binaries, tmp_path):
 def test_checksums_and_repeated_builds_match(package, binaries, tmp_path):
     output = package[0].parent
     assert [p.name for p in package] == [f"platmon_{version()}-1_{arch}.deb" for arch in sorted(RELEASED)] + \
-        [f"platmon-cli_{version()}-1_{arch}.deb" for arch in sorted(RELEASED)]
+        [f"platmon-frontend_{version()}-1_{arch}.deb" for arch in sorted(RELEASED)]
     manifest = json.loads((output / "BUILD.json").read_text())
     assert manifest["version"] == version() and manifest["package_version"] == f"{version()}-1"
     assert manifest["source_date_epoch"] == packaging_epoch() > 0
@@ -300,7 +308,7 @@ def test_revision_and_epoch_override_reach_package_metadata(tmp_path):
     result = run(sys.executable, str(ROOT / "scripts/packaging/package.py"),
                  "--revision", "2", "--output", str(tmp_path / "dist"), "--binary", f"arm64={server}", env=env)
     assert result.returncode == 0, result.stderr
-    assert sorted(p.name for p in (tmp_path / "dist").glob("*.deb")) == [f"platmon-cli_{version()}-2_arm64.deb",
+    assert sorted(p.name for p in (tmp_path / "dist").glob("*.deb")) == [f"platmon-frontend_{version()}-2_arm64.deb",
                                                                        f"platmon_{version()}-2_arm64.deb"]
     package = tmp_path / "dist" / f"platmon_{version()}-2_arm64.deb"
     root = tmp_path / "extracted"
@@ -348,7 +356,7 @@ def test_server_binary_checked(tmp_path, case, message):
     ("a server", "is a server, not the platmon command"),
 ])
 def test_command_binary_checked(tmp_path, case, message):
-    """platmon-cli takes the platmon command beside each server: the same architecture, and not a server."""
+    """platmon-frontend takes the platmon command beside each server: the same architecture, and not a server."""
     server = fake_server(tmp_path / "platmon-server", "amd64")
     if case == "other arch":
         fake_server(command_beside(server), "arm64", mark=b"")
@@ -367,7 +375,7 @@ def test_armhf_is_released_as_a_32_bit_package(tmp_path):
     if shutil.which("dpkg-deb") is None:
         pytest.skip("dpkg-deb is required for distribution tests")
     debs = build(tmp_path / "dist", binaries={"armhf": fake_build(tmp_path / "armhf", "armhf")})
-    assert [p.name for p in debs] == [f"platmon_{version()}-1_armhf.deb", f"platmon-cli_{version()}-1_armhf.deb"]
+    assert [p.name for p in debs] == [f"platmon_{version()}-1_armhf.deb", f"platmon-frontend_{version()}-1_armhf.deb"]
     assert "Architecture: armhf" in run("dpkg-deb", "-f", str(debs[0])).stdout
 
 

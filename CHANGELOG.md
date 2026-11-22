@@ -7,10 +7,8 @@ API schema versions are independent of release versions.
 ## Unreleased
 
 - **The `platmon` command is a native binary**, built from `native/` beside the server, in place of
-  `frontends/cli.py`: no Python is needed anywhere any more. `platmon-cli` is one package per architecture,
-  `platmon-cli_VERSION-1_{amd64,arm64,armhf}.deb` and `platmon-cli-VERSION-1.{x86_64,aarch64}.rpm` in place of
-  `_all.deb` and `.noarch.rpm`, without the `python3` dependency; apt and dnf upgrade to it as before. The
-  Windows zip and installer ship `platmon.exe` in place of `cli.py` and `platmon.cmd`, on the `PATH` as before.
+  `frontends/cli.py`: no Python is needed anywhere any more. Its package, `platmon-frontend` (below), is one
+  per architecture, without the `python3` dependency. The Windows zip and installer ship `platmon.exe` in place of `cli.py` and `platmon.cmd`, on the `PATH` as before.
   `scripts/install-cli.sh` installs the binary `native/build.sh` built. `BUILD.json` adds `command_sha256` and
   `windows_command_sha256`. Its options, exit codes, messages and screens are unchanged (they were compared
   with `cli.py` byte for byte on 12 snapshots, 23 failures, 4552 screens and 350 key presses), except:
@@ -19,6 +17,26 @@ API schema versions are independent of release versions.
     device's address instead;
   - a failure the command does not explain (an invalid port, a malformed host) is one line where Python printed
     a traceback ending in it.
+- **`platmon-cli` is renamed `platmon-frontend` and holds the web page too**: `platmon` is the server, its
+  unit and `platmon.ini`, and recommends `platmon-frontend`, which has the page (`/usr/share/platmon`, the same
+  path) and the `platmon` command: `platmon-frontend_VERSION-1_{amd64,arm64,armhf}.deb` and
+  `platmon-frontend-VERSION-1.{x86_64,aarch64}.rpm` in place of `platmon-cli_VERSION-1_all.deb` and
+  `platmon-cli-VERSION-1.noarch.rpm`. No transitional package: from 1.10.0 run `sudo apt full-upgrade` or
+  `sudo apt install platmon-frontend` (`apt upgrade` and `apt-get upgrade` keep `platmon` back while
+  `platmon-cli` is installed); `dpkg -i` of the new `platmon` and `platmon-frontend` files together and
+  `dnf upgrade` replace `platmon-cli` by themselves. Rolling `platmon` back to 1.10.0 removes `platmon-frontend`. The Windows zip and
+  installer and the container are unchanged.
+- **Without the page installed** (`--no-install-recommends`), `/` answers 404 with one line naming
+  `platmon-frontend` (it closed the connection without an answer), the API answers as always, and the start
+  log says the page is not installed.
+- **`/api/status` adds `version`**, the platmon version the server runs (`schema_version` stays 1). The web
+  page reads its version and its levels from `/api/status` instead of having the server fill them into
+  `index.html`; when `/api/status` cannot be read it keeps its default levels and shows "platmon version
+  unknown".
+- **The server serves its web directory without a list of files**: any regular file there whose type it
+  knows from the extension (`.html`, `.js`, `.css`, `.svg`, `.json`, `.png`, `.ico`, `.woff2`), with the
+  page's headers. A path with `..`, `%`, a hidden file, a symbolic link, a directory or a file of another type
+  answers 404.
 - The server's refusal of a `[terminal]` section no longer names `frontends/cli.py`.
 - Development: `native/` is a Cargo workspace (the server, a `shared` crate with the JSON code and `/text`'s
   renderer, and the `frontend` crate with the command), so the frontend cannot use the server's modules.

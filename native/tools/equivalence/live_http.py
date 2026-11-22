@@ -6,7 +6,7 @@ the process it started is stopped (and restarted once), by its own handle.
   python3 live_http.py PATH/TO/platmon-server [--json OUT]   (the platmon command beside it, when there)
 
 - every path: status code, Content-Type, Cache-Control as the Python service answered (PATHS); the web page
-  and its files: the bytes of frontends/web (the page with the version filled in)
+  and its files: the bytes of frontends/web; /api/status: the version (VERSION) and levels the page reads
 - the /text screen: the sections the platmon command (beside the server, as native/build.sh leaves it; skipped
   without one) prints with --once for the same /api/stats and /api/observations, served to it by a stub
 - raw requests at the protocol's edges (HEAD, HTTP/0.9, versions, header and line limits): the answer's
@@ -498,12 +498,10 @@ def problems(r, stopped, restarted):
         got = (eps[path]["code"], eps[path]["type"], eps[path]["no_store"])
         if got != EXPECTED[path]:
             out.append(f"{path}: {got} != {EXPECTED[path]}")
-    page = eps["/"]["body"]
-    if eps["/index.html"]["body"] != page or f"platmon v{version()}".encode() not in page or b"@VERSION@" in page \
-            or b"@LEVELS@" in page:
-        out.append("/: not the page with its version and levels filled in")
-    for path in WEB[2:]:
-        with open(f"{REPO}/frontends/web{path}", "rb") as f:
+    if r["bodies"]["/api/status"].get("version") != version() or "levels" not in r["bodies"]["/api/status"]:
+        out.append(f"/api/status: version {r['bodies']['/api/status'].get('version')!r}, not {version()!r} with levels")
+    for path in WEB[1:]:
+        with open(f"{REPO}/frontends/web{path}", "rb") as f:  # the page too: nothing is filled in
             if eps[path]["body"] != f.read():
                 out.append(f"{path}: not the bytes of frontends/web{path}")
     command = once(COMMAND, r["bodies"])

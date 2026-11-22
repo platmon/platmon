@@ -24,8 +24,11 @@ const context = vm.createContext({AbortController, console, performance: {now: (
   clearTimeout: id => timers.delete(id), fetch: async url => {
     requests.push(url);
     if (failure && url === 'api/stats') return {ok: false, status: 503};
+    if (url === 'api/status') return {ok: true, status: 200, json: async () => status};  // the server's [thresholds] and version
     return {ok: true, status: 200, json: async () => url === 'api/stats' ? stats : url.startsWith('api/history') ? history : observations};
   }});
+// a null temperature (an older server's, unset): the generic level stays
+const status = {schema_version: 1, state: 'ready', levels: {gpu: [70, 85], temperature: null}, version: '9.8.7'};
 const observations = {schema_version: 2, groups: {battery: {state: 'ok', stale_after_ms: 180000,
   observation: {id: 5, data_age_ms: 1000, stale: false},
   data: {provider: 'sysfs_power_supply', external: [],
@@ -41,8 +44,9 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
 // the Recent history buttons are delegated on their row, as the chart readout is
 const clickGroup = prefix => el('history-groups').handlers.click({target: {closest: () => ({dataset: {group: prefix}})}});
 (async () => {
-  el('levels').textContent = JSON.stringify({gpu: [70, 85]});  // as the server fills it in from [thresholds]
   run(code); await flush();
+  assert.equal(count('api/status'), 1, 'levels and version are asked for once');
+  assert.equal(el('system-version').textContent, 'platmon v9.8.7');
   assert.equal(count('api/stats'), 1);
   assert.equal(count('api/history'), 0, 'overview does not request graphs');
   assert.equal(count('api/observations'), 0);

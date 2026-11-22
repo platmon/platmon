@@ -15,5 +15,7 @@ platmon (@VERSION@) unstable; urgency=medium
     platmon-native link to it (its name up to 1.6.0).
   * Say where the service listens, and that it has no authentication, at the
     end of the first installation; upgrades say nothing new.
+  * Rename platmon-cli to platmon-frontend and move the web page
+    (/usr/share/platmon) into it; platmon recommends platmon-frontend.
 
  -- Jinwoo Sung <jwsung91@users.noreply.github.com>  Sat, 21 Nov 2026 09:00:00 +0900

@@ -10,9 +10,9 @@ const context = vm.createContext({AbortController, console, performance: {now: (
     setAttribute() {}, addEventListener() {}, focus() {}, scrollIntoView() {}},
     querySelectorAll: () => [], addEventListener() {}},
   setTimeout: () => 0, clearTimeout() {}, setInterval() {}, fetch: () => new Promise(() => {})});
-elements.levels = {textContent: JSON.stringify(input.levels)};  // as the server fills it in from [thresholds]
 vm.runInContext(code, context);
 context.input = input;
+vm.runInContext('applyStatus({levels: input.levels})', context);  // as /api/status answers them from [thresholds]
 const html = vm.runInContext('obs = input.observations; obsAt = 0; attentionHtml(input.stats)', context);
 const pills = [...html.matchAll(/<a class="pill (warn|crit)" href="#\w+">(.*?) <span class="mono">(.*?)<\/span><\/a>/g)];
 console.log(JSON.stringify(pills.map(([, lv, name, value]) => [name, value, lv])));

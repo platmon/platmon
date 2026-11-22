@@ -41,6 +41,17 @@ def test_every_step_ran(steps):
         assert s["refresh_scheduled"] == (0 if s["step"] in IN_REQUEST else 1), s
 
 
+def test_status_unreadable_keeps_the_defaults():
+    """The page asks /api/status once for its levels and version; when that fails it shows what index.html
+    says (the server no longer fills either into the page). web_views_harness.js covers the answer."""
+    page = (ROOT / "frontends/web/index.html").read_text(encoding="utf-8")
+    assert '<span id="system-version">platmon version unknown</span>' in page and "@VERSION@" not in page and "@LEVELS@" not in page
+
+
+def test_status_is_asked_once(steps):
+    assert {s["status_fetches"] for s in steps.values()} == {1} and steps["recovered"]["version"] == ""
+
+
 def test_web_survives_errors_and_recovers(steps):
     """An older server without sample metadata: the age is the time since its last answer, and says so.
     (Before the sample age line, this age was appended to the error message as "showing data from N s ago".)"""

@@ -4,11 +4,11 @@ Section: admin
 Priority: optional
 Architecture: @ARCH@
 Depends: systemd, init-system-helpers (>= 1.56)
-Recommends: platmon-cli
+Recommends: platmon-frontend
 Maintainer: platmon maintainers <jwsung91@users.noreply.github.com>
 Homepage: https://github.com/platmon/platmon
 Installed-Size: @SIZE@
 Description: lightweight read-only Linux platform monitor
- Collects platform metrics with a static native server and exposes an HTTP
- API and web viewer. The terminal client, the platmon command, is in
- platmon-cli.
+ Collects platform metrics with a static native server and exposes them in
+ an HTTP API. The web page it serves and the terminal client, the platmon
+ command, are in platmon-frontend.

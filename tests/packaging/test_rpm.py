@@ -10,12 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from scripts.packaging.package import command_beside, default_binary, packaging_epoch, stage_server, version
+from scripts.packaging.package import (command_beside, default_binary, packaging_epoch, stage_frontend, stage_server,
+                                     version)
 from scripts.packaging.package_rpm import ARCHES, build
 from tests.packaging.test_packaging import fake_build, fake_server
 
 ROOT = Path(__file__).resolve().parents[2]
-SPECS = ("platmon", "platmon-cli")
+SPECS = ("platmon", "platmon-frontend")
 
 
 def run(*args):
@@ -73,13 +74,18 @@ def test_server_scriptlets_check_before_starting_and_keep_the_choice():
         assert message in posttrans and message in deb, message
 
 
-def test_spec_files_are_the_staged_server(tmp_path, binaries):
-    """%files lists what stage_server() and docs() put in the package, nothing else."""
+@pytest.mark.parametrize("name", SPECS)
+def test_spec_files_are_the_staged_ones(tmp_path, binaries, name):
+    """%files lists what stage_server() or stage_frontend() and docs() put in the package, nothing else."""
     from scripts.packaging.package_rpm import docs
     stage = tmp_path / "stage"
-    stage_server(ROOT, stage, binaries["amd64"].read_bytes(), version())
-    docs(ROOT, stage, "platmon", (ROOT / "docs/reference/packaging.md",))
-    spec = (ROOT / "packaging/rpm/platmon.spec").read_text(encoding="utf-8")
+    if name == "platmon":
+        stage_server(ROOT, stage, binaries["amd64"].read_bytes(), version())
+        docs(ROOT, stage, "platmon", (ROOT / "docs/reference/packaging.md",))
+    else:
+        stage_frontend(ROOT, stage, command_beside(binaries["amd64"]).read_bytes(), packaging_epoch())
+        docs(ROOT, stage, name)
+    spec = (ROOT / f"packaging/rpm/{name}.spec").read_text(encoding="utf-8")
     listed = [line.split()[-1] for line in spec.split("%files\n", 1)[1].split("\n%changelog", 1)[0].splitlines()
               if line.strip()]
     staged = {"/" + p.relative_to(stage).as_posix() for p in stage.rglob("*") if not p.is_dir() or p.is_symlink()}
@@ -101,30 +107,38 @@ def test_architectures_and_release_refused(tmp_path, binaries):
 
 def test_package_metadata_and_contents(rpms, binaries):
     assert [p.name for p in rpms] == [f"platmon-{version()}-1.x86_64.rpm", f"platmon-{version()}-1.aarch64.rpm",
-                                      f"platmon-cli-{version()}-1.x86_64.rpm", f"platmon-cli-{version()}-1.aarch64.rpm"]
+                                      f"platmon-frontend-{version()}-1.x86_64.rpm",
+                                      f"platmon-frontend-{version()}-1.aarch64.rpm"]
     for rpm, arch in zip(rpms[:2], ("x86_64", "aarch64")):
         assert query(rpm, "%{NAME} %{VERSION} %{RELEASE} %{ARCH} %{BUILDTIME}") == \
             f"platmon {version()} 1 {arch} {packaging_epoch()}"
         assert query(rpm, "%{LICENSE}") == "Apache-2.0 AND (MIT OR Apache-2.0) AND MIT"
         assert "systemd" in run("rpm", "-qpR", str(rpm)).split("\n")
-        assert run("rpm", "-qp", "--recommends", str(rpm)).split() == ["platmon-cli"]
+        assert run("rpm", "-qp", "--recommends", str(rpm)).split() == ["platmon-frontend"]
         files = dict(line.split(" ", 1) for line in query(rpm, "[%{FILENAMES} %{FILEFLAGS:fflags}\n]").splitlines())
         assert files["/etc/platmon/platmon.ini"] == "cn"  # %config(noreplace)
         assert "/usr/bin/platmon" not in files and not any(path.endswith(".py") for path in files)
+        assert not any(path.startswith("/usr/share/platmon") for path in files)  # the page is platmon-frontend's
         links = dict(line.split(" ", 1) for line in query(rpm, "[%{FILENAMES} %{FILELINKTOS}\n]").splitlines())
         assert links["/usr/lib/platmon/platmon-native"] == "platmon-server"  # the name up to 1.6.0
         server = [line for line in query(rpm, "[%{FILENAMES} %{FILEMODES:perms}\n]").splitlines()
                   if line.startswith("/usr/lib/platmon/platmon-server ")]
         assert server == ["/usr/lib/platmon/platmon-server -rwxr-xr-x"]
     for cli, arch in zip(rpms[2:], ("x86_64", "aarch64")):
-        assert query(cli, "%{NAME} %{ARCH}") == f"platmon-cli {arch}"
+        assert query(cli, "%{NAME} %{ARCH}") == f"platmon-frontend {arch}"
+        # platmon-cli up to this release: replaced on upgrade, and still what platmon-cli asks for
+        assert run("rpm", "-qp", "--obsoletes", str(cli)).split("\n")[0] == f"platmon-cli < {version()}"
+        assert f"platmon-cli = {version()}-1" in run("rpm", "-qp", "--provides", str(cli)).split("\n")
         assert query(cli, "%{LICENSE}") == "Apache-2.0 AND (MIT OR Apache-2.0) AND MIT"
         assert "python" not in run("rpm", "-qpR", str(cli))  # one static binary
-        assert sorted(run("rpm", "-qpl", str(cli)).split()) == [
-            "/usr/bin/platmon", "/usr/share/doc/platmon-cli", "/usr/share/doc/platmon-cli/CHANGELOG.md",
-            "/usr/share/doc/platmon-cli/README.md", "/usr/share/licenses/platmon-cli",
-            "/usr/share/licenses/platmon-cli/LICENSE", "/usr/share/licenses/platmon-cli/copyright",
+        listed = sorted(run("rpm", "-qpl", str(cli)).split())
+        assert [p for p in listed if not p.startswith("/usr/share/platmon")] == [
+            "/usr/bin/platmon", "/usr/share/doc/platmon-frontend", "/usr/share/doc/platmon-frontend/CHANGELOG.md",
+            "/usr/share/doc/platmon-frontend/README.md", "/usr/share/licenses/platmon-frontend",
+            "/usr/share/licenses/platmon-frontend/LICENSE", "/usr/share/licenses/platmon-frontend/copyright",
             "/usr/share/man/man1/platmon.1.gz"]
+        assert {"/usr/share/platmon/frontends/web/index.html", "/usr/share/platmon/frontends/web/app.js",
+                "/usr/share/platmon/frontends/web/assets/brand/favicon.svg"} <= set(listed)
         command = [line for line in query(cli, "[%{FILENAMES} %{FILEMODES:perms}\n]").splitlines()
                    if line.startswith("/usr/bin/platmon ")]
         assert command == ["/usr/bin/platmon -rwxr-xr-x"]

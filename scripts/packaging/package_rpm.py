@@ -2,8 +2,8 @@
 """Build .rpm packages with stdlib + the host's rpmbuild, from the same files as the .deb packages.
 
 platmon, one package per architecture (x86_64, aarch64): the static Rust server from native/build.sh, its
-unit and web page, without Python. platmon-cli, per architecture too: the `platmon` command, the static Rust
-binary built beside the server, which platmon recommends. Nothing is compiled: packaging/rpm/*.spec copy the staged files (package.py's). No
+unit and configuration, without Python. platmon-frontend, per architecture too: the web page and the `platmon`
+command, the static Rust binary built beside the server; platmon recommends it. Nothing is compiled: packaging/rpm/*.spec copy the staged files (package.py's). No
 interpreter, OS software, build tools or hardware binaries are bundled; the packages are not signed.
 rpmbuild comes with the host's rpm (Fedora: rpm-build; Debian and Ubuntu: rpm).
 """
@@ -17,10 +17,10 @@ import tempfile
 import time
 
 if __package__:
-    from .package import (ROOT, check_binary, command_beside, copy_file, default_binary, packaging_epoch, stage_cli,
+    from .package import (ROOT, check_binary, command_beside, copy_file, default_binary, packaging_epoch, stage_frontend,
                           stage_server, version)
 else:  # run as a script, from its own directory
-    from package import (ROOT, check_binary, command_beside, copy_file, default_binary, packaging_epoch, stage_cli,
+    from package import (ROOT, check_binary, command_beside, copy_file, default_binary, packaging_epoch, stage_frontend,
                          stage_server, version)
 
 # Debian architecture (package.py's, for the binaries): the RPM one. armhf is not built: its binary is
@@ -30,7 +30,7 @@ ARCHES = {"amd64": "x86_64", "arm64": "aarch64"}
 
 def build(output, release="1", root=ROOT, epoch=None, binaries=None):
     """Build one platmon package per architecture in `binaries` ({Debian arch: server path}; default: amd64 and
-    arm64, from native/target), then one platmon-cli per architecture from the platmon command beside each
+    arm64, from native/target), then one platmon-frontend per architecture from the platmon command beside each
     server, and SHA256SUMS; returns their paths, platmon's first."""
     upstream = version(root)
     if not re.fullmatch(r"[1-9][0-9]*", release):
@@ -48,8 +48,8 @@ def build(output, release="1", root=ROOT, epoch=None, binaries=None):
     bodies = {arch: check_binary(arch, binaries[arch]) for arch in sorted(binaries)}
     commands = {arch: check_binary(arch, command_beside(binaries[arch]), server=False) for arch in bodies}
     rpms = [output / f"platmon-{upstream}-{release}.{ARCHES[arch]}.rpm" for arch in bodies]
-    cli_rpms = [output / f"platmon-cli-{upstream}-{release}.{ARCHES[arch]}.rpm" for arch in commands]
-    if any(path.exists() for path in (*rpms, *cli_rpms, output / "SHA256SUMS")):
+    frontend_rpms = [output / f"platmon-frontend-{upstream}-{release}.{ARCHES[arch]}.rpm" for arch in commands]
+    if any(path.exists() for path in (*rpms, *frontend_rpms, output / "SHA256SUMS")):
         raise ValueError("output files already exist; use a fresh output directory")
     for (arch, body), rpm in zip(bodies.items(), rpms):
         with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
@@ -57,13 +57,13 @@ def build(output, release="1", root=ROOT, epoch=None, binaries=None):
             stage_server(root, stage, body, upstream)
             docs(root, stage, "platmon", (root / "docs/reference/packaging.md",))
             rpmbuild(root, "platmon", stage, rpm, ARCHES[arch], upstream, release, epoch)
-    for (arch, body), rpm in zip(commands.items(), cli_rpms):
+    for (arch, body), rpm in zip(commands.items(), frontend_rpms):
         with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
             stage = Path(directory)
-            stage_cli(root, stage, body, epoch)
-            docs(root, stage, "platmon-cli")
-            rpmbuild(root, "platmon-cli", stage, rpm, ARCHES[arch], upstream, release, epoch)
-    rpms += cli_rpms
+            stage_frontend(root, stage, body, epoch)
+            docs(root, stage, "platmon-frontend")
+            rpmbuild(root, "platmon-frontend", stage, rpm, ARCHES[arch], upstream, release, epoch)
+    rpms += frontend_rpms
     checksums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in rpms)
     (output / "SHA256SUMS").write_text(checksums, encoding="utf-8")
     return rpms
