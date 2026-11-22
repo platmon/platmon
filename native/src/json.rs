@@ -165,6 +165,19 @@ impl<T: Into<Value>> From<Option<T>> for Value {
     fn from(o: Option<T>) -> Value { o.map(Into::into).unwrap_or(Value::Null) }
 }
 
+/// Python's str() of a scalar in an f-string; None for what the collector never puts in an id.
+pub fn py_str(v: &Value) -> Option<String> {
+    match v {
+        Value::Null => Some("None".into()),
+        Value::Bool(b) => Some(if *b { "True" } else { "False" }.into()),
+        Value::Int(i) => Some(i.to_string()),
+        Value::Big(i) => Some(i.to_string()),
+        Value::Float(_) => Some(v.to_string(false)),
+        Value::Str(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
 /// Python's repr of a float: the shortest text that reads back as the same double, with ".0" for whole
 /// numbers and an exponent from 1e16 and below 1e-4.
 fn write_float(out: &mut String, f: f64) {

@@ -1,6 +1,7 @@
 //! frontends/cli.py render(): the plain-text screen /text answers with, from an /api/stats snapshot and an
 //! /api/observations answer. Where frontends/cli.py raises (a key missing, None formatted as a number), Err:
-//! /text then answers 500 (runtime_fixture.py checks both on the same snapshots).
+//! /text then answers 500 (runtime_fixture.py checks both on the same snapshots). The platmon command
+//! (src/bin/platmon) prints the same screen and shares the helpers marked pub(crate).
 use crate::json::Value;
 
 type R<T> = Result<T, ()>;
@@ -12,7 +13,7 @@ fn key<'a>(v: &'a Value, k: &str) -> R<&'a Value> {
 }
 
 /// A number as Python formats it with a float spec: int, float or bool, else Err (TypeError).
-fn num(v: &Value) -> R<f64> {
+pub(crate) fn num(v: &Value) -> R<f64> {
     match v {
         Value::Int(i) => Ok(*i as f64),
         Value::Big(i) => Ok(*i as f64),
@@ -23,7 +24,7 @@ fn num(v: &Value) -> R<f64> {
 }
 
 /// Python's truth value.
-fn truthy(v: Option<&Value>) -> bool {
+pub(crate) fn truthy(v: Option<&Value>) -> bool {
     match v {
         None | Some(Value::Null) => false,
         Some(Value::Bool(b)) => *b,
@@ -37,15 +38,15 @@ fn truthy(v: Option<&Value>) -> bool {
 }
 
 /// str() of a value inside an f-string.
-fn s(v: &Value) -> String {
+pub(crate) fn s(v: &Value) -> String {
     match v {
         Value::Str(x) => x.clone(),
-        other => crate::history::py_str(other).unwrap_or_else(|| other.to_py().replace('"', "'")),
+        other => crate::json::py_str(other).unwrap_or_else(|| other.to_py().replace('"', "'")),
     }
 }
 
 /// Python's format(x, ".Nf") for finite and non-finite floats.
-fn f(x: f64, prec: usize) -> String {
+pub(crate) fn f(x: f64, prec: usize) -> String {
     if x.is_nan() { return "nan".into() }
     if x.is_infinite() { return if x > 0.0 { "inf".into() } else { "-inf".into() } }
     format!("{:.*}", prec, x)
@@ -56,7 +57,7 @@ fn pad_left(t: String, w: usize) -> String {
     if n >= w { t } else { format!("{}{}", " ".repeat(w - n), t) }
 }
 
-fn pad_right(t: &str, w: usize) -> String {
+pub(crate) fn pad_right(t: &str, w: usize) -> String {
     let n = t.chars().count();
     if n >= w { t.to_string() } else { format!("{}{}", t, " ".repeat(w - n)) }
 }
@@ -84,7 +85,7 @@ fn cpu_reason(r: &str) -> String {
     }.to_string()
 }
 
-fn cpu_note(st: &Value) -> R<String> {
+pub(crate) fn cpu_note(st: &Value) -> R<String> {
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     let sampling = st.get("cpu_sampling").filter(|v| truthy(Some(v)));
     if let Some(Value::Arr(un)) = sampling.and_then(|c| c.get("unavailable")) {
@@ -106,7 +107,7 @@ fn cpu_note(st: &Value) -> R<String> {
     Ok("CPU sampling: ".to_string() + &groups.iter().map(|(w, ids)| format!("{} {}", ids.join(" "), w)).collect::<Vec<_>>().join("; "))
 }
 
-fn rate_reason(r: &Value) -> String {
+pub(crate) fn rate_reason(r: &Value) -> String {
     match r {
         Value::Str(x) => match x.as_str() {
             "warmup" => "warming up", "gap" => "restarting after a gap", "counter_regressed" => "counter went backwards",
@@ -117,7 +118,7 @@ fn rate_reason(r: &Value) -> String {
     }
 }
 
-fn per_s(v: f64) -> String {
+pub(crate) fn per_s(v: f64) -> String {
     let mut v = v;
     for unit in ["B/s", "KiB/s", "MiB/s"] {
         if v.abs() < 1024.0 {
@@ -215,7 +216,7 @@ fn counters_lines(st: &Value) -> R<Vec<String>> {
 }
 
 /// (data, observation) of a group of an /api/observations answer, when both are dicts.
-fn group<'a>(obs: Option<&'a Value>, name: &str) -> Option<(&'a Value, &'a Value)> {
+pub(crate) fn group<'a>(obs: Option<&'a Value>, name: &str) -> Option<(&'a Value, &'a Value)> {
     let g = obs?.get("groups")?.get(name)?;
     match (g.get("data"), g.get("observation")) {
         (Some(d @ Value::Obj(_)), Some(o @ Value::Obj(_))) => Some((d, o)),
@@ -361,7 +362,7 @@ fn probe_lines(obs: Option<&Value>) -> R<Vec<String>> {
     Ok(out)
 }
 
-fn collection_note(st: &Value) -> String {
+pub(crate) fn collection_note(st: &Value) -> String {
     let Some(Value::Obj(c)) = st.get("collectors") else { return String::new() };
     let bad: Vec<String> = c.iter().filter(|(n, _)| n != "core").filter_map(|(n, v)| match v.get("state") {
         Some(Value::Str(state)) if state == "partial" || state == "error" => Some(format!("{} {}", n, state)),
