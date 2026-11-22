@@ -2,7 +2,7 @@
 rem platmon, Windows zip: install or upgrade the Windows service "platmon".
 rem Run as administrator (right-click, Run as administrator). The service runs as LocalSystem and starts
 rem with Windows, so its files go to %ProgramFiles%\platmon, which only administrators can change:
-rem platmon-server.exe and the web page are replaced, an existing platmon.ini is kept.
+rem platmon-server.exe, platmon.exe and the web page are replaced, an existing platmon.ini is kept.
 setlocal
 set "DEST=%ProgramFiles%\platmon"
 fltmc >nul 2>&1 || (echo Run this as administrator: right-click install-service.cmd, Run as administrator.& pause & exit /b 1)
@@ -16,7 +16,9 @@ if defined EXISTS call :stop || (pause & exit /b 1)
 
 if not exist "%DEST%" mkdir "%DEST%" || (pause & exit /b 1)
 copy /y platmon-server.exe "%DEST%\" >nul || (pause & exit /b 1)
-for %%f in (README.txt LICENSE LICENSE-MIT uninstall-service.cmd cli.py platmon.cmd) do copy /y %%f "%DEST%\" >nul
+for %%f in (README.txt LICENSE LICENSE-MIT uninstall-service.cmd platmon.exe) do copy /y %%f "%DEST%\" >nul
+rem the Python command of zips before the native one
+for %%f in (cli.py platmon.cmd) do if exist "%DEST%\%%f" del /q "%DEST%\%%f"
 if exist "%DEST%\platmon.ini" (echo Keeping %DEST%\platmon.ini.) else (copy /y platmon.ini "%DEST%\" >nul || (pause & exit /b 1))
 if exist "%DEST%\web" rmdir /s /q "%DEST%\web"
 xcopy /e /i /q /y web "%DEST%\web" >nul || (pause & exit /b 1)
@@ -40,7 +42,7 @@ set "PORT=9797"
 for /f "tokens=2 delims== " %%p in ('findstr /b /r /c:"port *=" "%DEST%\platmon.ini"') do set "PORT=%%p"
 echo platmon is installed and running: http://127.0.0.1:%PORT%/
 echo Settings: %DEST%\platmon.ini (then: sc.exe stop platmon, sc.exe start platmon). To remove it: uninstall-service.cmd
-echo The platmon command (Python 3.9+): %DEST%\platmon.cmd; README.txt shows how to put it on PATH.
+echo The platmon command: %DEST%\platmon.exe; README.txt shows how to put it on PATH.
 pause
 exit /b 0
 

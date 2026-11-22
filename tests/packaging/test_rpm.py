@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.packaging.package import default_binary, packaging_epoch, stage_server, version
+from scripts.packaging.package import command_beside, default_binary, packaging_epoch, stage_server, version
 from scripts.packaging.package_rpm import ARCHES, build
-from tests.packaging.test_packaging import fake_server
+from tests.packaging.test_packaging import fake_build, fake_server
 
 ROOT = Path(__file__).resolve().parents[2]
 SPECS = ("platmon", "platmon-cli")
@@ -30,9 +30,9 @@ def query(rpm, fmt):
 def binaries(tmp_path):
     """The binaries native/build.sh left, else fakes (enough to package, not to run)."""
     real = {arch: default_binary(arch) for arch in ARCHES}
-    if all(path.is_file() for path in real.values()):
+    if all(path.is_file() and command_beside(path).is_file() for path in real.values()):
         return real
-    return {arch: fake_server(tmp_path / "bin" / arch, arch) for arch in ARCHES}
+    return {arch: fake_build(tmp_path / "bin" / arch, arch) for arch in ARCHES}
 
 
 @pytest.fixture
@@ -101,8 +101,8 @@ def test_architectures_and_release_refused(tmp_path, binaries):
 
 def test_package_metadata_and_contents(rpms, binaries):
     assert [p.name for p in rpms] == [f"platmon-{version()}-1.x86_64.rpm", f"platmon-{version()}-1.aarch64.rpm",
-                                      f"platmon-cli-{version()}-1.noarch.rpm"]
-    for rpm, arch in zip(rpms, ("x86_64", "aarch64")):
+                                      f"platmon-cli-{version()}-1.x86_64.rpm", f"platmon-cli-{version()}-1.aarch64.rpm"]
+    for rpm, arch in zip(rpms[:2], ("x86_64", "aarch64")):
         assert query(rpm, "%{NAME} %{VERSION} %{RELEASE} %{ARCH} %{BUILDTIME}") == \
             f"platmon {version()} 1 {arch} {packaging_epoch()}"
         assert query(rpm, "%{LICENSE}") == "Apache-2.0 AND (MIT OR Apache-2.0) AND MIT"
@@ -116,14 +116,18 @@ def test_package_metadata_and_contents(rpms, binaries):
         server = [line for line in query(rpm, "[%{FILENAMES} %{FILEMODES:perms}\n]").splitlines()
                   if line.startswith("/usr/lib/platmon/platmon-server ")]
         assert server == ["/usr/lib/platmon/platmon-server -rwxr-xr-x"]
-    cli = rpms[-1]
-    assert query(cli, "%{NAME} %{ARCH}") == "platmon-cli noarch"
-    assert "python3 >= 3.9" in run("rpm", "-qpR", str(cli)).split("\n")
-    assert sorted(run("rpm", "-qpl", str(cli)).split()) == [
-        "/usr/bin/platmon", "/usr/share/doc/platmon-cli", "/usr/share/doc/platmon-cli/CHANGELOG.md",
-        "/usr/share/doc/platmon-cli/README.md", "/usr/share/licenses/platmon-cli",
-        "/usr/share/licenses/platmon-cli/LICENSE", "/usr/share/licenses/platmon-cli/copyright",
-        "/usr/share/man/man1/platmon.1.gz"]
+    for cli, arch in zip(rpms[2:], ("x86_64", "aarch64")):
+        assert query(cli, "%{NAME} %{ARCH}") == f"platmon-cli {arch}"
+        assert query(cli, "%{LICENSE}") == "Apache-2.0 AND (MIT OR Apache-2.0) AND MIT"
+        assert "python" not in run("rpm", "-qpR", str(cli))  # one static binary
+        assert sorted(run("rpm", "-qpl", str(cli)).split()) == [
+            "/usr/bin/platmon", "/usr/share/doc/platmon-cli", "/usr/share/doc/platmon-cli/CHANGELOG.md",
+            "/usr/share/doc/platmon-cli/README.md", "/usr/share/licenses/platmon-cli",
+            "/usr/share/licenses/platmon-cli/LICENSE", "/usr/share/licenses/platmon-cli/copyright",
+            "/usr/share/man/man1/platmon.1.gz"]
+        command = [line for line in query(cli, "[%{FILENAMES} %{FILEMODES:perms}\n]").splitlines()
+                   if line.startswith("/usr/bin/platmon ")]
+        assert command == ["/usr/bin/platmon -rwxr-xr-x"]
 
 
 def test_checksums_and_repeated_builds_match(rpms, binaries, tmp_path):

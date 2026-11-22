@@ -3,11 +3,11 @@
 
 platmon-VERSION-windows-x86_64.zip: the server built by CI's native-windows job (MSVC, the C
 runtime linked statically, so it needs no Visual C++ Redistributable), the web page, platmon.ini listening on
-127.0.0.1 only, the licenses, a README, the terminal client (cli.py, run by platmon.cmd with the Python on PATH)
-and packaging/windows's scripts: start.cmd (serve as the user, open the browser) and install-service.cmd /
+127.0.0.1 only, the licenses, a README, the platmon command (platmon.exe, built beside the server, no Python
+needed) and packaging/windows's scripts: start.cmd (serve as the user, open the browser) and install-service.cmd /
 uninstall-service.cmd (the service, in Program Files). The installer is package_msi.py's (the owner's decisions,
 docs/development/remaining-work.md, "Windows build"). Its checksum is added to the SHA256SUMS package.py
-wrote, and the server's to its BUILD.json (whose own checksum line follows).
+wrote, and the server's and the command's to its BUILD.json (whose own checksum line follows).
 """
 import argparse
 import hashlib
@@ -25,8 +25,6 @@ else:  # run as a script, from its own directory
     from package import ALLOCATOR_MARK, ROOT, packaging_epoch, version
 
 WEB_SUFFIXES = (".html", ".css", ".js", ".svg", ".json")
-# the platmon command: the terminal client beside it, with the Python on PATH (as platmon-cli on Linux)
-PLATMON_CMD = b'@python "%~dp0cli.py" %*\r\n'
 PE_AMD64 = 0x8664
 SCRIPTS = ("start.cmd", "install-service.cmd", "uninstall-service.cmd")
 # the Visual C++ runtime's DLLs: a server linked with the C runtime statically (+crt-static) imports none
@@ -82,10 +80,9 @@ until the source is registered, once, in PowerShell run as administrator (the
   New-Item -Force HKLM:\\SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\platmon |
     New-ItemProperty -Force -Name EventMessageFile -PropertyType ExpandString -Value '%SystemRoot%\\Microsoft.NET\\Framework64\\v4.0.30319\\EventLogMessages.dll'
 
-The platmon command (the terminal client) needs Python 3.9 or later as python
-on PATH: platmon.cmd runs cli.py beside it, as platmon --once, platmon
-192.168.55.53 or platmon --help. To type platmon anywhere, add this folder to
-your user PATH once, in PowerShell (a new terminal then finds it):
+The platmon command, platmon.exe, is the terminal client: platmon --once,
+platmon 192.168.55.53 or platmon --help. To type platmon anywhere, add this
+folder to your user PATH once, in PowerShell (a new terminal then finds it):
   [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';C:\\Program Files\\platmon', 'User')
 On Windows it shows every section on one screen, redrawn in place.
 
@@ -101,11 +98,12 @@ restarts, sleep and resume (Modern Standby, S3, hibernation), a 24 h soak and
 platmon-hub. Not checked: Windows 10, more than 64 CPUs (several processor
 groups), an AMD CPU.
 
-Licenses: LICENSE (Apache-2.0) for platmon. platmon-server.exe also includes
-the Rust standard library and the libc, windows-sys and windows-link crates,
-each MIT or Apache-2.0 (LICENSE-MIT here), and Microsoft's C runtime, linked
-statically as Microsoft's Visual C++ license terms allow for a program built
-with its tools. It calls Windows's own libraries, which are not included.
+Licenses: LICENSE (Apache-2.0) for platmon. platmon-server.exe and platmon.exe
+also include the Rust standard library and the libc, windows-sys and
+windows-link crates, each MIT or Apache-2.0 (LICENSE-MIT here), and Microsoft's
+C runtime, linked statically as Microsoft's Visual C++ license terms allow for
+a program built with its tools. They call Windows's own libraries, which are
+not included.
 """
 MIT = """Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -139,6 +137,11 @@ def default_binary(root=ROOT):
     return root / "native/target/release/platmon-server.exe"
 
 
+def command_beside(server):
+    """The platmon command the same build left beside the server (native/target/release/platmon.exe)."""
+    return Path(server).with_name("platmon.exe")
+
+
 def imported_dlls(body):
     """The DLL names in a PE32+ file's import table (lowercase), or None when it has none to read."""
     pe = int.from_bytes(body[60:64], "little")
@@ -164,19 +167,23 @@ def imported_dlls(body):
     return names or None
 
 
-def check_binary(path):
-    """An x86_64 PE built with the system allocator (build-info's mark), as package.py checks the ELF ones, and
-    with the C runtime linked statically: no Visual C++ runtime DLL among its imports."""
+def check_binary(path, server=True):
+    """An x86_64 PE with the C runtime linked statically (no Visual C++ runtime DLL among its imports): the
+    server built with the system allocator (build-info's mark), as package.py checks the ELF ones, the platmon
+    command (server=False) not a server."""
     path = Path(path)
+    what = "server" if server else "platmon command"
     if path.is_symlink() or not path.is_file():
-        raise ValueError(f"Windows server binary not found: {path} (RUSTFLAGS='-C target-feature=+crt-static' "
+        raise ValueError(f"Windows {what} binary not found: {path} (RUSTFLAGS='-C target-feature=+crt-static' "
                          f"cargo build --release --locked --no-default-features)")
     body = path.read_bytes()
     pe = int.from_bytes(body[60:64], "little") if body[:2] == b"MZ" and len(body) >= 64 else -1
     if pe < 0 or body[pe:pe + 4] != b"PE\0\0" or int.from_bytes(body[pe + 4:pe + 6], "little") != PE_AMD64:
         raise ValueError(f"{path} is not an x86_64 Windows executable")
-    if ALLOCATOR_MARK not in body:
+    if server and ALLOCATOR_MARK not in body:
         raise ValueError(f"{path} does not carry the system allocator's mark")
+    if not server and ALLOCATOR_MARK in body:
+        raise ValueError(f"{path} is a server, not the platmon command")
     dlls = imported_dlls(body)
     if not dlls:
         raise ValueError(f"{path}: no import table to read")
@@ -195,15 +202,14 @@ def local_ini(root):
     return text.replace("\nbind = 0.0.0.0\n", "\nbind = 127.0.0.1\n").replace("\n", "\r\n").encode("utf-8")
 
 
-def members(root, server, release):
+def members(root, server, command, release):
     """(path in the zip, body): fixed names and order."""
     web = root / "frontends/web"
     files = [("platmon-server.exe", server), ("platmon.ini", local_ini(root)),
              ("LICENSE", (root / "LICENSE").read_bytes()),
              ("LICENSE-MIT", (MIT_HOLDERS + MIT).replace("\n", "\r\n").encode("utf-8")),
              ("README.txt", README.format(release=release).replace("\n", "\r\n").encode("utf-8")),
-             ("cli.py", (root / "frontends/cli.py").read_bytes()),
-             ("platmon.cmd", PLATMON_CMD)]
+             ("platmon.exe", command)]
     # cmd reads a batch file with LF line ends wrongly (labels, goto): CRLF in the zip
     files += [(name, (root / "packaging/windows" / name).read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
               for name in SCRIPTS]
@@ -225,13 +231,14 @@ def check_changelog(text, release):
 
 def build(output, binary=None, root=ROOT, epoch=None, msi=None):
     """Write the zip into `output` (package.py's directory, with its SHA256SUMS and BUILD.json), add its
-    checksum and the server's; with msi (package_msi.py's installer of the same release, built on Windows),
+    checksum and the server's and the command's (platmon.exe beside the server); with msi (package_msi.py's installer of the same release, built on Windows),
     copy it there too and add its checksum."""
     release = version(root)
     epoch = packaging_epoch(root) if epoch is None else epoch
     # zip times are local DOS times from 1980; the UTC fields of the epoch keep repeat builds equal
     stamp = max(time.gmtime(epoch)[:6], (1980, 1, 1, 0, 0, 0))
-    server = check_binary(binary or default_binary(root))
+    binary = binary or default_binary(root)
+    server, command = check_binary(binary), check_binary(command_beside(binary), server=False)
     output = Path(output).resolve()
     sums, manifest = output / "SHA256SUMS", output / "BUILD.json"
     for path in (sums, manifest):
@@ -242,12 +249,13 @@ def build(output, binary=None, root=ROOT, epoch=None, msi=None):
         raise ValueError(f"{target} already exists; use a fresh output directory")
     top = f"platmon-{release}-windows-x86_64/"
     with zipfile.ZipFile(target, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for name, body in members(root, server, release):
+        for name, body in members(root, server, command, release):
             info = zipfile.ZipInfo(top + name, date_time=stamp)
             info.compress_type, info.create_system = zipfile.ZIP_DEFLATED, 0  # 0: MS-DOS, no Unix modes
             archive.writestr(info, body)
     data = json.loads(manifest.read_text(encoding="utf-8"))
     data["windows_server_sha256"] = {"x86_64": hashlib.sha256(server).hexdigest()}
+    data["windows_command_sha256"] = {"x86_64": hashlib.sha256(command).hexdigest()}
     # bytes, not write_text(newline=) (Python 3.10+): LF on every host
     manifest.write_bytes((json.dumps(data, indent=2, sort_keys=True) + "\n").encode())
     sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -267,7 +275,8 @@ def build(output, binary=None, root=ROOT, epoch=None, msi=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", default=str(ROOT / "dist"), help="package.py's output directory (default dist)")
-    parser.add_argument("--binary", help="the Windows server (default native/target/release/platmon-server.exe)")
+    parser.add_argument("--binary", help="the Windows server, platmon.exe beside it (default "
+                        "native/target/release/platmon-server.exe)")
     parser.add_argument("--msi", help="package_msi.py's installer of this release, to add beside the zip")
     parser.add_argument("--version", action="version", version=version())
     args = parser.parse_args()

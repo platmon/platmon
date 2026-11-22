@@ -50,7 +50,7 @@ def field(package, tag):
 
 
 def cli_beside(package):
-    path = package.parent / f"platmon-cli-{field(package, 'VERSION')}-{field(package, 'RELEASE')}.noarch.rpm"
+    path = package.parent / f"platmon-cli-{field(package, 'VERSION')}-{field(package, 'RELEASE')}.{field(package, 'ARCH')}.rpm"
     if not path.is_file():
         raise RuntimeError(f"no {path.name} beside {package.name}")
     return path

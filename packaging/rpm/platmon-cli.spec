@@ -1,21 +1,20 @@
-# platmon-cli: scripts/packaging/package_rpm.py fills in the @...@ fields and stages the files (the same as
+# platmon-cli for one architecture: scripts/packaging/package_rpm.py fills in the @...@ fields and stages the files (the same as
 # the .deb's) in @STAGE@; nothing is compiled here.
 Name: platmon-cli
 Version: @VERSION@
 Release: @RELEASE@
 Summary: Terminal client for the platmon platform monitor
-License: Apache-2.0
+License: Apache-2.0 AND (MIT OR Apache-2.0) AND MIT
 URL: https://github.com/platmon/platmon
-BuildArch: noarch
-Requires: python3 >= 3.9
-# One Python file on the standard library: its interpreter is the only dependency, given above.
+# One static binary, as the server: no dependencies to find, no debug package, nothing to strip.
 AutoReqProv: no
+%global debug_package %{nil}
 %global __os_install_post %{nil}
 
 %description
 The platmon command: a live view of a platmon service's HTTP API, this
-device's by default, in the terminal. One Python file that uses the host's
-Python standard library only.
+device's by default, in the terminal. One static native binary, without
+Python.
 
 %install
 cp -a @STAGE@/. %{buildroot}/

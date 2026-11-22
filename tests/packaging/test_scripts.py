@@ -22,8 +22,17 @@ def test_script_is_executable_bash(script):
     subprocess.run(["bash", "-n", str(script)], check=True)  # syntax only; they need sudo/docker to run
 
 
+def built_command():
+    """The platmon command native/build.sh or build-armhf.sh built for this machine, as install-cli.sh finds it."""
+    triple = {"x86_64": "x86_64-unknown-linux-musl", "aarch64": "aarch64-unknown-linux-musl",
+              "armv7l": "arm-unknown-linux-musleabihf"}.get(os.uname().machine)
+    return SCRIPT_DIR.parent / "native/target" / str(triple) / "release/platmon"
+
+
 def test_install_cli_user(tmp_path):
     """--user installs ~/.local/bin/platmon (no sudo), never overwrites a foreign file, and uninstalls."""
+    if not built_command().is_file():
+        pytest.skip("needs the platmon command from native/build.sh")
     script = str(SCRIPT_DIR / "install-cli.sh")
     env = dict(os.environ, HOME=str(tmp_path))
     target = tmp_path / ".local/bin/platmon"
@@ -31,7 +40,7 @@ def test_install_cli_user(tmp_path):
     out = subprocess.run([script, "--user"], env=env, capture_output=True, text=True, check=True).stdout
     assert f"installed {target}" in out
     assert "is not in this shell's PATH. A new login shell often has it" in out  # temp HOME is not on PATH
-    assert os.access(target, os.X_OK) and "# platmon-cli:" in target.read_text()
+    assert os.access(target, os.X_OK) and target.read_bytes() == built_command().read_bytes()
     help_text = subprocess.run([str(target), "--help"], capture_output=True, text=True, check=True).stdout
     assert help_text.startswith("usage: platmon")
 
@@ -42,6 +51,22 @@ def test_install_cli_user(tmp_path):
     r = subprocess.run([script, "--user"], env=env, capture_output=True, text=True)
     assert r.returncode == 1 and "not the platmon client" in r.stderr
     assert "someone else's" in target.read_text()
+
+
+def test_install_cli_replaces_the_python_command_and_needs_a_build(tmp_path):
+    """The Python command an earlier checkout installed is its own (its marker): uninstall removes it. Without
+    a build, installing says which script makes one."""
+    script = str(SCRIPT_DIR / "install-cli.sh")
+    env = dict(os.environ, HOME=str(tmp_path))
+    target = tmp_path / ".local/bin/platmon"
+    target.parent.mkdir(parents=True)
+    target.write_text("#!/usr/bin/env python3\n# platmon-cli: marker\n")
+    subprocess.run([script, "--user", "--uninstall"], env=env, check=True, capture_output=True)
+    assert not target.exists()
+    if built_command().is_file():
+        return
+    r = subprocess.run([script, "--user"], env=env, capture_output=True, text=True)
+    assert r.returncode == 1 and "run native/build" in r.stderr and not target.exists()
 
 
 def test_source_uninstall_removes_cli_from_relocated_checkout(tmp_path):

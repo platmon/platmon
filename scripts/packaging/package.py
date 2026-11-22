@@ -2,8 +2,9 @@
 """Build .deb packages, source archive and checksums with stdlib + the host's dpkg-deb.
 
 platmon, one package per architecture (amd64, arm64, armhf): the static Rust server from native/build.sh, its
-unit and web page, without Python. platmon-cli, Architecture: all: the `platmon` client, one Python file,
-which platmon recommends. No interpreter, OS software, build tools or hardware binaries are bundled.
+unit and web page, without Python. platmon-cli, per architecture too: the `platmon` command, the static Rust
+binary built beside the server, which platmon recommends. No interpreter, OS software, build tools or hardware
+binaries are bundled.
 """
 import argparse
 from email.utils import parsedate_to_datetime
@@ -28,7 +29,7 @@ SOURCE_DIRS = ("frontends", "native", "scripts", "packaging", "deploy", "docs",
 # Debian architecture: the Rust target native/build.sh builds for it, its ELF e_machine and class (bits).
 ARCHES = {"amd64": ("x86_64-unknown-linux-musl", 62, 64), "arm64": ("aarch64-unknown-linux-musl", 183, 64),
           "armhf": ("arm-unknown-linux-musleabihf", 40, 32)}
-# What a release packages: build.sh's two binaries and build-armhf.sh's.
+# What a release packages: build.sh's two builds and build-armhf.sh's.
 RELEASED = ("amd64", "arm64", "armhf")
 ALLOCATOR_MARK = b"platmon-server-allocator=system;"
 
@@ -68,17 +69,26 @@ def default_binary(arch, root=ROOT):
     return root / "native/target" / ARCHES[arch][0] / "release/platmon-server"
 
 
-def check_binary(arch, path):
-    """The binary must be the system-allocator build for this architecture (native/build.sh checks the same mark)."""
+def command_beside(server):
+    """The platmon command the same build left beside a server binary (native/target/<triple>/release/platmon)."""
+    return Path(server).with_name("platmon")
+
+
+def check_binary(arch, path, server=True):
+    """The binary must be an ELF for this architecture: the server the system-allocator build (native/build.sh
+    checks the same mark), the platmon command (server=False) not a server."""
     path = Path(path)
+    what = "server" if server else "platmon command"
     if path.is_symlink() or not path.is_file():
-        raise ValueError(f"{arch} server binary not found: {path} (build it with native/build.sh)")
+        raise ValueError(f"{arch} {what} binary not found: {path} (build it with native/build.sh)")
     body = path.read_bytes()
     _, machine, bits = ARCHES[arch]
     if body[:6] != b"\x7fELF" + bytes((bits // 32, 1)) or int.from_bytes(body[18:20], "little") != machine:
         raise ValueError(f"{path} is not a {bits}-bit little-endian ELF for {arch}")
-    if ALLOCATOR_MARK not in body:
+    if server and ALLOCATOR_MARK not in body:
         raise ValueError(f"{path} does not carry the system allocator's mark")
+    if not server and ALLOCATOR_MARK in body:
+        raise ValueError(f"{path} is a server, not the platmon command")
     return body
 
 
@@ -123,8 +133,9 @@ def source_archive(root, output, release, epoch):
 
 
 def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
-    """Build one platmon package per architecture in `binaries` ({arch: path}; default: RELEASED, from
-    native/target), then platmon-cli; returns their paths, platmon-cli's last."""
+    """Build one platmon package per architecture in `binaries` ({arch: server path}; default: RELEASED, from
+    native/target), then one platmon-cli per architecture from the platmon command beside each server; returns
+    their paths, platmon's first."""
     release = version(root)
     if not re.fullmatch(r"[1-9][0-9]*", revision):
         raise ValueError("revision must be a positive integer")
@@ -139,26 +150,29 @@ def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
     if not binaries or set(binaries) - set(ARCHES):
         raise ValueError("architectures must be among: " + ", ".join(ARCHES))
     bodies = {arch: check_binary(arch, binaries[arch]) for arch in sorted(binaries)}
+    commands = {arch: check_binary(arch, command_beside(binaries[arch]), server=False) for arch in bodies}
     deb_version = f"{release}-{revision}"
     debs = [output / f"platmon_{deb_version}_{arch}.deb" for arch in bodies]
-    debs.append(output / f"platmon-cli_{deb_version}_all.deb")
+    cli_debs = [output / f"platmon-cli_{deb_version}_{arch}.deb" for arch in commands]
     source = output / f"platmon-{release}.tar.gz"
-    outputs = (*debs, source, output / "BUILD.json", output / "SHA256SUMS")
+    outputs = (*debs, *cli_debs, source, output / "BUILD.json", output / "SHA256SUMS")
     if any(path.exists() for path in outputs):
         raise ValueError("output files already exist; use a fresh output directory")
     for (arch, body), deb in zip(bodies.items(), debs):
         build_deb(root, deb, arch, body, release, revision, epoch)
-    build_cli_deb(root, debs[-1], release, revision, epoch)
+    for (arch, body), deb in zip(commands.items(), cli_debs):
+        build_cli_deb(root, deb, arch, body, release, revision, epoch)
     source_archive(root, source, release, epoch)
     inputs = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in source_files(root)}
     manifest = {"version": release, "package_version": deb_version, "source_date_epoch": epoch,
                 "server_sha256": {arch: hashlib.sha256(body).hexdigest() for arch, body in bodies.items()},
+                "command_sha256": {arch: hashlib.sha256(body).hexdigest() for arch, body in commands.items()},
                 "source_files_sha256": inputs}
     (output / "BUILD.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     checksums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in outputs[:-1])
     (output / "SHA256SUMS").write_text(checksums, encoding="utf-8")
-    return debs
+    return debs + cli_debs
 
 
 def stage_server(root, stage, server, release):
@@ -182,12 +196,12 @@ def stage_server(root, stage, server, release):
     copy_file(root / "platmon.ini", stage / "etc/platmon/platmon.ini")
 
 
-def stage_cli(root, stage, epoch):
+def stage_cli(root, stage, command, epoch):
     """platmon-cli's files, the same in every package format: the platmon command and its manual."""
     cli = stage / "usr/bin/platmon"
-    copy_file(root / "frontends/cli.py", cli, executable=True)
-    cli.write_text(cli.read_text(encoding="utf-8").replace(
-        "#!/usr/bin/env python3\n", "#!/usr/bin/python3\n", 1), encoding="utf-8")
+    cli.parent.mkdir(parents=True)
+    cli.write_bytes(command)
+    cli.chmod(0o755)
     write_gzip((root / "packaging/debian/platmon.1").read_bytes(),
                stage / "usr/share/man/man1/platmon.1.gz", epoch)
 
@@ -204,16 +218,17 @@ def build_deb(root, deb, arch, server, release, revision, epoch):
              overrides, {"@VERSION@": f"{release}-{revision}", "@ARCH@": arch}, revision, epoch)
 
 
-def build_cli_deb(root, deb, release, revision, epoch):
-    """platmon-cli: the platmon command and its manual. It breaks and replaces the platmon packages that had
+def build_cli_deb(root, deb, arch, command, release, revision, epoch):
+    """platmon-cli for one architecture: the platmon command and its manual. It breaks and replaces the platmon packages that had
     the command, those before 1.7.0 (a fixed bound in its control file, not this release's version, so that
     rolling platmon back to a release that has no command keeps the newer platmon-cli)."""
     with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
         stage = Path(directory)
-        stage_cli(root, stage, epoch)
+        stage_cli(root, stage, command, epoch)
         docs(root, stage, "platmon-cli", release, revision, epoch)
-        pack(root, stage, deb, "platmon-cli", root / "packaging/debian/cli", ("postinst",), "",
-             {"@VERSION@": f"{release}-{revision}"}, revision, epoch)
+        overrides = (root / "packaging/debian/cli/lintian-overrides").read_text(encoding="utf-8")
+        pack(root, stage, deb, "platmon-cli", root / "packaging/debian/cli", ("postinst",), overrides,
+             {"@VERSION@": f"{release}-{revision}", "@ARCH@": arch}, revision, epoch)
 
 
 def docs(root, stage, package, release, revision, epoch, extra=()):
@@ -269,8 +284,9 @@ def main():
     parser.add_argument("--output", default=str(ROOT / "dist"), help="fresh output directory (default dist)")
     parser.add_argument("--revision", default="1", help="Debian packaging revision (default 1)")
     parser.add_argument("--binary", action="append", metavar="ARCH=PATH",
-                        help="a server binary for one architecture (repeat; default: amd64, arm64 and armhf "
-                             "from native/target, built by native/build.sh and native/build-armhf.sh)")
+                        help="a server binary for one architecture, the platmon command beside it (repeat; "
+                             "default: amd64, arm64 and armhf from native/target, built by native/build.sh and "
+                             "native/build-armhf.sh)")
     parser.add_argument("--version", action="version", version=version())
     args = parser.parse_args()
     try:

@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from scripts.packaging.package import ALLOCATOR_MARK, packaging_epoch, version
-from scripts.packaging.package_windows import SCRIPTS, build, check_binary, check_changelog, default_binary, imported_dlls
+from scripts.packaging.package_windows import (SCRIPTS, build, check_binary, check_changelog, command_beside, default_binary,
+                                               imported_dlls)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,8 +34,12 @@ def fake_exe(path, machine=0x8664, mark=ALLOCATOR_MARK, dlls=("KERNEL32.dll", "n
 
 @pytest.fixture
 def exe(tmp_path):
+    """The server native-windows built, platmon.exe beside it, else fakes of both."""
     real = default_binary()
-    return real if real.is_file() else fake_exe(tmp_path / "bin/platmon-server.exe")
+    if real.is_file() and command_beside(real).is_file():
+        return real
+    fake_exe(tmp_path / "bin/platmon.exe", mark=b"")
+    return fake_exe(tmp_path / "bin/platmon-server.exe")
 
 
 def output_with_sums(path):
@@ -54,11 +59,11 @@ def test_zip_contents_and_checksum(tmp_path, exe):
     top = f"platmon-{release}-windows-x86_64/"
     with zipfile.ZipFile(target) as z:
         names = z.namelist()
-        assert names[:10] == [top + n for n in ("platmon-server.exe", "platmon.ini", "LICENSE", "LICENSE-MIT", "README.txt",
-                                                "cli.py", "platmon.cmd") + SCRIPTS]
-        # the platmon command: the client as it is in the source, run with the Python on PATH
-        assert z.read(top + "cli.py") == (ROOT / "frontends/cli.py").read_bytes()
-        assert z.read(top + "platmon.cmd") == b'@python "%~dp0cli.py" %*\r\n'
+        assert names[:9] == [top + n for n in ("platmon-server.exe", "platmon.ini", "LICENSE", "LICENSE-MIT", "README.txt",
+                                               "platmon.exe") + SCRIPTS]
+        # the platmon command: the native binary built beside the server, no Python
+        assert z.read(top + "platmon.exe") == command_beside(exe).read_bytes()
+        assert top + "cli.py" not in names and top + "platmon.cmd" not in names
         assert top + "web/index.html" in names and all(n.startswith(top) for n in names)
         assert z.read(top + "platmon-server.exe") == exe.read_bytes()
         ini = z.read(top + "platmon.ini").decode("utf-8")
@@ -68,7 +73,8 @@ def test_zip_contents_and_checksum(tmp_path, exe):
         assert f"platmon-{release}-windows-x86_64.msi" in readme and "Supported on Windows 11" in readme
         # the service runs as LocalSystem: its files only where administrators alone can write
         assert "\\Program Files\\platmon\\platmon-server.exe" in readme and "Windows 10 was not checked" in readme
-        assert "platmon.cmd runs cli.py" in readme and "EventLogMessages.dll" in readme
+        assert "platmon.exe, is the terminal client" in readme and "Python" not in readme
+        assert "EventLogMessages.dll" in readme
         assert all(name in readme for name in SCRIPTS)
         for name in SCRIPTS:  # cmd misreads labels and goto in a batch file with LF line ends
             script = z.read(top + name)
@@ -78,11 +84,13 @@ def test_zip_contents_and_checksum(tmp_path, exe):
         # the install script sets the guide's recovery actions and the event log source, as the README's steps do
         install = z.read(top + "install-service.cmd").decode("utf-8")
         assert "restart/5000/restart/5000/restart/60000" in install and "EventLogMessages.dll" in install
-        assert "cli.py platmon.cmd" in install
+        assert "uninstall-service.cmd platmon.exe" in install
+        assert "for %%f in (cli.py platmon.cmd) do if exist" in install  # the Python command of older zips
         assert all(i.date_time[0] >= 1980 and i.create_system == 0 for i in z.infolist())
     sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
     assert json.loads((out / "BUILD.json").read_text(encoding="utf-8")) == \
-        {"version": "x", "windows_server_sha256": {"x86_64": sha(exe)}}
+        {"version": "x", "windows_server_sha256": {"x86_64": sha(exe)},
+         "windows_command_sha256": {"x86_64": sha(command_beside(exe))}}
     # BUILD.json changed: its checksum line follows, and the zip's is added
     assert (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines() == \
         ["0" * 64 + "  platmon-x.tar.gz", f"{sha(out / 'BUILD.json')}  BUILD.json", f"{sha(target)}  {target.name}"]
@@ -124,8 +132,16 @@ def test_refusals(tmp_path):
         check_binary(fake_exe(tmp_path / "bare.exe", dlls=()))
     with pytest.raises(ValueError, match="not found"):
         build(out, tmp_path / "missing.exe")
+    # platmon.exe beside the server: missing, or a server
+    with pytest.raises(ValueError, match="Windows platmon command binary not found"):
+        build(out, fake_exe(tmp_path / "ok.exe"))
+    with pytest.raises(ValueError, match="is a server, not the platmon command"):
+        build(out, fake_exe(tmp_path / "platmon.exe"))
+    with pytest.raises(ValueError, match="no import table"):
+        check_binary(fake_exe(tmp_path / "platmon.exe", dlls=(), mark=b""), server=False)
+    fake_exe(tmp_path / "platmon.exe", mark=b"")
     with pytest.raises(ValueError, match="run package.py"):
-        build(tmp_path / "empty", fake_exe(tmp_path / "ok.exe"))
+        build(tmp_path / "empty", tmp_path / "ok.exe")
     build(out, tmp_path / "ok.exe")
     with pytest.raises(ValueError, match="already exists"):
         build(out, tmp_path / "ok.exe")

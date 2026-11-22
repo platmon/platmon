@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The candidate's build, in a throwaway container (no Rust toolchain on the host needed):
 #   native/build.sh   -> native/target/{x86_64,aarch64}-unknown-linux-musl/release/platmon-server
+#                        and platmon (the platmon command, the workspace's frontend) beside it
 # The system allocator only: no features (cache-alloc and mimalloc are records, built by their own scripts,
 # never here and never with --all-features), Cargo.lock as committed (--locked), both static musl targets.
-# Each binary must carry the system allocator's mark (src/main.rs, ALLOCATOR_MARK); then the SHA-256.
+# Each server binary must carry the system allocator's mark (src/main.rs, ALLOCATOR_MARK); then the SHA-256
+# of every binary.
 # The repository's VERSION is mounted beside the crate (/src/../VERSION), where src/main.rs reads it at build time.
 # The shell in the container stops at the first failure too (-e there, not only here): a failed test fails the build.
 set -euo pipefail
@@ -21,4 +23,4 @@ for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
     exit 1
   fi
 done
-sha256sum target/*-unknown-linux-musl/release/platmon-server
+sha256sum target/*-unknown-linux-musl/release/platmon-server target/*-unknown-linux-musl/release/platmon

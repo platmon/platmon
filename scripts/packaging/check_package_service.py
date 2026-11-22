@@ -79,7 +79,7 @@ def python_server(exe):
 def upgrade(old, new):
     old_version = invoke("dpkg-deb", "-f", str(old), "Version")
     new_version = invoke("dpkg-deb", "-f", str(new), "Version")
-    cli = new.parent / f"platmon-cli_{new_version}_all.deb"
+    cli = new.parent / f"platmon-cli_{new_version}_{invoke('dpkg-deb', '-f', str(new), 'Architecture')}.deb"
     assert cli.is_file(), f"no {cli.name} beside {new.name}"
     invoke("dpkg", "--compare-versions", old_version, "lt", new_version)
     # The previous package, then an administrator's INI.

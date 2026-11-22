@@ -63,12 +63,13 @@ jobs:
               output.write("version=" + release + "\n")
               output.write("revision=" + (match.group(1) or "1") + "\n")
           PY
-      # The server binaries the checks built and compared (native/build.sh), in the same run.
+      # The server binaries the checks built and compared (native/build.sh), the platmon commands beside them,
+      # in the same run.
       - uses: actions/download-artifact@v4
         with:
           name: platmon-server
           path: native/target
-      # The Windows server the checks built and smoke-tested (native-windows), for the zip.
+      # The Windows server and platmon.exe the checks built and smoke-tested (native-windows), for the zip.
       - uses: actions/download-artifact@v4
         with:
           name: platmon-server-windows
@@ -95,7 +96,7 @@ jobs:
       - name: Check package policy
         run: lintian --no-cfg --info --pedantic --fail-on error,warning dist/*.deb
       # This runner is amd64; the checks ran both architectures' packages on their own runners.
-      - run: python3 scripts/packaging/check_package.py dist/*_amd64.deb
+      - run: python3 scripts/packaging/check_package.py dist/platmon_*_amd64.deb
       # The mirrors once, with retries; the lifecycle check runs in this local image (never pushed, #96).
       - name: Prepare the test image (python3, systemd)
         timeout-minutes: 20
@@ -106,7 +107,7 @@ jobs:
         run: |
           # The next revision is only an upgrade fixture; it is not released.
           python3 scripts/packaging/package.py --revision "$((REVISION + 1))" --output "$RUNNER_TEMP/upgrade"
-          python3 scripts/packaging/check_package_install.py dist/*_amd64.deb "$RUNNER_TEMP"/upgrade/*_amd64.deb \
+          python3 scripts/packaging/check_package_install.py dist/platmon_*_amd64.deb "$RUNNER_TEMP"/upgrade/platmon_*_amd64.deb \
             --image platmon-package-test:local
       - name: Check package policy (rpmlint)
         timeout-minutes: 20
@@ -125,7 +126,7 @@ jobs:
         run: |
           # The next release is only an upgrade fixture; it is not released.
           python3 scripts/packaging/package_rpm.py --release "$((REVISION + 1))" --output "$RUNNER_TEMP/rpm-upgrade"
-          python3 scripts/packaging/check_rpm.py dist/platmon-*.x86_64.rpm "$RUNNER_TEMP"/rpm-upgrade/platmon-*.x86_64.rpm \
+          python3 scripts/packaging/check_rpm.py dist/platmon-[0-9]*.x86_64.rpm "$RUNNER_TEMP"/rpm-upgrade/platmon-[0-9]*.x86_64.rpm \
             --image platmon-rpm-test:local
       - name: Verify checksums
         working-directory: dist
