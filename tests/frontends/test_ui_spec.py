@@ -30,6 +30,14 @@ def test_cli_copy_matches_the_spec():
     assert cli.UI_SPEC == {key: value for key, value in SPEC.items() if key != "about"}
 
 
+def test_rust_command_copy_matches_the_spec():
+    """The Rust platmon command's copy (native/src/bin/platmon/screen.rs UI_SPEC: its build has only native/
+    and VERSION, so the file cannot be included)."""
+    source = (ROOT / "native/src/bin/platmon/screen.rs").read_text(encoding="utf-8")
+    copy = re.search(r'const UI_SPEC: &str = r##"(.*?)"##;', source, re.S).group(1)
+    assert json.loads(copy) == {key: value for key, value in SPEC.items() if key != "about"}
+
+
 def test_views_are_the_web_tabs_and_the_terminal_views():
     page = (WEB / "index.html").read_text(encoding="utf-8")
     tabs = re.findall(r'<button id="tab-(\w+)" role="tab"[^>]*>(.*?)</button>', page)
