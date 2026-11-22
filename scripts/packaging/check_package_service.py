@@ -118,7 +118,8 @@ def upgrade(old, new):
     finally:
         holder.close()
     # Installing the previous package recovers from there; it has the platmon command and the web page
-    # itself, so platmon-frontend, which breaks it, goes first (apt removes it for the same reason).
+    # itself, so platmon-frontend, which breaks it (Breaks: platmon << its release), goes first (apt removes
+    # it for the same reason).
     dpkg("--remove", "platmon-frontend")
     dpkg("--force-confold", "-i", str(old))
     assert package() == f"{old_version} all install ok installed", package()

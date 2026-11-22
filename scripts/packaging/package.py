@@ -219,10 +219,11 @@ def build_deb(root, deb, arch, server, release, revision, epoch):
 
 
 def build_frontend_deb(root, deb, arch, command, release, revision, epoch):
-    """platmon-frontend for one architecture: the web page, the platmon command and its manual. It breaks and
-    replaces platmon-cli, its name up to this release, and the platmon packages before this release, which had
-    the web page (and before 1.7.0 the command): both bounds are this release's upstream version, so that its
-    later packaging revisions still upgrade from them."""
+    """platmon-frontend for one architecture: the web page, the platmon command and its manual. It conflicts with
+    and replaces platmon-cli, its name up to this release (a rename: dpkg -i removes platmon-cli by itself), and
+    breaks and replaces the platmon packages before this release, which had the web page (and before 1.7.0 the
+    command). Every bound is this release's upstream version, so that its later packaging revisions still
+    upgrade from them."""
     with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
         stage = Path(directory)
         stage_frontend(root, stage, command, epoch)

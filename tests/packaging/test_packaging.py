@@ -208,12 +208,13 @@ def test_frontend_package_contents(package, binaries, tmp_path, arch):
     cli = package[0].parent / f"platmon-frontend_{version()}-1_{arch}.deb"
     assert cli in package
     metadata = run("dpkg-deb", "-f", str(cli)).stdout
-    # platmon-cli was its name, and platmon had the web page (and before 1.7.0 the command), up to this release
+    # platmon-cli was its name (a rename: Conflicts, so that dpkg removes it), and platmon had the web page (and
+    # before 1.7.0 the command; Breaks, as files moved), up to this release
     for field in ("Package: platmon-frontend", "Source: platmon", f"Version: {version()}-1", f"Architecture: {arch}",
-                  f"Breaks: platmon (<< {version()}), platmon-cli (<< {version()})",
+                  f"Breaks: platmon (<< {version()})", f"Conflicts: platmon-cli (<< {version()})",
                   f"Replaces: platmon (<< {version()}), platmon-cli (<< {version()})"):
         assert field + "\n" in metadata, field
-    assert "\nProvides:" not in metadata and "\nConflicts:" not in metadata  # no transitional package
+    assert "\nProvides:" not in metadata  # no transitional package
     assert "\nDepends:" not in metadata and "python3 (" not in metadata  # one static binary
     root = tmp_path / "extracted"
     assert run("dpkg-deb", "-R", str(cli), str(root)).returncode == 0

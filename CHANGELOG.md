@@ -23,8 +23,8 @@ API schema versions are independent of release versions.
   `platmon-frontend-VERSION-1.{x86_64,aarch64}.rpm` in place of `platmon-cli_VERSION-1_all.deb` and
   `platmon-cli-VERSION-1.noarch.rpm`. No transitional package: from 1.10.0 run `sudo apt full-upgrade` or
   `sudo apt install platmon-frontend` (`apt upgrade` and `apt-get upgrade` keep `platmon` back while
-  `platmon-cli` is installed; with `dpkg -i`, remove `platmon-cli` first); `dnf upgrade` replaces
-  `platmon-cli` by itself. Rolling `platmon` back to 1.10.0 removes `platmon-frontend`. The Windows zip and
+  `platmon-cli` is installed); `dpkg -i` of the new `platmon` and `platmon-frontend` files together and
+  `dnf upgrade` replace `platmon-cli` by themselves. Rolling `platmon` back to 1.10.0 removes `platmon-frontend`. The Windows zip and
   installer and the container are unchanged.
 - **Without the page installed** (`--no-install-recommends`), `/` answers 404 with one line naming
   `platmon-frontend` (it closed the connection without an answer), the API answers as always, and the start

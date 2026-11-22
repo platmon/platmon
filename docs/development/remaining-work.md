@@ -357,9 +357,10 @@ data (the web page, the `platmon` command, the tray) is a frontend, in one packa
 - `platmon-cli` is renamed `platmon-frontend` and takes the web page from `platmon`. platmon has no users
   outside the maintainer's devices yet (#181), so there is no transitional package: `platmon-frontend` only
   carries `Breaks`/`Replaces: platmon-cli` and `Replaces: platmon (<< that release)` (`Obsoletes`/`Provides` in
-  the `.rpm`), enough for the maintainer's devices to upgrade. As built: `Breaks` too on `platmon (<< that
-  release)` (the old `platmon` without its page would be broken, Debian policy 7.6.1), and both bounds on
-  `platmon-cli` versioned the same way (`Breaks` without a version is a lintian warning).
+  the `.rpm`), enough for the maintainer's devices to upgrade. As built: `Conflicts`/`Replaces: platmon-cli`
+  (Debian's relation for a renamed package, so that a plain `dpkg -i` removes it), `Breaks` too on `platmon
+  (<< that release)` (the old `platmon` without its page would be broken, Debian policy 7.6.1), every bound
+  that release's upstream version.
 - With `web = yes` and no page installed (`--no-install-recommends`), the server answers `/` with a 404 that
   names `platmon-frontend`; until step 2 `native/src/http.rs` failed reading `index.html` (the connection
   closed without an answer).

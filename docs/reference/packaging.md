@@ -23,7 +23,7 @@ package uses the host's systemd, has no Python dependency and bundles no OS/NVID
 | Package | Contents | Relations |
 | --- | --- | --- |
 | `platmon` | the server (`/usr/lib/platmon/platmon-server`), its unit, `/etc/platmon/platmon.ini` | `Depends: systemd`; `Recommends: platmon-frontend` |
-| `platmon-frontend` | the web page (`/usr/share/platmon/frontends/web`, where the unit's `--web` points) and the `platmon` command (`/usr/bin/platmon`, `man platmon`) | none; `Breaks`/`Replaces: platmon-cli`, `platmon` (both `<<` its release) |
+| `platmon-frontend` | the web page (`/usr/share/platmon/frontends/web`, where the unit's `--web` points) and the `platmon` command (`/usr/bin/platmon`, `man platmon`) | none; `Conflicts`/`Replaces: platmon-cli` (a rename), `Breaks`/`Replaces: platmon` (the moved page), all `<<` its release |
 
 The `platmon` command is the static native binary `native/build.sh` builds beside the server
 (`native/frontend/`), without dependencies. `platmon` recommends `platmon-frontend`, so apt installs it by
@@ -194,7 +194,8 @@ the vendor unit to `/usr/lib/systemd/system/platmon.service`, and config to `/et
 manual (`man platmon`).
 
 From 1.10.0 or earlier, `platmon-frontend` takes the page from the old `platmon` and the command from
-`platmon-cli` (or, before 1.7.0, from `platmon`): it breaks and replaces both, up to its own release.
+`platmon-cli` (or, before 1.7.0, from `platmon`), up to its own release: it conflicts with and replaces
+`platmon-cli` (a renamed package), and breaks and replaces the old `platmon`.
 Checked with the 1.10.0 packages and a local repository:
 
 - `sudo apt full-upgrade`, or `sudo apt install platmon-frontend` (which upgrades `platmon` with it),
@@ -205,12 +206,14 @@ Checked with the 1.10.0 packages and a local repository:
   recommended `platmon-frontend`; `apt-get upgrade` installs no new package, so it upgrades `platmon` alone
   and the page is missing (`/` answers 404 naming `platmon-frontend`) until
   `sudo apt install platmon-frontend`.
-- `dpkg -i` does not remove a package that another one breaks: `sudo dpkg --remove platmon-cli` first, then
-  install the new `platmon` and `platmon-frontend` files together (or use `sudo apt install ./FILE.deb ...`,
-  which does it).
+- `sudo dpkg -i platmon_<version>-<revision>_<arch>.deb platmon-frontend_<version>-<revision>_<arch>.deb`
+  removes `platmon-cli` by itself and moves the page. Give both files together: `platmon-frontend` alone is
+  refused while the old `platmon` is installed. `sudo apt install ./platmon-frontend_….deb` upgrades
+  `platmon` from the repository with it.
 
 Rolling `platmon` back to 1.10.0 or earlier makes apt remove `platmon-frontend`, as the old package has the
-page itself (and, before 1.7.0, the command); install that release's `platmon-cli` again for the command.
+page itself (and, before 1.7.0, the command); from the repository apt installs that release's recommended
+`platmon-cli` again (with a downloaded file, install it yourself).
 Within one release (another packaging revision) `platmon` rolls back alone beside the newer
 `platmon-frontend`. Compressed documentation and
 changelogs are in `/usr/share/doc/platmon/` (and `/usr/share/doc/platmon-frontend/`); `copyright` references the system's
