@@ -63,13 +63,13 @@ jobs:
               output.write("version=" + release + "\n")
               output.write("revision=" + (match.group(1) or "1") + "\n")
           PY
-      # The server binaries the checks built and compared (native/build.sh), the platmon commands beside them,
+      # The server binaries the checks built and compared (native/build.sh), the platmon commands and trays beside them,
       # in the same run.
       - uses: actions/download-artifact@v4
         with:
           name: platmon-server
           path: native/target
-      # The Windows server and platmon.exe the checks built and smoke-tested (native-windows), for the zip.
+      # The Windows server, platmon.exe and platmon-tray.exe the checks built and smoke-tested (native-windows), for the zip.
       - uses: actions/download-artifact@v4
         with:
           name: platmon-server-windows

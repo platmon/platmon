@@ -3,8 +3,8 @@
 
 platmon, one package per architecture (amd64, arm64, armhf): the static Rust server from native/build.sh, its
 unit and configuration, without Python. platmon-frontend, per architecture too: the web page the server sends
-from /usr/share/platmon and the `platmon` command, the static Rust binary built beside the server; platmon
-recommends it. No interpreter, OS software, build tools or hardware binaries are bundled.
+from /usr/share/platmon, the `platmon` command and the tray (`platmon-tray`), static Rust binaries built beside
+the server; platmon recommends it. No interpreter, OS software, build tools or hardware binaries are bundled.
 """
 import argparse
 from email.utils import parsedate_to_datetime
@@ -74,11 +74,16 @@ def command_beside(server):
     return Path(server).with_name("platmon")
 
 
-def check_binary(arch, path, server=True):
+def tray_beside(server):
+    """The tray the same build left beside a server binary (native/target/<triple>/release/platmon-tray)."""
+    return Path(server).with_name("platmon-tray")
+
+
+def check_binary(arch, path, server=True, what="platmon command"):
     """The binary must be an ELF for this architecture: the server the system-allocator build (native/build.sh
-    checks the same mark), the platmon command (server=False) not a server."""
+    checks the same mark), the platmon command or the tray (server=False, what names it) not a server."""
     path = Path(path)
-    what = "server" if server else "platmon command"
+    what = "server" if server else what
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"{arch} {what} binary not found: {path} (build it with native/build.sh)")
     body = path.read_bytes()
@@ -88,7 +93,7 @@ def check_binary(arch, path, server=True):
     if server and ALLOCATOR_MARK not in body:
         raise ValueError(f"{path} does not carry the system allocator's mark")
     if not server and ALLOCATOR_MARK in body:
-        raise ValueError(f"{path} is a server, not the platmon command")
+        raise ValueError(f"{path} is a server, not the {what}")
     return body
 
 
@@ -134,8 +139,8 @@ def source_archive(root, output, release, epoch):
 
 def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
     """Build one platmon package per architecture in `binaries` ({arch: server path}; default: RELEASED, from
-    native/target), then one platmon-frontend per architecture from the platmon command beside each server; returns
-    their paths, platmon's first."""
+    native/target), then one platmon-frontend per architecture from the platmon command and the tray beside each
+    server; returns their paths, platmon's first."""
     release = version(root)
     if not re.fullmatch(r"[1-9][0-9]*", revision):
         raise ValueError("revision must be a positive integer")
@@ -151,6 +156,7 @@ def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
         raise ValueError("architectures must be among: " + ", ".join(ARCHES))
     bodies = {arch: check_binary(arch, binaries[arch]) for arch in sorted(binaries)}
     commands = {arch: check_binary(arch, command_beside(binaries[arch]), server=False) for arch in bodies}
+    trays = {arch: check_binary(arch, tray_beside(binaries[arch]), server=False, what="tray") for arch in bodies}
     deb_version = f"{release}-{revision}"
     debs = [output / f"platmon_{deb_version}_{arch}.deb" for arch in bodies]
     frontend_debs = [output / f"platmon-frontend_{deb_version}_{arch}.deb" for arch in commands]
@@ -161,13 +167,14 @@ def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
     for (arch, body), deb in zip(bodies.items(), debs):
         build_deb(root, deb, arch, body, release, revision, epoch)
     for (arch, body), deb in zip(commands.items(), frontend_debs):
-        build_frontend_deb(root, deb, arch, body, release, revision, epoch)
+        build_frontend_deb(root, deb, arch, body, trays[arch], release, revision, epoch)
     source_archive(root, source, release, epoch)
     inputs = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in source_files(root)}
     manifest = {"version": release, "package_version": deb_version, "source_date_epoch": epoch,
                 "server_sha256": {arch: hashlib.sha256(body).hexdigest() for arch, body in bodies.items()},
                 "command_sha256": {arch: hashlib.sha256(body).hexdigest() for arch, body in commands.items()},
+                "tray_sha256": {arch: hashlib.sha256(body).hexdigest() for arch, body in trays.items()},
                 "source_files_sha256": inputs}
     (output / "BUILD.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     checksums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in outputs[:-1])
@@ -189,21 +196,23 @@ def stage_server(root, stage, server, release):
     copy_file(root / "platmon.ini", stage / "etc/platmon/platmon.ini")
 
 
-def stage_frontend(root, stage, command, epoch):
-    """platmon-frontend's files, the same in every package format: the web page (where the unit's --web points)
-    and the platmon command and its manual."""
+def stage_frontend(root, stage, command, tray, epoch):
+    """platmon-frontend's files, the same in every package format: the web page (where the unit's --web points),
+    the platmon command and the tray with their manuals. No /etc/xdg/autostart entry: the tray starts only for a
+    user who runs platmon-tray --autostart."""
     web = root / "frontends/web"
     for path in sorted(web.rglob("*")):
         if path.is_file() and path.suffix in (".html", ".css", ".js", ".svg", ".json"):
             if path.is_symlink():
                 raise ValueError(f"unexpected web file: {path}")
             copy_file(path, stage / "usr/share/platmon/frontends/web" / path.relative_to(web))
-    cli = stage / "usr/bin/platmon"
-    cli.parent.mkdir(parents=True)
-    cli.write_bytes(command)
-    cli.chmod(0o755)
-    write_gzip((root / "packaging/debian/platmon.1").read_bytes(),
-               stage / "usr/share/man/man1/platmon.1.gz", epoch)
+    for name, body in (("platmon", command), ("platmon-tray", tray)):
+        binary = stage / "usr/bin" / name
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_bytes(body)
+        binary.chmod(0o755)
+        write_gzip((root / f"packaging/debian/{name}.1").read_bytes(),
+                   stage / f"usr/share/man/man1/{name}.1.gz", epoch)
 
 
 def build_deb(root, deb, arch, server, release, revision, epoch):
@@ -218,15 +227,15 @@ def build_deb(root, deb, arch, server, release, revision, epoch):
              overrides, {"@VERSION@": f"{release}-{revision}", "@ARCH@": arch}, revision, epoch)
 
 
-def build_frontend_deb(root, deb, arch, command, release, revision, epoch):
-    """platmon-frontend for one architecture: the web page, the platmon command and its manual. It conflicts with
-    and replaces platmon-cli, its name up to this release (a rename: dpkg -i removes platmon-cli by itself), and
-    breaks and replaces the platmon packages before this release, which had the web page (and before 1.7.0 the
-    command). Every bound is this release's upstream version, so that its later packaging revisions still
+def build_frontend_deb(root, deb, arch, command, tray, release, revision, epoch):
+    """platmon-frontend for one architecture: the web page, the platmon command, the tray and their manuals. It
+    conflicts with and replaces platmon-cli, its name up to this release (a rename: dpkg -i removes platmon-cli by
+    itself), and breaks and replaces the platmon packages before this release, which had the web page (and before
+    1.7.0 the command). Every bound is this release's upstream version, so that its later packaging revisions still
     upgrade from them."""
     with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
         stage = Path(directory)
-        stage_frontend(root, stage, command, epoch)
+        stage_frontend(root, stage, command, tray, epoch)
         docs(root, stage, "platmon-frontend", release, revision, epoch)
         overrides = (root / "packaging/debian/frontend/lintian-overrides").read_text(encoding="utf-8")
         pack(root, stage, deb, "platmon-frontend", root / "packaging/debian/frontend", ("postinst",), overrides,
@@ -286,8 +295,8 @@ def main():
     parser.add_argument("--output", default=str(ROOT / "dist"), help="fresh output directory (default dist)")
     parser.add_argument("--revision", default="1", help="Debian packaging revision (default 1)")
     parser.add_argument("--binary", action="append", metavar="ARCH=PATH",
-                        help="a server binary for one architecture, the platmon command beside it (repeat; "
-                             "default: amd64, arm64 and armhf from native/target, built by native/build.sh and "
+                        help="a server binary for one architecture, the platmon command and the tray beside it "
+                             "(repeat; default: amd64, arm64 and armhf from native/target, built by native/build.sh and "
                              "native/build-armhf.sh)")
     parser.add_argument("--version", action="version", version=version())
     args = parser.parse_args()

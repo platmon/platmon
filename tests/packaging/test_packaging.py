@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from scripts.packaging.package import (ALLOCATOR_MARK, ARCHES, RELEASED, build, check_binary, command_beside,
-                                       default_binary, packaging_epoch, version)
+                                       default_binary, packaging_epoch, tray_beside, version)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -127,9 +127,10 @@ def fake_server(path, arch, mark=ALLOCATOR_MARK):
 
 
 def fake_build(directory, arch):
-    """A fake server and the fake platmon command beside it (no allocator mark), as a build leaves them; the
-    server's path."""
+    """A fake server and the fake platmon command and tray beside it (no allocator mark), as a build leaves them;
+    the server's path."""
     fake_server(command_beside(directory / "platmon-server"), arch, mark=b"")
+    fake_server(tray_beside(directory / "platmon-server"), arch, mark=b"tray")  # not the command's bytes
     return fake_server(directory / "platmon-server", arch)
 
 
@@ -137,7 +138,8 @@ def fake_build(directory, arch):
 def binaries(tmp_path):
     """The binaries native/build.sh and build-armhf.sh left, else fakes (enough to package, not to run)."""
     real = {arch: default_binary(arch) for arch in RELEASED}
-    if all(path.is_file() and command_beside(path).is_file() for path in real.values()):
+    if all(path.is_file() and command_beside(path).is_file() and tray_beside(path).is_file()
+           for path in real.values()):
         return real
     return {arch: fake_build(tmp_path / "bin" / arch, arch) for arch in RELEASED}
 
@@ -220,6 +222,9 @@ def test_frontend_package_contents(package, binaries, tmp_path, arch):
     assert run("dpkg-deb", "-R", str(cli), str(root)).returncode == 0
     command = root / "usr/bin/platmon"
     assert os.access(command, os.X_OK) and command.read_bytes() == command_beside(binaries[arch]).read_bytes()
+    tray = root / "usr/bin/platmon-tray"
+    assert os.access(tray, os.X_OK) and tray.read_bytes() == tray_beside(binaries[arch]).read_bytes()
+    assert not (root / "etc").exists()  # no /etc/xdg/autostart: the tray starts only for users who ask
     assert not list(root.rglob("*.py"))
     web = root / "usr/share/platmon/frontends/web"  # where platmon's unit points --web
     assert {p.relative_to(web).as_posix() for p in web.rglob("*") if p.is_file()} == {
@@ -227,11 +232,13 @@ def test_frontend_package_contents(package, binaries, tmp_path, arch):
         if p.is_file() and p.suffix in (".html", ".css", ".js", ".svg", ".json")}
     assert (web / "index.html").read_bytes() == (ROOT / "frontends/web/index.html").read_bytes()
     assert gzip.decompress((root / "usr/share/man/man1/platmon.1.gz").read_bytes()).startswith(b".TH PLATMON 1")
+    assert gzip.decompress((root / "usr/share/man/man1/platmon-tray.1.gz").read_bytes()).startswith(b".TH PLATMON-TRAY 1")
     doc = root / "usr/share/doc/platmon-frontend"
     assert gzip.decompress((doc / "changelog.Debian.gz").read_bytes()).decode().startswith(f"platmon ({version()}-1) unstable;")
     assert "/usr/share/common-licenses/Apache-2.0" in (doc / "copyright").read_text()
     overrides = (root / "usr/share/lintian/overrides/platmon-frontend").read_text()
     assert "platmon-frontend [arm64 armhf]: statically-linked-binary [usr/bin/platmon]" in overrides
+    assert "platmon-frontend [arm64 armhf]: statically-linked-binary [usr/bin/platmon-tray]" in overrides
     assert overrides.endswith("platmon-frontend: initial-upload-closes-no-bugs\n")
     assert sorted(p.name for p in (root / "DEBIAN").iterdir()) == ["control", "md5sums", "postinst"]
     assert run("sh", "-n", str(root / "DEBIAN/postinst")).returncode == 0
@@ -261,6 +268,8 @@ def test_checksums_and_repeated_builds_match(package, binaries, tmp_path):
                                          for arch in RELEASED}
     assert manifest["command_sha256"] == {arch: hashlib.sha256(command_beside(binaries[arch]).read_bytes()).hexdigest()
                                           for arch in RELEASED}
+    assert manifest["tray_sha256"] == {arch: hashlib.sha256(tray_beside(binaries[arch]).read_bytes()).hexdigest()
+                                       for arch in RELEASED}
     for line in (output / "SHA256SUMS").read_text().splitlines():
         digest, name = line.split("  ")
         assert hashlib.sha256((output / name).read_bytes()).hexdigest() == digest
@@ -354,11 +363,18 @@ def test_server_binary_checked(tmp_path, case, message):
     ("missing", "amd64 platmon command binary not found"),
     ("other arch", "not a 64-bit little-endian ELF for amd64"),
     ("a server", "is a server, not the platmon command"),
+    ("no tray", "amd64 tray binary not found"),
+    ("tray a server", "is a server, not the tray"),
 ])
 def test_command_binary_checked(tmp_path, case, message):
-    """platmon-frontend takes the platmon command beside each server: the same architecture, and not a server."""
+    """platmon-frontend takes the platmon command and the tray beside each server: the same architecture, and not
+    a server."""
     server = fake_server(tmp_path / "platmon-server", "amd64")
-    if case == "other arch":
+    if "tray" in case:  # the command is right, the tray is not
+        fake_server(command_beside(server), "amd64", mark=b"")
+    if case == "tray a server":
+        shutil.copyfile(server, tray_beside(server))
+    elif case == "other arch":
         fake_server(command_beside(server), "arm64", mark=b"")
     elif case == "a server":
         shutil.copyfile(server, command_beside(server))

@@ -1,6 +1,6 @@
 """frontends/ui-spec.json, the design tokens the frontends share: every adapter agrees with it, so the
 terminal and the web page cannot drift apart (views, levels, state colors), and the brand roles agree with
-the approved brand colors. The terminal is the platmon command (native/frontend/src/bin/platmon/screen.rs),
+the approved brand colors. The terminal is the platmon command (native/frontend/src/screen.rs),
 which reads its copy of the spec (UI_SPEC) for all of these; its source is checked here, and its attention
 list through the binary when native/build.sh has built it."""
 import html
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = json.loads((ROOT / "frontends/ui-spec.json").read_text(encoding="utf-8"))
 WEB = ROOT / "frontends/web"
 # the terminal's code, not its tests
-TERMINAL = (ROOT / "native/frontend/src/bin/platmon/screen.rs").read_text(encoding="utf-8").split("#[cfg(test)]")[0]
+TERMINAL = (ROOT / "native/frontend/src/screen.rs").read_text(encoding="utf-8").split("#[cfg(test)]")[0]
 COMMAND = Path(os.environ.get("PLATMON_COMMAND", ROOT / "native/target/x86_64-unknown-linux-musl/release/platmon"))
 G = 2**30
 FULL = {
@@ -43,9 +43,9 @@ def css_tokens():
 
 
 def test_rust_command_copy_matches_the_spec():
-    """The Rust platmon command's copy (native/frontend/src/bin/platmon/screen.rs UI_SPEC: its build has only
+    """The Rust platmon command's copy (native/frontend/src/screen.rs UI_SPEC: its build has only
     native/ and VERSION, so the file cannot be included)."""
-    source = (ROOT / "native/frontend/src/bin/platmon/screen.rs").read_text(encoding="utf-8")
+    source = (ROOT / "native/frontend/src/screen.rs").read_text(encoding="utf-8")
     copy = re.search(r'const UI_SPEC: &str = r##"(.*?)"##;', source, re.S).group(1)
     assert json.loads(copy) == {key: value for key, value in SPEC.items() if key != "about"}
 
@@ -142,7 +142,7 @@ def test_units_follow_a_space_everywhere():
     """A reading and its unit are two words in every frontend: 91.4 %, 51.2 °C, as 918 MHz and -70 dBm."""
     read = lambda path: (ROOT / path).read_text(encoding="utf-8")
     assert not re.findall(r".{20}(?:\+ '(?:%|°C)'|\}(?:%(?![\";)])|°C))", read("frontends/web/app.js"))  # not CSS lengths
-    for rust in ("native/shared/src/render.rs", "native/frontend/src/bin/platmon/screen.rs"):
+    for rust in ("native/shared/src/render.rs", "native/frontend/src/screen.rs"):
         assert not re.findall(r".{20}\{\}(?:%|°C)", read(rust)), rust  # format!("{}%")
 
 

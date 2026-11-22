@@ -56,6 +56,8 @@ def inside(first, second):
     assert invoke("/usr/lib/platmon/platmon-native", "--version") == "platmon-server " + first_version.split("-")[0]
     invoke("dpkg", "-i", str(first_frontend))
     assert invoke("/usr/bin/platmon", "--version") == "platmon " + first_version.split("-")[0]
+    assert invoke("/usr/bin/platmon-tray", "--version") == "platmon-tray " + first_version.split("-")[0]
+    assert not Path("/etc/xdg/autostart/platmon-tray.desktop").exists()  # the tray starts only for users who ask
     assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-frontend: /usr/bin/platmon"
     assert invoke("dpkg", "-S", PAGE) == "platmon-frontend: " + PAGE
     invoke("systemctl", "is-enabled", "platmon.service")
@@ -86,7 +88,7 @@ def inside(first, second):
     assert not os.path.lexists("/usr/lib/platmon/platmon-native")
     assert Path("/usr/bin/platmon").exists() and Path(PAGE).exists()  # their own package
     invoke("dpkg", "--remove", "platmon-frontend")
-    assert not Path("/usr/bin/platmon").exists() and not Path(PAGE).exists()
+    assert not Path("/usr/bin/platmon").exists() and not Path("/usr/bin/platmon-tray").exists() and not Path(PAGE).exists()
     invoke("dpkg", "--purge", "platmon")
     assert not ini.exists()
     # A source unit must be refused before it or any source-installed code is lost.

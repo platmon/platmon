@@ -34,6 +34,16 @@ jobs:
           python-version: "3.13"
       - name: Build the server (Rust tests, amd64 and arm64, the system allocator)
         run: native/build.sh
+      # The tray's StatusNotifierItem on a private session bus (frontend/tests/tray.rs), which build.sh's container
+      # skips without dbus-daemon: the same image as root installs it, then runs the test as the runner's user
+      # (dbus-daemon wants a passwd entry for it), reusing build.sh's release build.
+      - name: Check the tray on a session bus (dbus-daemon)
+        run: >-
+          docker run --rm -e CARGO_HOME=/src/target/cargo-home -v "$PWD/native":/src -v "$PWD/VERSION":/VERSION:ro -w /src
+          rust:1.88-slim bash -euo pipefail -c "apt-get update -qq && apt-get install -y -qq --no-install-recommends dbus-daemon >/dev/null
+          && echo build:x:$(id -u):$(id -g)::/tmp:/bin/sh >> /etc/passwd
+          && setpriv --reuid=$(id -u) --regid=$(id -g) --clear-groups env HOME=/tmp PLATMON_REQUIRE_DBUS=1
+          cargo test -q --release --locked --no-default-features -p platmon-frontend --test tray"
       # Released; these runners cannot run 32-bit code, so armhf-userspace runs its package under QEMU.
       - name: Build the 32-bit ARM server (armhf)
         run: native/build-armhf.sh
@@ -58,13 +68,14 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/hub"
           "$RUNNER_TEMP/hub/bin/pip" install --quiet --require-hashes -r native/tools/equivalence/hub-requirements.txt
           "$RUNNER_TEMP/hub/bin/python" -I native/tools/equivalence/hub_contract.py "$SERVER"
-      # the servers and the platmon commands beside them (platmon-frontend's)
+      # the servers, the platmon commands and the trays beside them (platmon-frontend's)
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server
           path: |
             native/target/*-unknown-linux-musl*/release/platmon-server
             native/target/*-unknown-linux-musl*/release/platmon
+            native/target/*-unknown-linux-musl*/release/platmon-tray
           if-no-files-found: error
 
   # Windows: the server and the platmon command build with the MSVC toolchain, the C runtime linked statically (no Visual C++
@@ -88,17 +99,19 @@ jobs:
         run: cargo build --release --locked --no-default-features
       - name: Smoke test
         run: python tools/windows_smoke.py target/release/platmon-server.exe
-      # The installer of these binaries (platmon.exe beside the server), with Windows Installer itself (scripts/packaging/package_msi.py); the smoke
+      # The installer of these binaries (platmon.exe and platmon-tray.exe beside the server), with Windows Installer itself (scripts/packaging/package_msi.py); the smoke
       # test installed, upgraded and removed packages built the same way.
       - name: Installer
         run: python ../scripts/packaging/package_msi.py --binary target/release/platmon-server.exe --output target/msi
-      # The zip packages these binaries (scripts/packaging/package_windows.py), the installer beside it.
+      # The zip packages these binaries (scripts/packaging/package_windows.py), the installer beside it; the smoke test
+      # ran the tray's --version and checked its HKLM Run value from the installer.
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server-windows
           path: |
             native/target/release/platmon-server.exe
             native/target/release/platmon.exe
+            native/target/release/platmon-tray.exe
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:

@@ -20,7 +20,9 @@ The primary distribution is a `.deb` package for Ubuntu and Debian-derived Linux
 It requires **systemd**. The service is one static native binary without Python. The web page and the
 `platmon` command are the separate package `platmon-frontend` (`platmon-cli` up to 1.10.0, the command alone),
 which `platmon` recommends, so apt installs it by default; the command is a static native binary for the same
-architectures, without dependencies (up to 1.10.0 it was one Python file that needed Python 3.9+). A device
+architectures, without dependencies (up to 1.10.0 it was one Python file that needed Python 3.9+). The package
+also has the tray, `platmon-tray`, which starts only for a user who runs `platmon-tray --autostart`
+([Tray](interfaces.md#tray)). A device
 that only feeds platmon-hub, Prometheus or a `platmon` command elsewhere can leave it out with
 `sudo apt install --no-install-recommends platmon`: the API answers as always, and `/` answers 404 naming
 `platmon-frontend`.
@@ -129,9 +131,11 @@ does not include; without it the server does not start (`vcruntime140.dll` was n
 From the release after 1.9.0 there is an installer, `platmon-<version>-windows-x86_64.msi`. Check it
 against `SHA256SUMS`, then double-click it (it asks for administrator rights) or, in an administrator shell,
 `msiexec /i platmon-<version>-windows-x86_64.msi /qn`. It puts the server, `platmon.ini` (listening on
-`127.0.0.1`), the web page and the `platmon` command in `C:\Program Files\platmon`, adds that folder to the
-system `PATH`, registers the event log source and installs and starts the service `platmon` with the recovery
-actions below. A newer installer upgrades it and keeps an edited `platmon.ini`; an older one refuses to install
+`127.0.0.1`), the web page, the `platmon` command and the tray in `C:\Program Files\platmon`, adds that folder
+to the system `PATH`, registers the event log source and installs and starts the service `platmon` with the
+recovery actions below. The tray, `platmon-tray.exe`, starts at every user's login from the next login on (an
+icon in the notification area; a click opens the web page; [Tray](interfaces.md#tray)); double-click it to
+start it now. A newer installer upgrades it and keeps an edited `platmon.ini`; an older one refuses to install
 over a newer version. Remove it in Settings > Apps, or with `msiexec /x` and the same file; `platmon.ini` stays.
 A service installed by `install-service.cmd` (below) is removed with `uninstall-service.cmd` first: the
 installer cannot take over a service it did not create. The installer is not signed, so SmartScreen may show
@@ -212,7 +216,8 @@ power mode or pressure: those groups are `unavailable` (`unsupported_platform`) 
 ([native/README.md, "Windows"](../../native/README.md#windows)).
 
 The `platmon` command is `platmon.exe`, in the installer's folder (on the system `PATH`) and in the zip; it
-needs nothing else. From 1.9.0 to 1.10.0 it was `cli.py` with `platmon.cmd`, which needed Python 3.9 or later on
+needs nothing else. The zip's tray, `platmon-tray.exe`, starts only when run, or at your login after
+`platmon-tray --autostart`. From 1.9.0 to 1.10.0 it was `cli.py` with `platmon.cmd`, which needed Python 3.9 or later on
 `PATH`. To type `platmon` anywhere with the zip, add the folder to your user `PATH` once (no administrator
 needed; a new terminal then finds it):
 

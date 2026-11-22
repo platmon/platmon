@@ -2,7 +2,7 @@
 """Check the .rpm packages under a booted systemd, inside a disposable container.
 
 The first install refuses a local unit and then enables and starts the service without platmon-frontend (only
-recommended: / answers 404 naming it), which then brings the platmon command and the web page; an upgrade keeps an edited INI and restarts the
+recommended: / answers 404 naming it), which then brings the platmon command, the tray and the web page; an upgrade keeps an edited INI and restarts the
 service; an invalid INI is reported and the running server left alone; a disabled service is not started;
 a failed start is reported; a downgrade recovers; erasing stops and disables the service and keeps the
 edited INI as .rpmsave. The packages beside each one: platmon-frontend of the same version. The container gets
@@ -117,6 +117,8 @@ def lifecycle(first, second):
     assert code == 404 and b"platmon-frontend" in body, (code, body)
     rpm("-i", str(first_frontend))
     assert invoke("/usr/bin/platmon", "--version") == "platmon " + field(first, "VERSION")
+    assert invoke("/usr/bin/platmon-tray", "--version") == "platmon-tray " + field(first, "VERSION")
+    assert not Path("/etc/xdg/autostart/platmon-tray.desktop").exists()  # the tray starts only for users who ask
     code, body = page(9797)
     assert code == 200 and b'src="/app.js"' in body, (code, body[:200])
     assert invoke("rpm", "-qf", "--qf", "%{NAME}", "/usr/share/platmon/frontends/web/index.html") == "platmon-frontend"
@@ -170,7 +172,8 @@ def lifecycle(first, second):
     assert Path(str(INI) + ".rpmsave").read_text() == CUSTOM
     assert Path("/usr/bin/platmon").exists() and Path("/usr/share/platmon/frontends/web/index.html").exists()
     rpm("-e", "platmon-frontend")
-    assert not Path("/usr/bin/platmon").exists() and not Path("/usr/share/platmon").exists()
+    assert not Path("/usr/bin/platmon").exists() and not Path("/usr/bin/platmon-tray").exists()
+    assert not Path("/usr/share/platmon").exists()
     print("rpm lifecycle passed: local unit refused, first install started (and its listen notice) without platmon-frontend, then with it, "
           "upgrade with the INI kept, invalid INI, disabled service, failed start, downgrade, erase")
 

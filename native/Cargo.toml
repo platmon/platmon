@@ -7,7 +7,7 @@ license = "Apache-2.0"
 description = "The platmon server the Debian package runs (native/README.md)"
 
 # One workspace, one Cargo.lock and one target/: this package (the server, at native/ so its paths stay),
-# shared/ (what both sides use: json.rs, render.rs) and frontend/ (the platmon command). The frontend cannot
+# shared/ (what both sides use: json.rs, render.rs) and frontend/ (the platmon command, the tray). The frontend cannot
 # use the server's modules nor the server the frontend's (native/README.md, "Workspace"). A plain cargo build
 # or cargo test covers all three; -p platmon-server only the server.
 [workspace]

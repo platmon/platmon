@@ -49,13 +49,26 @@ ignored), no NSS (mDNS `.local` names do not resolve), one line where `cli.py` p
 are Rust tests (`shared/src/render.rs`, `frontend/`, `frontend/tests/cli.rs` against a stand-in server) and
 `tests/frontends/test_cli_screen.py`, which draws screens through the binary's hidden `--screen-script`.
 
+The tray is the third binary, `platmon-tray` (`frontend/src/bin/platmon-tray/`), in `platmon-frontend` and
+in the Windows zip and installer (`platmon-tray.exe`; [Tray](../docs/guides/interfaces.md#tray)). It shares the
+command's HTTP client (`frontend/src/net.rs`) and screen code (`frontend/src/screen.rs`: `attention()`, the
+levels, `metrics()`) through the frontend's library target (`frontend/src/lib.rs`), so its states are the
+command's. On Linux it is a StatusNotifierItem written on a `UnixStream` without a D-Bus crate (`dbus.rs`: the
+wire format for the types it needs, little-endian, SASL `EXTERNAL`, `unix:path=` and `unix:abstract=`
+addresses, the latter through std's Linux socket address; `sni.rs`: the item, its Properties, Introspectable and
+Peer interfaces and signals); on Windows `Shell_NotifyIconW` on a hidden top-level window (`win.rs`; a
+message-only window would miss the `TaskbarCreated` broadcast). Its tests: unit tests (states, tooltips, byte
+layouts against hand-made sequences) and `frontend/tests/tray.rs`, which runs it on a private `dbus-daemon`
+with a stand-in watcher and server (skipped without `dbus-daemon`; CI's `native` job installs it).
+
 **Workspace.** `native/` is one Cargo workspace with one `Cargo.lock` and one `target/`: the server
 (`platmon-server`, the package at `native/` itself, so its sources and build paths stay where they were),
 `shared/` (`platmon-shared`: `json.rs` and `render.rs`, `/text`'s plain screen, which the command's
-`--once` prints too) and `frontend/` (`platmon-frontend`: the `platmon` command). Each side depends on
+`--once` prints too) and `frontend/` (`platmon-frontend`: the `platmon` command and the tray, and the library
+both use). Each side depends on
 `shared/` only, so the frontend cannot use the server's modules, nor the server the frontend's; that keeps
 a later split of the frontends into their own repository possible. A plain `cargo build` or `cargo test`
-covers all three; `-p platmon-server` the server alone (the container). Both binaries land in
+covers all three; `-p platmon-server` the server alone (the container). The binaries land in
 `target/<triple>/release/`.
 
 Behaviour kept from Python where bypassing std made it explicit:

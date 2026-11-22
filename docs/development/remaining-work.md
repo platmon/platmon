@@ -14,8 +14,9 @@
 >   supported from the release after 1.9.0; the evidence is [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16).
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
 > - Decided (2026-11-22): the `platmon` command in Rust (step 1, done: #239, #240, `cli.py` removed), then
->   the frontends in one package `platmon-frontend` (step 2, done: this change, the web page moved from
->   `platmon` and `platmon-cli` renamed), then a tray on Linux and Windows; macOS planned ([below](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22)).
+>   the frontends in one package `platmon-frontend` (step 2, done: #241, the web page moved from
+>   `platmon` and `platmon-cli` renamed), then the tray on Linux and Windows (step 3, implemented: this change;
+>   desktops and devices still to check); macOS planned ([below](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22)).
 > - Also recorded, not started: a separate network process (deferred; no Unix socket).
 
 Merging, production rollout and releases always wait for the owner's approval. The staged plan of
@@ -340,9 +341,9 @@ the API without the page, this host only), on Linux and Windows alike; they are 
 
 ## Decided: the frontend package, the CLI in Rust and the tray (2026-11-22)
 
-Steps 1 (#239, #240) and 2 (this change) done; step 3 not started. Decided with the owner on 2026-11-22,
-replacing the tray plan of 2026-10-18; each step is its own change and release, and starting each is the
-owner's decision.
+Steps 1 (#239, #240) and 2 (#241) done; step 3 implemented (this change), its desktop and device checks open.
+Decided with the owner on 2026-11-22, replacing the tray plan of 2026-10-18; each step is its own change and
+release, and starting each is the owner's decision.
 
 **The goal:** the core, `platmon`, collects and serves the API and nothing else; everything that shows the
 data (the web page, the `platmon` command, the tray) is a frontend, in one package beside it.
@@ -412,14 +413,37 @@ or Jetson GNOME, the Windows laptop and desktop.
    (`.deb` amd64, arm64, armhf; `.rpm` x86_64, aarch64), `platmon.exe` in the zip and the MSI, `cli.py`
    removed and its tests moved to Rust tests and the binary. Accepted differences: no proxy, no NSS (mDNS
    `.local` names), one line where `cli.py` printed a traceback.
-2. The packages: `platmon-frontend` and the 404 for a missing page. **Done** (this change): `platmon-cli`
+2. The packages: `platmon-frontend` and the 404 for a missing page. **Done** (#241): `platmon-cli`
    renamed `platmon-frontend` with the web page moved into it (`.deb` and `.rpm`; Windows and Docker
    unchanged), `/` a 404 naming `platmon-frontend` when the page is not installed, the server serving its web
    directory without a list, and the page reading `levels` and `version` (a new `/api/status` field) from
    the API. Upgrades from 1.10.0 checked in containers with a local APT and DNF repository: `apt
    full-upgrade`, `apt install platmon-frontend` and `dnf upgrade` move the page and replace `platmon-cli`;
    `apt upgrade` and `apt-get upgrade` keep `platmon` back while `platmon-cli` is installed.
-3. The tray.
+3. The tray. **Implemented** (this change): `platmon-tray`, a third binary of `native/frontend/`, sharing the
+   command's HTTP client, `attention()`, levels and `metrics()` through the frontend's library target
+   (`frontend/src/lib.rs`, not `shared/`: they are the frontends' code, which the server must not depend
+   on); in `platmon-frontend` (`/usr/bin/platmon-tray`, `man platmon-tray`, nothing in
+   `/etc/xdg/autostart`), the zip and the MSI (`platmon-tray.exe`; the MSI's `Registry` row under HKLM
+   `Run`, removed on uninstall). Linux: a StatusNotifierItem on `UnixStream` (no D-Bus crate; `unix:path=`
+   and `unix:abstract=`, the latter through std's Linux socket address); without a StatusNotifierWatcher
+   it exits with code 3; it registers again when the watcher's name gets a new owner. Windows: a hidden
+   top-level window, not a message-only one, which would never get `TaskbarCreated`. Checked here: unit
+   tests, `frontend/tests/tray.rs` on a private `dbus-daemon` (CI's `native` job), and by hand in a
+   container with GLib's `gdbus` and a GDBus watcher stand-in against `platmon-server`: registration,
+   `GetAll`, `Introspect`, `Activate` running `xdg-open` with the page, the icon and tooltip turning not
+   reachable when the server stopped and back when it returned, each with `NewIcon`, `NewAttentionIcon`
+   and `NewToolTip`. In that container (WSL2, x86_64), over 180 s: the tray 640 KiB resident (`VmRSS`, two
+   threads) and 0.011 % of one core (2 clock ticks); 0.216 requests/s through a counting proxy (18
+   `/api/status`, 18 `/api/stats`, 3 `/api/observations`); the server 0.316 % of one core with it and
+   0.305 % without (180 s each, within the noise). Still to check before release:
+   - KDE Plasma, and Ubuntu's or the Jetson's GNOME with the AppIndicator extension: the icon, the
+     tooltip, a click reaching `Activate` (unchecked under GNOME's extension without a menu), a restarted
+     panel;
+   - the Windows laptop and desktop: the icon and tooltip, the stock icons, a click, Explorer restarted,
+     the MSI's login start, an MSI upgrade with the tray running (Restart Manager closing it), logoff;
+   - the tray's CPU and memory on the Orin's desktop, and the server's cost of its requests, against
+     [budget.md](../performance/budget.md).
 
 ### macOS: planned
 

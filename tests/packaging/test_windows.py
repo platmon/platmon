@@ -9,7 +9,7 @@ import pytest
 
 from scripts.packaging.package import ALLOCATOR_MARK, packaging_epoch, version
 from scripts.packaging.package_windows import (SCRIPTS, build, check_binary, check_changelog, command_beside, default_binary,
-                                               imported_dlls)
+                                               imported_dlls, tray_beside)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,11 +34,12 @@ def fake_exe(path, machine=0x8664, mark=ALLOCATOR_MARK, dlls=("KERNEL32.dll", "n
 
 @pytest.fixture
 def exe(tmp_path):
-    """The server native-windows built, platmon.exe beside it, else fakes of both."""
+    """The server native-windows built, platmon.exe and platmon-tray.exe beside it, else fakes of the three."""
     real = default_binary()
-    if real.is_file() and command_beside(real).is_file():
+    if real.is_file() and command_beside(real).is_file() and tray_beside(real).is_file():
         return real
     fake_exe(tmp_path / "bin/platmon.exe", mark=b"")
+    fake_exe(tmp_path / "bin/platmon-tray.exe", mark=b"tray")
     return fake_exe(tmp_path / "bin/platmon-server.exe")
 
 
@@ -59,10 +60,11 @@ def test_zip_contents_and_checksum(tmp_path, exe):
     top = f"platmon-{release}-windows-x86_64/"
     with zipfile.ZipFile(target) as z:
         names = z.namelist()
-        assert names[:9] == [top + n for n in ("platmon-server.exe", "platmon.ini", "LICENSE", "LICENSE-MIT", "README.txt",
-                                               "platmon.exe") + SCRIPTS]
+        assert names[:10] == [top + n for n in ("platmon-server.exe", "platmon.ini", "LICENSE", "LICENSE-MIT", "README.txt",
+                                                "platmon.exe", "platmon-tray.exe") + SCRIPTS]
         # the platmon command: the native binary built beside the server, no Python
         assert z.read(top + "platmon.exe") == command_beside(exe).read_bytes()
+        assert z.read(top + "platmon-tray.exe") == tray_beside(exe).read_bytes()
         assert top + "cli.py" not in names and top + "platmon.cmd" not in names
         assert top + "web/index.html" in names and all(n.startswith(top) for n in names)
         assert z.read(top + "platmon-server.exe") == exe.read_bytes()
@@ -74,6 +76,7 @@ def test_zip_contents_and_checksum(tmp_path, exe):
         # the service runs as LocalSystem: its files only where administrators alone can write
         assert "\\Program Files\\platmon\\platmon-server.exe" in readme and "Windows 10 was not checked" in readme
         assert "platmon.exe, is the terminal client" in readme and "Python" not in readme
+        assert "platmon-tray --autostart" in readme and "every login for all users" in readme
         assert "EventLogMessages.dll" in readme
         assert all(name in readme for name in SCRIPTS)
         for name in SCRIPTS:  # cmd misreads labels and goto in a batch file with LF line ends
@@ -90,7 +93,8 @@ def test_zip_contents_and_checksum(tmp_path, exe):
     sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
     assert json.loads((out / "BUILD.json").read_text(encoding="utf-8")) == \
         {"version": "x", "windows_server_sha256": {"x86_64": sha(exe)},
-         "windows_command_sha256": {"x86_64": sha(command_beside(exe))}}
+         "windows_command_sha256": {"x86_64": sha(command_beside(exe))},
+         "windows_tray_sha256": {"x86_64": sha(tray_beside(exe))}}
     # BUILD.json changed: its checksum line follows, and the zip's is added
     assert (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines() == \
         ["0" * 64 + "  platmon-x.tar.gz", f"{sha(out / 'BUILD.json')}  BUILD.json", f"{sha(target)}  {target.name}"]
@@ -140,6 +144,12 @@ def test_refusals(tmp_path):
     with pytest.raises(ValueError, match="no import table"):
         check_binary(fake_exe(tmp_path / "platmon.exe", dlls=(), mark=b""), server=False)
     fake_exe(tmp_path / "platmon.exe", mark=b"")
+    # platmon-tray.exe beside it: missing, or a server
+    with pytest.raises(ValueError, match="Windows tray binary not found"):
+        build(out, tmp_path / "ok.exe")
+    with pytest.raises(ValueError, match="is a server, not the tray"):
+        build(out, fake_exe(tmp_path / "platmon-tray.exe"))
+    fake_exe(tmp_path / "platmon-tray.exe", mark=b"")
     with pytest.raises(ValueError, match="run package.py"):
         build(tmp_path / "empty", tmp_path / "ok.exe")
     build(out, tmp_path / "ok.exe")

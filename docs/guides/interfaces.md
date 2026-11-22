@@ -5,6 +5,8 @@
 >   same seven views of the published snapshot and share the `[thresholds]` levels.
 > - Neither triggers a collection: they read what the service last published; `/text` gives the plain
 >   screen over HTTP.
+> - The tray (`platmon-tray [host]`) shows the state as one icon with the readings or the attention list as
+>   its tooltip; on Linux it starts only after `platmon-tray --autostart`, on Windows the installer starts it.
 
 The collector publishes a snapshot in the background. The standalone terminal client,
 web dashboard and plain-text endpoint display those published values without launching
@@ -125,6 +127,42 @@ fragment falls back to Overview. Tab selection replaces the current history
 entry. Only the active view renders, and detail views share cached history.
 A hidden browser page suspends its polling until visible again, **without**
 pausing collection or in-memory history on the device.
+
+## Tray
+
+`platmon-tray` shows a service's state as one icon in the desktop's tray (Linux) or notification area
+(Windows): **ok**, **warning**, **critical** or **not reachable**, with the same levels as the web page
+and the terminal client.
+
+```sh
+platmon-tray                     # this device (localhost:9797)
+platmon-tray 192.168.55.53       # another device, default port 9797
+platmon-tray --autostart         # start it at your login (with the host given), then exit
+platmon-tray --no-autostart      # remove that login entry
+```
+
+- **State:** not reachable when the service does not answer or has no current data (`starting`,
+  `stale`); critical when **Needs attention** has a critical entry; warning when it has a warning entry
+  or the service is `degraded`; otherwise ok.
+- **Tooltip:** the host name and the state, then, when ok, a reading line such as
+  `CPU 23% · RAM 41% · 52°C` (mean CPU, memory, hottest temperature); otherwise up to three
+  attention entries, critical first. It fits Windows's 128-character limit.
+- **Click:** opens `http://host:port/` in the default browser (`xdg-open` on Linux). No menu.
+- **Requests:** `/api/status` and `/api/stats` every 10 s, `/api/observations` every 60 s (about
+  0.22 requests/s); read-only, it never controls the service. Several hosts belong in platmon-hub.
+
+**Linux** (`platmon-frontend` package): the icon is a StatusNotifierItem on the D-Bus session bus.
+KDE Plasma, XFCE and Cinnamon show it as installed; Ubuntu's GNOME (and the Jetson's) shows it through
+its AppIndicator extension, which is on by default; plain GNOME (Debian, Fedora) needs that extension
+installed. Without a StatusNotifierWatcher on the session bus it says so in one line and exits with
+code 3. The package starts nothing by itself: `--autostart` writes
+`~/.config/autostart/platmon-tray.desktop` (`$XDG_CONFIG_HOME` respected) for your user only.
+
+**Windows** (the installer and the zip): `platmon-tray.exe`. The installer starts it at every user's
+login (HKLM `Run`) from the next login on; uninstalling removes that. From the zip it starts only when
+run, or at your login after `platmon-tray --autostart` (HKCU `Run`; `--no-autostart` removes it, not the
+installer's entry). There is no menu to quit it: Task Manager ends it, and Settings > Apps > Startup
+turns the login start off.
 
 ## HTTP and plain-text access
 

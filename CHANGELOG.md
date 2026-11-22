@@ -6,6 +6,16 @@ API schema versions are independent of release versions.
 
 ## Unreleased
 
+- **The tray, `platmon-tray [host[:port]]`**: a service's state as one icon (ok, warning, critical, not
+  reachable, from the same levels and attention list as the web page and the command), the host and the state
+  with the readings (`CPU 23% · RAM 41% · 52°C`) or up to three attention entries as its tooltip; a click
+  opens the web page. It asks `/api/status` and `/api/stats` every 10 s and `/api/observations` every 60 s,
+  and never controls the service. Linux: a StatusNotifierItem on the D-Bus session bus (KDE, XFCE, Cinnamon;
+  GNOME with the AppIndicator extension), in `platmon-frontend` with `man platmon-tray`; it starts only for a
+  user who runs `platmon-tray --autostart` (`~/.config/autostart`), and exits with code 3 where no
+  StatusNotifierWatcher runs. Windows: `platmon-tray.exe` in the zip and the installer, which starts it at
+  every user's login (HKLM `Run`, removed on uninstall); `--autostart` writes the user's own `Run` value.
+  `BUILD.json` adds `tray_sha256` and `windows_tray_sha256`.
 - **The `platmon` command is a native binary**, built from `native/` beside the server, in place of
   `frontends/cli.py`: no Python is needed anywhere any more. Its package, `platmon-frontend` (below), is one
   per architecture, without the `python3` dependency. The Windows zip and installer ship `platmon.exe` in place of `cli.py` and `platmon.cmd`, on the `PATH` as before.

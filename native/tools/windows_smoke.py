@@ -1,6 +1,6 @@
 """The Windows build's smoke test (CI, native-windows).
 
-  windows_smoke.py BINARY   (platmon-server.exe; the platmon command, platmon.exe, beside it)
+  windows_smoke.py BINARY   (platmon-server.exe; the platmon command, platmon.exe, and the tray beside it)
 
 - build-info: the system allocator's mark; the imports: no Visual C++ runtime DLL (the C runtime linked
   statically, so the zip needs no Redistributable);
@@ -16,7 +16,8 @@
   snapshot, and /api/observations with the probe connecting to the server itself, the storage group
   listing the system volume, the Wi-Fi group (unavailable without a WLAN service) and the battery group
   with the AC line, then stopped by its own handle; meanwhile the platmon command (platmon.exe, also without
-  a Visual C++ runtime DLL) prints its version and --once reads that server;
+  a Visual C++ runtime DLL) prints its version and --once reads that server, and the tray (platmon-tray.exe,
+  likewise) its version;
 - service: outside the service control manager it exits 2; as a service (sc.exe create, start) it serves
   /api/status ready; with the guide's recovery actions (sc.exe failure) a crash (the process killed)
   restarts it, ready as a new instance; sc.exe stop leaves it stopped with exit code 0 and the port free;
@@ -27,9 +28,9 @@
   which serves, then upgrades it keeping an edited platmon.ini; uninstall-service.cmd removes the service and
   its files but platmon.ini. Skipped where port 9797, a "platmon" service or that folder is already there.
 - the installer (package_msi.py), built for VERSION and for the next patch release: msiexec installs the service
-  (automatic, the guide's command line and recovery actions, the failure-actions flag), the event log source
-  and the folder on the system PATH, and it serves; the next release upgrades it keeping an edited platmon.ini;
-  the older package is refused (1603); removal leaves platmon.ini only. Skipped as the scripts are.
+  (automatic, the guide's command line and recovery actions, the failure-actions flag), the event log source,
+  the folder on the system PATH and the tray's HKLM Run value, and it serves; the next release upgrades it keeping
+  an edited platmon.ini; the older package is refused (1603); removal leaves platmon.ini only. Skipped as the scripts are.
 The INI files serve and the service read (platmon-smoke.ini, platmon-service.ini, in the current directory)
 and the zip's folders are removed after each part, whatever its result."""
 import json
@@ -47,7 +48,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from scripts.packaging.package import version  # noqa: E402
-from scripts.packaging.package_windows import CRT_DLL, command_beside, imported_dlls, members  # noqa: E402
+from scripts.packaging.package_windows import CRT_DLL, command_beside, imported_dlls, members, tray_beside  # noqa: E402
 from scripts.packaging.package_msi import build_msi, tables  # noqa: E402
 
 TIMEOUT = 30
@@ -214,6 +215,12 @@ def main(binary):
         r = subprocess.run([command, f"127.0.0.1:{port}", "--once"], capture_output=True, encoding="utf-8",
                            errors="replace", timeout=TIMEOUT)
         check("platmon.exe --once", r.returncode == 0 and "CPU" in r.stdout, repr(r))
+        # the tray, a GUI program: piped, it writes to the pipes it was given
+        tray = str(tray_beside(binary))
+        dlls = imported_dlls(Path(tray).read_bytes()) or []
+        check("platmon-tray.exe: static C runtime", dlls and not any(CRT_DLL.match(d) for d in dlls), json.dumps(dlls))
+        r = run(tray, ["--version"])
+        check("platmon-tray.exe --version", r.returncode == 0 and r.stdout.strip() == "platmon-tray " + version(ROOT), repr(r))
     finally:
         server.kill()
         output = server.communicate(timeout=TIMEOUT)[0]
@@ -313,7 +320,8 @@ def zip_scripts(binary, check, sc):
         print(f"skip  the zip's scripts: port {port}, a platmon service or {dest} is already there")
         return
     folder = Path(tempfile.mkdtemp(prefix="platmon-zip-"))
-    for name, body in members(ROOT, Path(binary).read_bytes(), command_beside(binary).read_bytes(), version(ROOT)):
+    for name, body in members(ROOT, Path(binary).read_bytes(), command_beside(binary).read_bytes(),
+                              tray_beside(binary).read_bytes(), version(ROOT)):
         (folder / name).parent.mkdir(parents=True, exist_ok=True)
         (folder / name).write_bytes(body)
 
@@ -377,10 +385,10 @@ def msi_installer(binary, check, sc):
     release = version(ROOT)
     major, minor, patch = release.split(".")
     newer = f"{major}.{minor}.{int(patch) + 1}"
-    server, command = Path(binary).read_bytes(), command_beside(binary).read_bytes()
+    server, command, tray = Path(binary).read_bytes(), command_beside(binary).read_bytes(), tray_beside(binary).read_bytes()
     folder = Path(tempfile.mkdtemp(prefix="platmon-msi-"))
     packages = {r: folder / f"platmon-{r}.msi" for r in (release, newer)}
-    codes = {r: dict(tables(members(ROOT, server, command, r), r)["Property"])["ProductCode"] for r in packages}
+    codes = {r: dict(tables(members(ROOT, server, command, tray, r), r)["Property"])["ProductCode"] for r in packages}
     key = r"SYSTEM\CurrentControlSet\Services\EventLog\Application\platmon"
 
     def msiexec(*args):
@@ -394,13 +402,20 @@ def msi_installer(binary, check, sc):
         except OSError:
             return None
 
+    def tray_at_login():
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run") as k:
+                return winreg.QueryValueEx(k, "platmon-tray")
+        except OSError:
+            return None
+
     def on_path():
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as k:
             return str(dest).lower() in [p.rstrip("\\").lower() for p in winreg.QueryValueEx(k, "Path")[0].split(";")]
 
     try:
         for r, path in packages.items():
-            build_msi(path, members(ROOT, server, command, r), r, "0" * 64)
+            build_msi(path, members(ROOT, server, command, tray, r), r, "0" * 64)
         code = msiexec("/i", str(packages[release]))
         config, failure = sc("qc", "platmon").stdout, sc("qfailure", "platmon").stdout
         status = ready(port)
@@ -411,6 +426,7 @@ def msi_installer(binary, check, sc):
               and "TRUE" in sc("qfailureflag", "platmon").stdout
               and event_source() == (r"%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll", winreg.REG_EXPAND_SZ)
               and on_path() and (dest / "platmon.exe").is_file() and not (dest / "cli.py").exists()
+              and (dest / "platmon-tray.exe").is_file() and tray_at_login() == (f'"{dest}\\platmon-tray.exe"', winreg.REG_SZ)
               and not (dest / "install-service.cmd").exists(), f"exit {code}\n" + config + failure + json.dumps(status))
         with open(dest / "platmon.ini", "a") as f:
             f.write("; edited\n")
@@ -423,7 +439,7 @@ def msi_installer(binary, check, sc):
         check("installer: an older package refused", code == 1603 and (ready(port) or {}).get("ready") is True, f"exit {code}")
         code = msiexec("/x", str(packages[newer]))
         check("installer: removal", code == 0 and sc("query", "platmon").returncode != 0
-              and get(port, "/api/status") == (None, None) and event_source() is None and not on_path()
+              and get(port, "/api/status") == (None, None) and event_source() is None and not on_path() and tray_at_login() is None
               and sorted(p.name for p in dest.iterdir()) == ["platmon.ini"], f"exit {code}")
     finally:
         for c in codes.values():

@@ -7,7 +7,7 @@
 
 **A 1.5 MB monitor for Jetson, Raspberry Pi and other Linux boards, and Windows 11 PCs.** One background
 service reads the device once a second and serves the same snapshot to a terminal client, a web
-dashboard and an HTTP API.
+dashboard, a tray icon and an HTTP API.
 
 | Web dashboard | Terminal client |
 | --- | --- |
@@ -135,7 +135,8 @@ long-term storage belongs to the consumer.
 ## Documentation
 
 - **[Getting started](docs/guides/getting-started.md):** installation, configuration and first connections.
-- **[CLI and web interfaces](docs/guides/interfaces.md):** views, controls, thresholds and available metrics.
+- **[CLI and web interfaces](docs/guides/interfaces.md):** views, controls, thresholds and available metrics;
+  the tray (`platmon-tray`).
 - **[Deployment and operations](docs/guides/deployment.md):** systemd, Docker, networking and troubleshooting.
 - **[HTTP API reference](docs/reference/api.md):** endpoints, payloads, freshness and related metric contracts.
 - **[Documentation index](docs/README.md):** architecture, packaging, release readiness and performance evidence.

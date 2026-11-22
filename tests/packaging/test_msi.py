@@ -13,11 +13,11 @@ from scripts.packaging.package_msi import COMPONENT_64, LEFT_OUT, NEVER_OVERWRIT
 from scripts.packaging.package_windows import members
 
 ROOT = Path(__file__).resolve().parents[2]
-SERVER, COMMAND = b"MZ fake server", b"MZ fake command"
+SERVER, COMMAND, TRAY = b"MZ fake server", b"MZ fake command", b"MZ fake tray"
 
 
 def files():
-    return members(ROOT, SERVER, COMMAND, "1.2.3")
+    return members(ROOT, SERVER, COMMAND, TRAY, "1.2.3")
 
 
 def test_every_table_fits_its_schema_and_its_references_resolve():
@@ -43,7 +43,8 @@ def test_the_files_and_their_names():
     t = tables(files(), "1.2.3")
     installed = [p for p, _ in files() if p not in LEFT_OUT]
     assert [r[2].split("|")[1] for r in t["File"]] == [p.rpartition("/")[2] for p in installed]
-    assert {"platmon-server.exe", "platmon.ini", "platmon.exe", "LICENSE", "LICENSE-MIT", "web/index.html"} <= set(installed)
+    assert {"platmon-server.exe", "platmon.ini", "platmon.exe", "platmon-tray.exe", "LICENSE", "LICENSE-MIT",
+            "web/index.html"} <= set(installed)
     assert not any(p.endswith((".py", ".cmd")) for p in installed)  # no Python command any more
     assert not set(installed) & LEFT_OUT  # the zip's own scripts and README are not installed
     shorts = [r[2].split("|")[0] for r in t["File"]]
@@ -55,7 +56,7 @@ def test_the_files_and_their_names():
     assert ini[3] == COMPONENT_64 | PERMANENT | NEVER_OVERWRITE  # an edited platmon.ini is kept and left behind
 
 
-def test_the_service_its_recovery_the_event_log_and_path():
+def test_the_service_its_recovery_the_event_log_the_tray_and_path():
     t = tables(files(), "1.2.3")
     (svc,) = t["ServiceInstall"]
     assert svc[1:6] == ("platmon", "platmon", 16, 2, 1) and svc[8] is None  # own process, automatic, LocalSystem
@@ -69,8 +70,13 @@ def test_the_service_its_recovery_the_event_log_and_path():
     assert seq["ConfigureRecovery"][1] == 'NOT REMOVE~="ALL"'
     assert seq["InstallServices"][2] < seq["ConfigureRecovery"][2] < seq["StartServices"][2]
     assert t["MsiServiceConfig"][0][2:5] == (1, 4, "1")  # the failure-actions flag
-    (reg,) = t["Registry"]
+    reg, tray = t["Registry"]
     assert reg[1] == 2 and reg[2].endswith(r"EventLog\Application\platmon") and reg[4].startswith("#%%SystemRoot%\\")
+    # the tray at every user's login: HKLM's Run value, with the tray's component (removed with it); no custom action
+    assert tray == ("platmon_tray_run", 2, r"Software\Microsoft\Windows\CurrentVersion\Run", "platmon-tray",
+                    '"[INSTALLDIR]platmon-tray.exe"', "C_platmon_tray_exe")
+    assert any(r[0] == "C_platmon_tray_exe" and r[5] == "F_platmon_tray_exe" for r in t["Component"])
+    assert [r[0] for r in t["CustomAction"]] == ["ConfigureRecovery"]
     assert t["Environment"] == [("platmon_path", "=-*PATH", "[~];[INSTALLDIR]", "C_platmon_server_exe")]
 
 
