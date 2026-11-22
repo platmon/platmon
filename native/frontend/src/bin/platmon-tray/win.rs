@@ -13,7 +13,8 @@ use windows_sys::Win32::UI::Shell::{ShellExecuteW, Shell_NotifyIconW, NIF_ICON, 
                                     NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NOTIFYICONDATAW, NOTIFYICON_VERSION_4};
 use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, LoadIconW, PostMessageW,
                                                   PostQuitMessage, RegisterClassExW, RegisterWindowMessageW, IDI_ERROR, IDI_INFORMATION,
-                                                  IDI_QUESTION, IDI_WARNING, MSG, SW_SHOWNORMAL, WM_APP, WM_DESTROY, WNDCLASSEXW,
+                                                  IDI_QUESTION, IDI_WARNING, MSG, SW_SHOWNORMAL, WM_APP, WM_DESTROY, WM_ENDSESSION,
+                                                  WNDCLASSEXW,
                                                   WS_EX_TOOLWINDOW, WS_OVERLAPPED};
 
 /// The icon's messages to the window (uCallbackMessage).
@@ -108,6 +109,10 @@ unsafe extern "system" fn window(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> 
                 notify(hwnd, NIM_ADD);
             }
             0
+        }
+        WM_ENDSESSION if w != 0 => { // logging off, or Restart Manager closing it for an upgrade (it has a window)
+            notify(hwnd, NIM_DELETE);
+            std::process::exit(0)
         }
         WM_DESTROY => {
             notify(hwnd, NIM_DELETE);
