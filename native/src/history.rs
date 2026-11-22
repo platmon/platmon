@@ -1,7 +1,7 @@
 //! History: the last few minutes of selected numbers from the published core snapshots and slow
 //! observations, in memory only, for trend graphs. One point per publication, appended by its publisher
 //! after it is published; reading never adds points. Contract: docs/reference/history.md.
-use crate::json::Value;
+use crate::json::{py_str, Value};
 use crate::metadata::pointer;
 use crate::runtime::{ms, seconds_ns};
 use std::collections::{HashSet, VecDeque};
@@ -20,7 +20,6 @@ fn priority(sid: &str) -> usize {
     PRIORITY.iter().position(|p| sid.starts_with(p)).unwrap_or(PRIORITY.len() - 1)
 }
 
-/// Python's str() of a scalar in an f-string; None for what the collector never puts in an id.
 /// The namespace part of a network or Wi-Fi series id: the scope's id, or "host" for a host scope without
 /// one (Windows, which has no network namespaces); None when neither identifies it.
 fn scope_id(scope: Option<&Value>) -> Result<Option<String>, ()> {
@@ -29,18 +28,6 @@ fn scope_id(scope: Option<&Value>) -> Result<Option<String>, ()> {
         Value::Null if scope.get("kind") == Some(&Value::Str("host".into())) => Ok(Some("host".into())),
         Value::Null => Ok(None),
         id => py_str(&id).map(Some).ok_or(()),
-    }
-}
-
-pub fn py_str(v: &Value) -> Option<String> {
-    match v {
-        Value::Null => Some("None".into()),
-        Value::Bool(b) => Some(if *b { "True" } else { "False" }.into()),
-        Value::Int(i) => Some(i.to_string()),
-        Value::Big(i) => Some(i.to_string()),
-        Value::Float(_) => Some(v.to_string(false)),
-        Value::Str(s) => Some(s.clone()),
-        _ => None,
     }
 }
 
