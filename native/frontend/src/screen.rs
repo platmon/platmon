@@ -432,10 +432,10 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-struct Metric {
-    label: String,
-    value: Option<f64>,
-    unit: &'static str,
+pub struct Metric {
+    pub label: String,
+    pub value: Option<f64>,
+    pub unit: &'static str,
     limits: Option<(f64, f64)>,
     detail: String,
 }
@@ -447,7 +447,7 @@ fn hottest_first(st: &Value) -> Vec<(String, f64)> {
 }
 
 /// The web Overview's readings.
-fn metrics(st: &Value, lim: &Limits) -> Vec<Metric> {
+pub fn metrics(st: &Value, lim: &Limits) -> Vec<Metric> {
     let cpus: Vec<f64> = list(st.get("cpu")).iter().filter(|c| c.get("usage").is_some_and(isnum)).map(|c| n(&c["usage"])).collect();
     let (m, d, gpu, npu) = (&st["memory"], &st["disk"], st.get("gpu"), st.get("npu"));
     let pct = |used: &Value, total: &Value| t(Some(total)).then(|| 100.0 * n(used) / n(total));

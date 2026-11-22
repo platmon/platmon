@@ -74,7 +74,7 @@ frontend's; the compiler enforces it.
 | `src/http.rs`, `shared/src/render.rs` | HTTP API, `/text` (the terminal client's plain screen) and the web page's files; reads published state only |
 | `shared/src/json.rs`, `src/pystr.rs` | JSON written as Python's `json` wrote it; the `str` methods the ports need |
 | `src/platform/` | Clocks, random bytes, the listening socket and the stop request, per OS |
-| `frontend/src/bin/platmon/` | The `platmon` command: HTTP client, live view, terminal; `--once` prints `shared/src/render.rs` |
+| `frontend/src/` | What the frontends share (`lib.rs`: the HTTP client `net.rs`, the screen and attention list `screen.rs`); `bin/platmon/` the `platmon` command (live view, terminal; `--once` prints `shared/src/render.rs`) |
 | `src/harness.rs`, `tools/` | Commands and scripts for the equivalence checks, measurements and candidate deployments |
 
 Equivalence checks run in CI (`native` job), with the fleet server's contract below; the Windows collector is checked by its unit tests and
@@ -119,7 +119,7 @@ system fields, the status levels with their fallback thresholds, the bar scales,
 and the color roles. Each client
 adapts them to its medium: the web page as `styles.css` custom properties (light and dark), `app.js`
 levels and the `index.html` tabs; the terminal as ANSI codes and views built from a copy in
-`native/frontend/src/bin/platmon/screen.rs` (`UI_SPEC`), as its build has only `native/`. There is no generation step: `tests/frontends/test_ui_spec.py`
+`native/frontend/src/screen.rs` (`UI_SPEC`), as its build has only `native/`. There is no generation step: `tests/frontends/test_ui_spec.py`
 checks every adapter, the server's `[thresholds]` defaults in `src/config.rs` and the brand roles in
 `assets/brand/brand-colors.json` against the spec. It also feeds one snapshot to both clients and
 compares their Needs attention entries (the terminal's through the binary's `--screen-script`), and rejects a reading written without a space before its unit.

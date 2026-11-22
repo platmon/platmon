@@ -13,13 +13,12 @@
 //! {"lines": screen(), "scroll": [offset, page], "attention": [[name, value, level], ...]} ({"keys", "view",
 //! "offset", "page"}: {"view", "offset"} after those keys), so tests/frontends/test_cli_screen.py can check
 //! frames without a terminal and test_ui_spec.py the attention list against the web page's.
-mod net;
-mod screen;
 #[cfg(unix)]
 mod term;
 
-// ../../../shared: the JSON parser and render(), the plain screen the server's /text answers with
-use platmon_shared::{json, render};
+// ../../lib.rs: the HTTP client and the screen, shared with the tray; ../../../shared (through lib.rs):
+// the JSON parser and render(), the plain screen the server's /text answers with
+use platmon_frontend::{json, net, render, screen, version};
 
 use json::Value;
 use net::Error;
@@ -28,11 +27,6 @@ use std::io::{BufRead, Write};
 use std::time::{Duration, Instant};
 
 const PORT: u16 = 9797;
-
-/// The application version: the repository's VERSION file, read at build time, as platmon-server's.
-pub fn version() -> &'static str {
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../VERSION")).trim()
-}
 
 const USAGE: &str = "usage: platmon [-h] [--once]
                [--view {overview,resources,network,storage,thermal,power,system}]
@@ -512,11 +506,6 @@ mod tests {
         assert_eq!(py_float("1__0"), None);
         assert!(py_float("nan").unwrap().is_nan() && py_float("inf") == Some(f64::INFINITY));
         assert_eq!(py_float("x"), None);
-    }
-
-    #[test]
-    fn version_is_the_version_file() {
-        assert!(version().split('.').count() == 3);
     }
 
     #[test]
