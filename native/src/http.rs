@@ -22,15 +22,14 @@ use std::time::{Duration, Instant};
 
 const LIVE: [&str; 7] = ["/api/stats", "/api/status", "/api/observations", "/api/history", "/api/samples",
                          "/api/observation-samples", "/text"];
-const WEB: [(&str, &str, &str); 7] = [
-    ("/app.js", "app.js", "text/javascript; charset=utf-8"),
-    ("/styles.css", "styles.css", "text/css; charset=utf-8"),
-    ("/assets/brand/platmon-logo-light.svg", "assets/brand/platmon-logo-light.svg", "image/svg+xml"),
-    ("/assets/brand/platmon-logo-dark.svg", "assets/brand/platmon-logo-dark.svg", "image/svg+xml"),
-    ("/assets/brand/platmon-icon-light.svg", "assets/brand/platmon-icon-light.svg", "image/svg+xml"),
-    ("/assets/brand/platmon-icon-dark.svg", "assets/brand/platmon-icon-dark.svg", "image/svg+xml"),
-    ("/assets/brand/favicon.svg", "assets/brand/favicon.svg", "image/svg+xml"),
+/// The types of the files the web directory may hold, by extension; a file of another type is not served.
+const WEB_TYPES: [(&str, &str); 8] = [
+    ("html", "text/html; charset=utf-8"), ("js", "text/javascript; charset=utf-8"), ("css", "text/css; charset=utf-8"),
+    ("svg", "image/svg+xml"), ("json", "application/json"), ("png", "image/png"), ("ico", "image/x-icon"),
+    ("woff2", "font/woff2"),
 ];
+/// The answer to / when the web directory has no index.html (installed without platmon-frontend).
+const NO_PAGE: &[u8] = b"The web page is not installed: install the platmon-frontend package. The API answers under /api/.\n";
 const MAX_POINTS: usize = 600;
 const MAX_PREFIX: usize = 128;
 const MAX_LINE: usize = 65536; // http.client._MAXLINE, and the request line's limit
@@ -425,6 +424,7 @@ impl Server {
             "/api/status" => { // never waits for the first snapshot; 200 even when not ready
                 let (_, mut status) = self.sampler.view(self.clock);
                 status.set("levels", self.levels.clone());
+                status.set("version", self.version.as_str().into());
                 x.reply(path, 200, status.to_py().as_bytes(), "application/json")
             }
             "/api/observations" => x.reply(path, 200, self.observations.view(self.clock).to_py().as_bytes(), "application/json"),
@@ -455,18 +455,15 @@ impl Server {
                                        "text/plain; charset=utf-8"),
                 }
             }
-            "/" | "/index.html" if self.web.is_some() => {
-                let page = std::fs::read_to_string(format!("{}/index.html", self.web.as_ref().unwrap()))?;
-                let page = page.replace("@VERSION@", &self.version).replace("@LEVELS@", &self.levels.to_py());
-                x.reply_with(path, 200, page.as_bytes(), "text/html; charset=utf-8", &PAGE_HEADERS)
-            }
-            _ => match WEB.iter().find(|(p, _, _)| *p == path).filter(|_| self.web.is_some()) {
-                Some((_, file, ctype)) => {
-                    let body = std::fs::read(format!("{}/{}", self.web.as_ref().unwrap(), file))?;
-                    x.reply_with(path, 200, &body, ctype, &PAGE_HEADERS)
+            _ => { // the web page: any file of the web directory that web_file accepts, nothing listed here
+                let Some(dir) = &self.web else { return x.error(404, None) };
+                let wanted = if path == "/" { "/index.html" } else { path };
+                match web_file(wanted).and_then(|(file, ctype)| regular_file(&std::path::Path::new(dir).join(file)).map(|b| (b, ctype))) {
+                    Some((body, ctype)) => x.reply_with(path, 200, &body, ctype, &PAGE_HEADERS),
+                    None if wanted == "/index.html" => x.reply_with(path, 404, NO_PAGE, "text/plain; charset=utf-8", &PAGE_HEADERS),
+                    None => x.error(404, None),
                 }
-                None => x.error(404, None),
-            },
+            }
         }
     }
 }
@@ -488,6 +485,26 @@ impl Server {
             Err(Refused::NoStream) => unavailable(),
         }
     }
+}
+
+/// The file of the web directory a path names, and its type: a relative path of segments of ASCII letters,
+/// digits, '-', '_' and '.', none empty or starting with '.', with an extension in WEB_TYPES. It cannot
+/// leave the directory: no "..", no percent-encoding (nothing is decoded), no backslash or drive, no hidden
+/// file, and a path ending in '/' (a directory) names nothing.
+fn web_file(path: &str) -> Option<(&str, &'static str)> {
+    let file = path.strip_prefix('/')?;
+    let segment = |s: &str| !s.is_empty() && !s.starts_with('.') && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
+    if !file.split('/').all(segment) {
+        return None;
+    }
+    let ext = file.rsplit('/').next()?.rsplit_once('.')?.1;
+    WEB_TYPES.iter().find(|(e, _)| *e == ext).map(|(_, ctype)| (file, *ctype))
+}
+
+/// The bytes of a regular file, not through a symbolic link: a directory, a link or a device is None.
+fn regular_file(path: &std::path::Path) -> Option<Vec<u8>> {
+    std::fs::symlink_metadata(path).ok().filter(|m| m.is_file())?;
+    std::fs::read(path).ok()
 }
 
 /// urllib.parse.unquote: %XX runs decoded as UTF-8 (invalid bytes replaced), everything else kept.
@@ -917,15 +934,56 @@ mod tests {
     }
 
     #[test]
-    fn web_asset_paths_are_allowlisted() {
-        let web = web_dir("allow", &[("assets/brand/private.svg", b"private asset"), ("index.html", b"page"), ("app.js", b"js")]);
+    fn web_paths_stay_inside_the_web_directory() {
+        // the directory is web/ inside a parent holding files the server must never send
+        let parent = web_dir("inside", &[("secret.js", b"outside"), ("web/index.html", b"page"), ("web/app.js", b"js"),
+                                          ("web/assets/brand/new.svg", b"<svg/>"), ("web/notes.txt", b"unknown type"),
+                                          ("web/.hidden.js", b"hidden"), ("web/app.js.bak", b"backup"), ("web/dir.js/x.js", b"x")]);
+        let web = format!("{}/web", parent);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(format!("{}/secret.js", parent), format!("{}/link.js", web)).unwrap();
         let (addr, _) = server(|s| s.web = Some(web.clone()));
-        for path in ["/private.js", "/../app.js", "/%2e%2e/app.js", "/assets/brand/", "/assets/brand/private.svg",
-                     "/assets/brand/../../index.html", "/assets/brand/%2e%2e/%2e%2e/index.html"] {
+        // any regular file of a known type is served, listed nowhere, with its type from the extension
+        for (path, ctype, body) in [("/assets/brand/new.svg", "image/svg+xml", "<svg/>"), ("/app.js?v=2", "text/javascript; charset=utf-8", "js"),
+                                    ("/index.html", "text/html; charset=utf-8", "page"), ("/dir.js/x.js", "text/javascript; charset=utf-8", "x")] {
             let r = get(addr, &format!("GET {} HTTP/1.0\r\n\r\n", path));
-            assert!(r.starts_with("HTTP/1.0 404 "), "{}: {:?}", path, &r[..r.len().min(60)]);
+            assert!(r.starts_with("HTTP/1.0 200 OK\r\n") && r.contains(&format!("\r\nContent-Type: {}\r\n", ctype)) && r.ends_with(body),
+                    "{}: {:?}", path, &r[..r.len().min(200)]);
         }
+        for path in ["/private.js", "/../secret.js", "/%2e%2e/secret.js", "/..%2fsecret.js", "/assets/brand/", "/assets/brand", "/assets",
+                     "/assets/brand/../../index.html", "/assets/brand/%2e%2e/%2e%2e/index.html", "/assets//brand/new.svg",
+                     "/notes.txt", "/.hidden.js", "/app.js.bak", "/dir.js", "/link.js", "/app.js%00", "/assets\\brand\\new.svg",
+                     "/C:/secret.js", "/APP.JS", "/web/app.js"] {
+            let r = get(addr, &format!("GET {} HTTP/1.0\r\n\r\n", path));
+            assert!(r.starts_with("HTTP/1.0 404 Not Found\r\n") && !r.contains("outside"), "{}: {:?}", path, &r[..r.len().min(60)]);
+        }
+        std::fs::remove_dir_all(&parent).unwrap();
+    }
+
+    #[test]
+    fn a_missing_page_names_its_package_and_the_api_still_answers() {
+        let web = web_dir("no-page", &[("app.js", b"js")]); // a web directory without index.html
+        let (addr, _) = server(|s| s.web = Some(web.clone()));
+        for path in ["/", "/index.html", "/?x"] {
+            let r = get(addr, &format!("GET {} HTTP/1.0\r\n\r\n", path));
+            assert!(r.starts_with("HTTP/1.0 404 Not Found\r\n") && r.contains("\r\nContent-Type: text/plain; charset=utf-8\r\n")
+                    && r.ends_with(std::str::from_utf8(NO_PAGE).unwrap()) && r.contains("platmon-frontend"), "{}: {}", path, r);
+        }
+        assert!(get(addr, "GET /api/status HTTP/1.0\r\n\r\n").starts_with("HTTP/1.0 200 OK\r\n"));
+        assert!(get(addr, "GET /nothing.js HTTP/1.0\r\n\r\n").contains("<p>Error code: 404</p>")); // other files: the usual 404
         std::fs::remove_dir_all(&web).unwrap();
+        // web = no: / is a plain 404, the page is off rather than missing
+        let (off, _) = server(|_| {});
+        assert!(!get(off, "GET / HTTP/1.0\r\n\r\n").contains("platmon-frontend"));
+    }
+
+    #[test]
+    fn status_carries_the_version_and_levels() {
+        let (addr, _) = server(|s| { s.version = "9.8.7".into(); s.levels = json::parse(r#"{"cpu": [70.0, 85.0]}"#).unwrap(); });
+        let r = get(addr, "GET /api/status HTTP/1.0\r\n\r\n");
+        let body = json::parse(r.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body.get("version"), Some(&Value::from("9.8.7")));
+        assert_eq!(body.get("levels").and_then(|l| l.get("cpu")).map(|c| c.to_py()), Some("[70.0, 85.0]".to_string()));
     }
 
     #[test]

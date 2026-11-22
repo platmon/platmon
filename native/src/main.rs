@@ -215,6 +215,8 @@ fn serve(args: &[String]) {
     println!("platmon http on {}", http::shown(&bind, port));
     let web = cfg.flag("http", "web").then_some(web_dir.clone()).flatten();
     match (&web, cfg.flag("http", "web")) {
+        (Some(dir), _) if !std::path::Path::new(dir).join("index.html").is_file() =>
+            println!("platmon web page: not installed in {} (the platmon-frontend package); / answers 404, the API is on", dir),
         (Some(dir), _) => println!("platmon web page at / from {}", dir),
         (None, true) => println!("platmon web page: off, no --web DIR given (API only)"),
         (None, false) => println!("platmon web page: off, web = no (API only)"),

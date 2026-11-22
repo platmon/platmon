@@ -25,7 +25,7 @@ a request without a version (HTTP/0.9) answers 400 and another version 505.
 | `/api/samples` | full published core snapshots after a cursor; bounded memory replay ([replay.md](replay.md)) |
 | `/api/observation-samples` | full publications of one slow group after its own cursor ([replay.md](replay.md)) |
 | `/text` | the `platmon` terminal screen as plain text; 503 when there is no current snapshot, 500 when the snapshot has a value the screen cannot show (`/api/stats` still has it) |
-| `/` | the web page (only with `web = yes`) |
+| `/` | the web page (only with `web = yes`); 404 naming `platmon-frontend` when the page is not installed ([Web page](#web-page)) |
 
 `/api/history`, `/api/samples` and `/api/observation-samples` take query parameters and answer 400 to ones
 they do not know. The other paths take none: a query string on them is ignored, so `/api/stats?_=1700000000`
@@ -405,7 +405,8 @@ check uses `/api/stats` for that reason).
   "collecting_for_ms": null,
   "clock": {"source": "boottime", "suspend_aware": true},
   "levels": {"cpu": [80.0, 90.0], "gpu": [80.0, 90.0], "memory": [80.0, 90.0], "filesystem": [80.0, 90.0],
-             "temperature": [85.0, 95.0], "battery": [20.0, 10.0], "wifi": [-70.0, -80.0]}
+             "temperature": [85.0, 95.0], "battery": [20.0, 10.0], "wifi": [-70.0, -80.0]},
+  "version": "1.11.0"
 }
 ```
 
@@ -430,6 +431,9 @@ check uses `/api/stats` for that reason).
   reading at or below a level reaches it. A client that does not know a name ignores it. The web page and the `platmon`
   command color readings with them. When `/api/status` cannot be read, or a server sends a null
   `temperature`, both use 80/90 for temperature.
+- `version`: the platmon version the server runs (its `VERSION`, or `serve --app-version`), as a string. The
+  web page shows it under System. Added after 1.10.0 as an additional field: `schema_version` stays 1, and a
+  client reads an answer without it (an older server) as an unknown version.
 
 ## Clock
 
@@ -439,6 +443,15 @@ falls back to the monotonic clock (`"source": "monotonic", "suspend_aware": fals
 suspended time, so ages can read too low right after a resume. Changes to the wall clock never affect them.
 
 ## Web page
+
+With `web = yes` the server sends any regular file of its web directory (`/usr/share/platmon/frontends/web`
+in the packages) whose path is made of letters, digits, `-`, `_` and `.` and whose type it knows from the
+extension (`.html`, `.js`, `.css`, `.svg`, `.json`, `.png`, `.ico`, `.woff2`); `/` is its `index.html`. It
+lists no file names, decodes no `%`, and sends no directory listing, hidden file, symbolic link, file of
+another type or path with `..`: those answer 404. The page reads its levels and version from `/api/status`;
+the server fills nothing into it. When the directory has no `index.html` (the `platmon-frontend` package is
+not installed), `/` answers `404` with a one-line `text/plain` message naming that package, and the API
+answers as always.
 
 The page and its files are sent with `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and a
 `Content-Security-Policy` that lets the page load scripts, styles and data from this server only and

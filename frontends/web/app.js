@@ -22,13 +22,12 @@ const table = (cols, head, rows, minWidth = 0) => `<div class="table"><div style
 const muted = text => `<span class="muted">${text}</span>`;
 
 // Status levels: ok below warn, warn from warn, crit from crit. Instantaneous values, no persistence.
-// The server fills them in from [thresholds] in platmon.ini, temperature with its board's default when
-// not set there (the server's board table, native/src/config.rs); these generic defaults apply only to a page not served by platmon.
+// The page reads them from /api/status (`levels`: [thresholds] in platmon.ini, temperature with its board's
+// default when not set there, native/src/config.rs) once it loads (loadStatus); these generic defaults apply
+// until then and when /api/status cannot be read.
 // They and the tab order and labels in index.html are frontends/ui-spec.json's (tests/frontends/test_ui_spec.py).
 const LIMITS = {cpu: [80, 90], gpu: [80, 90], memory: [80, 90], filesystem: [80, 90], temperature: [80, 90],
   battery: [20, 10], wifi: [-70, -80]};
-try { Object.assign(LIMITS, JSON.parse($('levels').textContent)); } catch (e) {}  // not served by platmon
-LIMITS.temperature ||= [80, 90];
 const level = (v, [warn, crit]) => v >= crit ? 'crit' : v >= warn ? 'warn' : 'ok';
 // battery and wifi: the low reading is the bad one, so a level is reached at or below it (warning above critical)
 const lowLevel = (v, [warn, crit]) => v <= crit ? 'crit' : v <= warn ? 'warn' : 'ok';
@@ -596,7 +595,7 @@ function renderSystem(s) {
   const extra = Object.entries(sys).filter(([key, value]) => !SYSTEM_FIELDS.includes(key) && value)
     .map(([key, value]) => `<div class="sys"><span>${esc(key)}</span><span>${esc(value)}</span></div>`).join('');
   if ($('system-extra').innerHTML !== extra) $('system-extra').innerHTML = extra;
-  // this page's own: the service it reads (the version is filled in by the server)
+  // this page's own: the service it reads (the version from /api/status, loadStatus)
   const service = `${location.host || 'this page'} · every 1 s`;
   if ($('system-service').textContent !== service) $('system-service').textContent = service;
 }
@@ -790,6 +789,21 @@ document.addEventListener('visibilitychange', () => {
   if (inflight) inflight.abort();  // its answer would not count; its finally starts the new request
   else tick();
 });
+// The server's levels and version from /api/status, once (it never waits for a snapshot). When it cannot be
+// read the defaults stay and the version says unknown; readings drawn before the answer are drawn again.
+function applyStatus(st) {
+  for (const [name, limits] of Object.entries((st && st.levels) || {})) if (Array.isArray(limits)) LIMITS[name] = limits;
+  if (st && typeof st.version === 'string') $('system-version').textContent = 'platmon v' + st.version;
+}
+async function loadStatus() {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  try {
+    const r = await fetch('api/status', {signal: ctl.signal, cache: 'no-store'});
+    if (r.ok) applyStatus(await r.json());
+  } catch (e) {} finally { clearTimeout(timer); }  // an older or unreachable server: the defaults
+  if (latestStats) { renderActive(); renderSlot(); }
+}
+loadStatus();
 const restoreTab = () => activateTab(TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview', false);
 window.addEventListener('hashchange', restoreTab);
 restoreTab();
