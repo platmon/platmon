@@ -39,8 +39,12 @@ The whole default service, with the output the Python one gave:
 - the runtime: the Sampler, history, replay, the HTTP API, the web page's files, `/text`, `platmon.ini`
   and `--frontends` ([Runtime](#runtime))
 
-The `platmon` command (`frontends/cli.py`) stays the Python client; the package installs it, so it needs
-the host's Python 3.9+.
+The `platmon` command (`frontends/cli.py`) is still the packaged client; the package installs it, so it
+needs the host's Python 3.9+. Its Rust port is the crate's second binary, `platmon` (`src/bin/platmon/`,
+sharing `src/json.rs` and `src/render.rs`; not part of `platmon-server`): the same options, exit codes,
+messages, `--once` output and live screens, checked against `cli.py` by `tools/equivalence/cli_fixture.py`.
+The packages switch to it in a later change (docs/development/remaining-work.md, "The `platmon` command in
+Rust").
 
 Behaviour kept from Python where bypassing std made it explicit:
 
@@ -138,7 +142,7 @@ service's answers on fixtures), **verified on hardware** (also run live on a hos
 | slow groups | storage, Wi-Fi, battery, probe (fixture `slow`) | what the three hosts have | |
 | configuration | `platmon.ini` as `load_config` reads and checks it, `--frontends` after it (67 cases, also the two servers' refusals) | on the three hosts (Python 3.14, 3.10, 3.13) | Unicode digits and whitespace in numbers, non-UTF-8 file names and files; argparse's abbreviations (`--front`) and a value that starts with `-` are unsupported |
 | HTTP API, web page, `/text`, history, replay | as `live_http.py` and `runtime_fixture.py` check them | the three hosts, no difference | which connections of a burst are refused (timing); Python versions' error page markup |
-| clients | the HTTP contracts the Hub and the web page use | the Hub-like poller of the final comparison; the released Hub ([below](#the-released-hub-p1-1)) | the `platmon` command (`frontends/cli.py`) stays the Python client and is not rewritten: the server runs without Python; the package installs the command, which needs the host's Python 3.9+ |
+| clients | the HTTP contracts the Hub and the web page use | the Hub-like poller of the final comparison; the released Hub ([below](#the-released-hub-p1-1)) | the `platmon` command: the package installs `frontends/cli.py`, which needs the host's Python 3.9+ (the server runs without Python); its Rust port, the `platmon` binary, is checked against it by `cli_fixture.py` and not packaged yet |
 
 **Load and memory.** Verified: the default configuration with the final comparison's load (1 s
 collections, a Hub-like poller, a 480 s reconnect backlog fetched five times) and four pollers fetching
@@ -182,6 +186,7 @@ native/tools/equivalence/fixture.sh                 # deterministic equivalence 
 python3 native/tools/equivalence/runtime_fixture.py $B
 python3 native/tools/equivalence/config_fixture.py $B
 python3 native/tools/equivalence/live_http.py $B
+python3 native/tools/equivalence/cli_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon   # the Rust platmon command against frontends/cli.py
 python3 -m venv /tmp/hub && /tmp/hub/bin/pip install --require-hashes -r native/tools/equivalence/hub-requirements.txt
 /tmp/hub/bin/python -I native/tools/equivalence/hub_contract.py $B   # about 45 s
 native/tools/equivalence/fixture.sh --bless; python3 native/tools/equivalence/runtime_fixture.py $B --bless; python3 native/tools/equivalence/config_fixture.py $B --bless   # after an intended change: rewrite golden/ from the server, review the diff
@@ -257,6 +262,11 @@ its own, since Windows has no SIGTERM to send; hosts given with an SSH target st
   without their `Date` and `Server` headers and without the markup of error pages (it differed between
   Python versions; the status line with the message stays). Runs on the host, reads no tree; the same
   self-test and deadlines as `fixture.py`.
+- `equivalence/cli_fixture.py`: the Rust `platmon` command against `frontends/cli.py` on the same snapshots
+  (the text scenario's recorded answers and a few of its own, served by a local stub): `--once` output,
+  a pipe, failures and command-line errors byte for byte; screen frames through the binary's hidden
+  `--screen-script` (every view, widths 30 to 119, color, ASCII, scrolled, offline, the server's levels)
+  and the keys; and two live sessions on a pty, every byte written. Runs on the host.
 - `equivalence/config_fixture.py`: platmon.ini files read by `platmon-server config-check` against
   `platmon.load_config`'s recorded answers: every setting with its type, the levels and the probe targets,
   or the same refusal message, also with a `--frontends` value; then `platmon-server serve`'s refusals as
