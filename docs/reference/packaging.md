@@ -2,9 +2,11 @@
 
 > **TL;DR**
 > - One `platmon` `.deb` per architecture (amd64, arm64, armhf) with the static native server and no Python;
->   the `platmon` command is `platmon-cli`, one per architecture too (a static native binary, no Python since
->   the release after 1.10.0), which it recommends.
-> - `.rpm` packages of the same files (x86_64, aarch64, platmon-cli included) build too, for Fedora and
+>   the web page and the `platmon` command are `platmon-frontend` (`platmon-cli`, the command alone, up to
+>   1.10.0), one per architecture too, which it recommends.
+> - Upgrading from 1.10.0: `sudo apt full-upgrade` or `sudo apt install platmon-frontend`; `apt upgrade` and
+>   `apt-get upgrade` keep `platmon` back while `platmon-cli` is installed ([Packages](#packages)).
+> - `.rpm` packages of the same files (x86_64, aarch64, platmon-frontend included) build too, for Fedora and
 >   Enterprise Linux 9+ ([RPM packages](#rpm-packages)); checked in CI and, from 1.8.0,
 >   among the GitHub Release files (no DNF repository).
 > - The `VERSION` file is the single version source; releases are built once in CI and
@@ -14,14 +16,27 @@
 The primary distribution is a Debian package for Ubuntu and Debian-derived Linux hosts
 (including supported Jetson and Raspberry Pi systems), one per architecture: `amd64`, `arm64` and `armhf`.
 The service is a static native server built from `native/` (Rust, musl, the system allocator); the
-package uses the host's systemd, has no Python dependency and bundles no OS/NVIDIA binaries. The
-`platmon` command is the second package `platmon-cli`, also one per architecture: the static native binary
-`native/build.sh` builds beside the server (`native/frontend/`), without dependencies. Up to 1.10.0 it was
-`Architecture: all`, one Python file that needed the host's Python 3.9+; apt replaces that package with the
-architecture's one on upgrade. `platmon` recommends it, so apt installs it by default;
-`--no-install-recommends` leaves it out. A package for an architecture does not mean that every OS/kernel on
-it has been validated. Neither package needs Python any more. Releases up to 1.3.0 are one `Architecture: all`
-package with the Python server, which was removed after 1.6.0; the source installation and the container run
+package uses the host's systemd, has no Python dependency and bundles no OS/NVIDIA binaries.
+
+### Packages
+
+| Package | Contents | Relations |
+| --- | --- | --- |
+| `platmon` | the server (`/usr/lib/platmon/platmon-server`), its unit, `/etc/platmon/platmon.ini` | `Depends: systemd`; `Recommends: platmon-frontend` |
+| `platmon-frontend` | the web page (`/usr/share/platmon/frontends/web`, where the unit's `--web` points) and the `platmon` command (`/usr/bin/platmon`, `man platmon`) | none; `Breaks`/`Replaces: platmon-cli`, `platmon` (both `<<` its release) |
+
+The `platmon` command is the static native binary `native/build.sh` builds beside the server
+(`native/frontend/`), without dependencies. `platmon` recommends `platmon-frontend`, so apt installs it by
+default; `--no-install-recommends` leaves it out, and the server then answers the API as always and `/`
+with a 404 that names `platmon-frontend`. A package for an architecture does not mean that every OS/kernel
+on it has been validated. Neither package needs Python any more.
+
+Up to 1.10.0 the page was in `platmon`, and the command in `platmon-cli` (1.7.0 to 1.10.0, `Architecture:
+all`, one Python file that needed the host's Python 3.9+). The release after 1.10.0 renamed `platmon-cli`
+`platmon-frontend` and moved the page into it, without a transitional package: platmon had no users beyond
+the maintainer's devices (#181). The page's path did not change, only the package that owns it.
+
+Releases up to 1.3.0 are one `Architecture: all` package with the Python server, which was removed after 1.6.0; the source installation and the container run
 the native server too, built from the checkout ([deployment](../guides/deployment.md)).
 `armhf` (32-bit ARM, ARMv6 with VFP and later, e.g. Raspberry Pi OS 32-bit) is built by
 `native/build-armhf.sh`; releases 1.4.0 and 1.5.0 had no armhf package, so armhf hosts upgrade from 1.3.0.
@@ -42,7 +57,7 @@ and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
 The `VERSION` file (one line, `MAJOR.MINOR.PATCH`) is the single source of the application version.
 The server reads it at build time (`platmon-server --version`; `native/build.sh` and the Dockerfile put it
 beside the crate), and the builder also writes it into the package's unit (`--app-version`, which overrides
-it); the server shows it on its web page and logs it at start. The `platmon` command reads it at build time
+it); the server reports it in `/api/status` (`version`), which the web page shows, and logs it at start. The `platmon` command reads it at build time
 too (`native/frontend/`), so a release changes `VERSION` alone. Check versions with:
 
 ```sh
@@ -85,8 +100,8 @@ lintian --no-cfg --info --pedantic --fail-on error,warning "$platmon_dist"/*.deb
 ```
 
 The fresh output directory contains `platmon_<version>-1_amd64.deb`, `platmon_<version>-1_arm64.deb`,
-`platmon_<version>-1_armhf.deb`, `platmon-cli_<version>-1_amd64.deb`, `platmon-cli_<version>-1_arm64.deb`,
-`platmon-cli_<version>-1_armhf.deb`, `platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the
+`platmon_<version>-1_armhf.deb`, `platmon-frontend_<version>-1_amd64.deb`, `platmon-frontend_<version>-1_arm64.deb`,
+`platmon-frontend_<version>-1_armhf.deb`, `platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the
 servers' and the commands' SHA-256 (`server_sha256`, `command_sha256`) and versions; `package_windows.py` adds
 the Windows server's and command's) and `SHA256SUMS`. The builder takes the servers from `native/target/` by
 default, or one per `--binary ARCH=PATH`, and the `platmon` command beside each (`platmon` in the same
@@ -128,7 +143,7 @@ with `Signed-By` so that the key is trusted for this repository only, and `Archi
 host's architecture, so that a foreign architecture such as i386 is not requested from it.
 
 ```sh
-sudo apt update && sudo apt install --only-upgrade platmon platmon-cli   # update platmon only
+sudo apt update && sudo apt install platmon platmon-frontend   # update platmon only (installs platmon-frontend)
 apt list -a platmon                                          # versions in the repository
 sudo apt install --allow-downgrades platmon=<version>-<revision>   # roll back
 ```
@@ -174,18 +189,31 @@ Use the release's own tag, including a `-<revision>` suffix when it has one.
 The published packages 1.0.0-1 to 1.3.0-1 have no attestation.
 
 The server goes to `/usr/lib/platmon/platmon-server` (with a `platmon-native` link, its name up to 1.6.0),
-its web files to `/usr/share/platmon/`,
 the vendor unit to `/usr/lib/systemd/system/platmon.service`, and config to `/etc/platmon/platmon.ini`;
-`platmon-cli` puts the client in `/usr/bin/platmon` and its manual (`man platmon`).
+`platmon-frontend` puts the web files in `/usr/share/platmon/`, the client in `/usr/bin/platmon` and its
+manual (`man platmon`).
 
-Up to 1.6.0 the command was in `platmon` itself. `platmon-cli` breaks and replaces the `platmon` releases
-before 1.7.0, so an upgrade moves `/usr/bin/platmon` to it: `apt upgrade` and `apt install
-platmon` install the newly recommended `platmon-cli` with it. `apt-get upgrade` installs no new package and
-so keeps `platmon` back at the old version, command included, until `apt install platmon` (checked with
-1.3.0 and a local repository). Rolling `platmon` back to 1.6.0 or earlier makes apt
-remove `platmon-cli`, as the old package has the command itself; rolling it back to 1.7.0 or later keeps the
-newer `platmon-cli`. Compressed documentation and
-changelogs are in `/usr/share/doc/platmon/` (and `/usr/share/doc/platmon-cli/`); `copyright` references the system's
+From 1.10.0 or earlier, `platmon-frontend` takes the page from the old `platmon` and the command from
+`platmon-cli` (or, before 1.7.0, from `platmon`): it breaks and replaces both, up to its own release.
+Checked with the 1.10.0 packages and a local repository:
+
+- `sudo apt full-upgrade`, or `sudo apt install platmon-frontend` (which upgrades `platmon` with it),
+  removes `platmon-cli` and installs `platmon-frontend`; the page and the command move to it.
+- `apt upgrade` and `apt-get upgrade` never remove a package, so while `platmon-cli` is installed they keep
+  `platmon` back at the old version, with its page; use one of the commands above.
+- A host installed without `platmon-cli` (`--no-install-recommends`): `apt upgrade` installs the newly
+  recommended `platmon-frontend`; `apt-get upgrade` installs no new package, so it upgrades `platmon` alone
+  and the page is missing (`/` answers 404 naming `platmon-frontend`) until
+  `sudo apt install platmon-frontend`.
+- `dpkg -i` does not remove a package that another one breaks: `sudo dpkg --remove platmon-cli` first, then
+  install the new `platmon` and `platmon-frontend` files together (or use `sudo apt install ./FILE.deb ...`,
+  which does it).
+
+Rolling `platmon` back to 1.10.0 or earlier makes apt remove `platmon-frontend`, as the old package has the
+page itself (and, before 1.7.0, the command); install that release's `platmon-cli` again for the command.
+Within one release (another packaging revision) `platmon` rolls back alone beside the newer
+`platmon-frontend`. Compressed documentation and
+changelogs are in `/usr/share/doc/platmon/` (and `/usr/share/doc/platmon-frontend/`); `copyright` references the system's
 Apache-2.0 license. Package metadata includes `md5sums` for non-conffile contents
 for tools such as `debsums`; release artifact verification uses `SHA256SUMS`.
 The service retains DynamicUser, ProtectSystem, ProtectHome and NoNewPrivileges; the server
@@ -235,10 +263,12 @@ installations; source install/uninstall scripts refuse an installed dpkg package
 
 `scripts/packaging/package_rpm.py` builds `.rpm` packages of the same files as the `.deb` ones, from the
 same servers (`native/build.sh`): `platmon-<version>-1.x86_64.rpm`, `platmon-<version>-1.aarch64.rpm`
-(the server, its unit, `/etc/platmon/platmon.ini` as `%config(noreplace)`, the web page; `Requires:
-systemd`, `Recommends: platmon-cli`), `platmon-cli-<version>-1.x86_64.rpm` and
-`platmon-cli-<version>-1.aarch64.rpm` (the `platmon` command, no requirements; `noarch` with Python up to
-1.10.0), with `SHA256SUMS`. There is no 32-bit ARM package: the armhf server is ARMv6, and the RPM distributions
+(the server, its unit, `/etc/platmon/platmon.ini` as `%config(noreplace)`; `Requires: systemd`,
+`Recommends: platmon-frontend`), `platmon-frontend-<version>-1.x86_64.rpm` and
+`platmon-frontend-<version>-1.aarch64.rpm` (the web page and the `platmon` command, no requirements), with
+`SHA256SUMS`. `platmon-frontend` obsoletes `platmon-cli` (`noarch` with Python, 1.7.0 to 1.10.0) up to its
+release and provides it, so `dnf upgrade` from 1.10.0 replaces `platmon-cli` with it and moves the page from
+the old `platmon` (checked with the 1.10.0 packages and a local repository). There is no 32-bit ARM package: the armhf server is ARMv6, and the RPM distributions
 that still have 32-bit ARM have armv7hl. Nothing is compiled: `packaging/rpm/*.spec` copy the staged files.
 The builder needs `rpmbuild` (Fedora: `sudo dnf install rpm-build`; Debian and Ubuntu: `sudo apt install
 rpm`); the same `SOURCE_DATE_EPOCH` and inputs give the same files with the same rpm version. The
@@ -249,7 +279,7 @@ native/build.sh
 python3 scripts/packaging/package_rpm.py --output dist/rpm     # --release 2 for a packaging-only rebuild
 (cd dist/rpm && sha256sum -c SHA256SUMS)
 rpmlint -c packaging/rpm/rpmlint.toml dist/rpm                 # on Fedora: sudo dnf install rpmlint
-sudo dnf install ./dist/rpm/platmon-*.$(uname -m).rpm   # platmon and platmon-cli
+sudo dnf install ./dist/rpm/platmon-*.$(uname -m).rpm   # platmon and platmon-frontend
 ```
 
 The scriptlets do what the `.deb`'s maintainer scripts do, within what rpm allows:
@@ -270,10 +300,10 @@ The scriptlets do what the `.deb`'s maintainer scripts do, within what rpm allow
   dpkg one.
 
 CI builds both releases (`-1` and `-2`) with Ubuntu's `rpmbuild` and runs `rpmlint` in a Fedora 44
-container (`packaging/rpm/rpmlint.toml` names the deliberately static server and the word `cli`). Each
+container (`packaging/rpm/rpmlint.toml` names the deliberately static binaries and the word `frontend`). Each
 architecture's packages run on a runner of that architecture under a booted systemd in Fedora 44,
 AlmaLinux 9 and CentOS Stream 10 containers (`scripts/packaging/check_rpm.py`): a refused local unit, the first install
-started without platmon-cli and then with it, an upgrade that keeps an edited INI, an invalid INI, a
+started without platmon-frontend (`/` a 404 naming it) and then with it, an upgrade that keeps an edited INI, an invalid INI, a
 disabled service, a failed start, a downgrade and the erase. Their test image
 (`scripts/packaging/prepare_test_image.py`) is kept in the Actions cache for the ISO week, per base and
 architecture, so the distributions' mirrors are used once a week rather than on every run (#166); the
@@ -377,8 +407,9 @@ directories are never automatically deleted by subsequent updates or uninstall.
    [platmon.github.io](https://github.com/platmon/platmon.github.io) with the tag
    (`gh workflow run apt -R platmon/platmon.github.io -f tags=v<version>`) and approve the
    `apt` environment. It re-checks the published files before signing the new index. The first release
-   with `platmon-cli` per architecture needs that repository's `apt/tools/update.sh` to take
-   `platmon-cli_<version>_<arch>.deb` as well as the older `_all.deb` first.
+   with `platmon-frontend` needs that repository's `apt/tools/update.sh` to take
+   `platmon-frontend_<version>_<arch>.deb` beside `platmon_<version>_<arch>.deb` first (no release had
+   `platmon-cli` per architecture).
 
 The repository's active `release-tags` tag ruleset targets `refs/tags/v*`: new tags
 are allowed, but existing tags cannot be updated or deleted, with no bypass actors.

@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - Install the `.deb` from the signed APT repository (check the key fingerprint first) on an Ubuntu or
->   Debian-derived host with systemd; the `platmon` command (`platmon-cli`, installed with it) is native too, no
->   Python needed.
+>   Debian-derived host with systemd; the web page and the `platmon` command (`platmon-frontend`, installed
+>   with it) come too, no Python needed.
 > - Then run `platmon`, open `http://<device>:9797`, or `curl` `/api/status`.
 > - Settings live in `/etc/platmon/platmon.ini`; the API has no authentication.
 > - Windows 11 (x86_64): the installer `platmon-<version>-windows-x86_64.msi`, or the zip to try it
@@ -17,11 +17,13 @@ published data. Collection is not triggered by requests.
 
 The primary distribution is a `.deb` package for Ubuntu and Debian-derived Linux hosts
 (including suitable Jetson and Raspberry Pi systems), built for **amd64**, **arm64** and **armhf** (32-bit ARM).
-It requires **systemd**. The service is one static native binary without Python. The `platmon` command is
-the separate package `platmon-cli`, which `platmon` recommends, so apt installs it by default; it is a static
-native binary for the same architectures, without dependencies (up to 1.10.0 it was one Python file that needed
-Python 3.9+). A headless device can leave it out
-with `sudo apt install --no-install-recommends platmon` and read the API or the web page instead.
+It requires **systemd**. The service is one static native binary without Python. The web page and the
+`platmon` command are the separate package `platmon-frontend` (`platmon-cli` up to 1.10.0, the command alone),
+which `platmon` recommends, so apt installs it by default; the command is a static native binary for the same
+architectures, without dependencies (up to 1.10.0 it was one Python file that needed Python 3.9+). A device
+that only feeds platmon-hub, Prometheus or a `platmon` command elsewhere can leave it out with
+`sudo apt install --no-install-recommends platmon`: the API answers as always, and `/` answers 404 naming
+`platmon-frontend`.
 A package for an architecture does not imply that every OS or kernel on it has been validated.
 
 Install from the signed APT repository at <https://platmon.github.io/apt>. It holds
@@ -67,7 +69,7 @@ containing all of the release files, verify checksums before installing the chos
 
 ```sh
 sha256sum -c SHA256SUMS
-sudo apt install ./platmon_<version>-<revision>_<arch>.deb ./platmon-cli_<version>-<revision>_<arch>.deb
+sudo apt install ./platmon_<version>-<revision>_<arch>.deb ./platmon-frontend_<version>-<revision>_<arch>.deb
 systemctl status platmon --no-pager
 platmon --version
 platmon --once
@@ -75,8 +77,9 @@ platmon --once
 
 Replace the angle-bracket placeholders with the actual version and revision from
 the release filenames and the host's architecture (`dpkg --print-architecture`); do not
-run the placeholder command literally. Releases up to 1.10.0 have `platmon-cli_<version>-<revision>_all.deb`,
-and releases up to 1.3.0 one `_all.deb` instead of both.
+run the placeholder command literally. Releases 1.7.0 to 1.10.0 have `platmon-cli_<version>-<revision>_all.deb`
+(the command alone; `platmon` had the web page) instead of `platmon-frontend`, and releases up to 1.3.0 one
+`_all.deb` instead of both.
 
 To build the package from a source checkout instead, use a Linux host with Python 3.9+,
 `dpkg-deb` (dpkg 1.19+) and Docker, which builds the server and the `platmon` command in a throwaway Rust
@@ -90,12 +93,12 @@ platmon_dist="dist/${platmon_version}-1"
 python3 scripts/packaging/package.py --output "$platmon_dist"
 python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_${platmon_arch}.deb"
 sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}.deb" \
-  "./${platmon_dist}/platmon-cli_${platmon_version}-1_${platmon_arch}.deb"
+  "./${platmon_dist}/platmon-frontend_${platmon_version}-1_${platmon_arch}.deb"
 ```
 
-The `platmon` package installs the server in `/usr/lib/platmon/platmon-server`, the web files in
-`/usr/share/platmon`, and configuration in `/etc/platmon/platmon.ini`; `platmon-cli` installs the
-`platmon` command in `/usr/bin`.
+The `platmon` package installs the server in `/usr/lib/platmon/platmon-server` and configuration in
+`/etc/platmon/platmon.ini`; `platmon-frontend` installs the web files in `/usr/share/platmon`, which the
+server sends, and the `platmon` command in `/usr/bin`.
 APT preserves an edited config on upgrade. If an existing **source or Docker**
 installation is present, follow the
 [migration procedure](../reference/packaging.md#migrate-a-source-or-docker-installation)
@@ -251,8 +254,8 @@ See [CLI and web interfaces](interfaces.md) for views, keyboard shortcuts
 and the remaining endpoints.
 
 To install **only the terminal client** on a Linux machine watching other devices,
-install the `platmon-cli` package of its architecture alone (`.deb` or `.rpm`; it depends
-on nothing, not even `platmon`), or from a checkout build it with `native/build.sh`
+install the `platmon-frontend` package of its architecture alone (`.deb` or `.rpm`; it depends
+on nothing, not even `platmon`; its web page then lies unused), or from a checkout build it with `native/build.sh`
 (`native/build-armhf.sh` on 32-bit ARM) and run `scripts/install-cli.sh`
 (`/usr/local/bin/platmon`, asks for sudo) or `scripts/install-cli.sh --user`
 (`~/.local/bin/platmon`, no sudo). The client is one static binary.

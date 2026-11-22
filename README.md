@@ -59,8 +59,8 @@ The service starts with the install. Other ways in, all running the same server:
 | Fedora or Enterprise Linux 9+ | the `.rpm` packages ([RPM packages](docs/reference/packaging.md#rpm-packages)) |
 | Another Linux, or a change to try | a [source installation or a locally built container](docs/guides/deployment.md) |
 | Windows 11 (x86_64) | the installer `platmon-<version>-windows-x86_64.msi` from [GitHub Releases](https://github.com/platmon/platmon/releases) ([Windows](docs/guides/getting-started.md#windows)) |
-| A headless device without the terminal client | `sudo apt install --no-install-recommends platmon`, then the web page or the API |
-| A PC that only watches other devices | the terminal client alone: the `platmon-cli` package of its architecture, or `scripts/install-cli.sh --user` after `native/build.sh` |
+| A headless device without the web page and the terminal client | `sudo apt install --no-install-recommends platmon`, then the API (platmon-hub, Prometheus, `curl`, a `platmon` command elsewhere) |
+| A PC that only watches other devices | the terminal client alone: the `platmon-frontend` package of its architecture, or `scripts/install-cli.sh --user` after `native/build.sh` |
 | Windows 11 (x86_64), to try it | the zip from [GitHub Releases](https://github.com/platmon/platmon/releases): unzip, double-click `start.cmd` ([Windows](docs/guides/getting-started.md#windows)) |
 
 ## Use

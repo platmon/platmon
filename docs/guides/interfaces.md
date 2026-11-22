@@ -56,7 +56,7 @@ matching `/text`; `--view` is intended for the interactive UI.
 The device's `platmon` command is installed automatically by the package
 (`/usr/bin`), source-systemd installer (`/usr/local/bin`) or Docker
 start script (`~/.local/bin`, when the host has run `native/build.sh`). For a monitoring-only PC,
-install the `platmon-cli` package alone or the built binary via
+install the `platmon-frontend` package alone (`platmon-cli` up to 1.10.0) or the built binary via
 [the CLI-only instructions](getting-started.md#view-a-running-device). The command is one static native
 binary (`native/frontend/`); up to 1.10.0 it was a Python file. Compared with that file it ignores
 `http_proxy` and the other proxy variables (it connects to the device directly), resolves host names

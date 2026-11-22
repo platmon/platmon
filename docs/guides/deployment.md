@@ -160,6 +160,14 @@ choose what is served, on Linux and Windows alike:
 | Hub and remote CLI, no page | `0.0.0.0` | `no` | the host and its networks; `/` answers 404 |
 | This host only | `127.0.0.1` | `no` (or `yes`) | programs on the host: `platmon` with no address, `curl localhost:9797` |
 
+The page's files come from the web directory (`--web DIR`): in the packages `/usr/share/platmon/frontends/web`,
+which the `platmon-frontend` package installs. The server lists none of them; it sends any file there of a
+type it knows (`.html`, `.js`, `.css`, `.svg` and a few more) and nothing else, and the page reads its
+levels and version from `/api/status`. A package installed without `platmon-frontend`
+(`--no-install-recommends`, or `apt-get upgrade` from 1.10.0, which installs no new package) keeps `web = yes`
+working for the API, and `/` answers 404 naming `platmon-frontend`: install it, or set `web = no`. The source
+installation, the container and the Windows zip and installer always have the page.
+
 With `bind = 127.0.0.1` the Hub cannot reach the device. To open the page from another machine anyway, use
 an SSH tunnel (`ssh -L 9797:127.0.0.1:9797 user@device`, then `http://localhost:9797` there) with `web = yes`.
 A loopback listener is still open to every local user and process, as `0.0.0.0` already is; there is no
