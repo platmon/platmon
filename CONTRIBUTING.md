@@ -44,17 +44,17 @@ You need a Linux host with Docker (the server is built in a throwaway Rust conta
 on the host) and Python 3.9 or later.
 
 ```sh
-native/build.sh                                         # Rust unit tests, then static x86_64 and aarch64 builds
+native/build.sh                                         # Rust tests, then the server and the platmon command, x86_64 and aarch64
 python3 -m pip install -r tests/requirements.txt        # pytest only
-pytest                                                  # the terminal client, the web page, packaging
+pytest                                                  # the terminal client's screens, the web page, packaging
 git diff --check
 ```
 
-Run the server from the checkout (use the `aarch64-unknown-linux-musl` path on an Arm host):
+Run the server and the command from the checkout (use the `aarch64-unknown-linux-musl` path on an Arm host):
 
 ```sh
 native/target/x86_64-unknown-linux-musl/release/platmon-server serve platmon.ini --web frontends/web
-python3 frontends/cli.py localhost
+native/target/x86_64-unknown-linux-musl/release/platmon localhost   # the command native/build.sh built
 ```
 
 The [architecture guide](docs/development/architecture.md) describes the source layout and which module
@@ -83,8 +83,8 @@ effect on clients ([ADR 0002](docs/development/adr/0002-api-contract-not-python-
 
 The terminal client and the web page share their views, levels and colors through
 `frontends/ui-spec.json`. Start a design change there; `tests/frontends/test_ui_spec.py` checks both
-clients against it. `/text` (`native/shared/src/render.rs`) is a port of the terminal client's plain screen, so a
-change to that screen is made in both.
+clients against it. `/text` (`native/shared/src/render.rs`) is also the terminal client's plain screen (`--once`): one
+renderer in the shared crate, so a change to that screen changes both.
 
 ## Pull requests
 

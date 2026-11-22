@@ -2,8 +2,9 @@
 
 > **TL;DR**
 > - One `platmon` `.deb` per architecture (amd64, arm64, armhf) with the static native server and no Python;
->   the `platmon` command is `platmon-cli` (`Architecture: all`, the host's Python 3.9+), which it recommends.
-> - `.rpm` packages of the same files (x86_64, aarch64; platmon-cli noarch) build too, for Fedora and
+>   the `platmon` command is `platmon-cli`, one per architecture too (a static native binary, no Python since
+>   the release after 1.10.0), which it recommends.
+> - `.rpm` packages of the same files (x86_64, aarch64, platmon-cli included) build too, for Fedora and
 >   Enterprise Linux 9+ ([RPM packages](#rpm-packages)); checked in CI and, from 1.8.0,
 >   among the GitHub Release files (no DNF repository).
 > - The `VERSION` file is the single version source; releases are built once in CI and
@@ -14,11 +15,12 @@ The primary distribution is a Debian package for Ubuntu and Debian-derived Linux
 (including supported Jetson and Raspberry Pi systems), one per architecture: `amd64`, `arm64` and `armhf`.
 The service is a static native server built from `native/` (Rust, musl, the system allocator); the
 package uses the host's systemd, has no Python dependency and bundles no OS/NVIDIA binaries. The
-`platmon` command is the second package `platmon-cli` (`Architecture: all`, `Depends: python3 (>= 3.9)`):
-one Python file that uses the host's standard library only. `platmon` recommends it, so apt installs it by
-default; `--no-install-recommends` leaves it out. A package for an architecture does not mean that every
-OS/kernel on it has been validated. A device whose Python is older than 3.9 needs a supported
-OS/interpreter for the command, not for the service. Releases up to 1.3.0 are one `Architecture: all`
+`platmon` command is the second package `platmon-cli`, also one per architecture: the static native binary
+`native/build.sh` builds beside the server (`native/frontend/`), without dependencies. Up to 1.10.0 it was
+`Architecture: all`, one Python file that needed the host's Python 3.9+; apt replaces that package with the
+architecture's one on upgrade. `platmon` recommends it, so apt installs it by default;
+`--no-install-recommends` leaves it out. A package for an architecture does not mean that every OS/kernel on
+it has been validated. Neither package needs Python any more. Releases up to 1.3.0 are one `Architecture: all`
 package with the Python server, which was removed after 1.6.0; the source installation and the container run
 the native server too, built from the checkout ([deployment](../guides/deployment.md)).
 `armhf` (32-bit ARM, ARMv6 with VFP and later, e.g. Raspberry Pi OS 32-bit) is built by
@@ -29,7 +31,8 @@ kernel and speed are not verified there (native/README.md, 32-bit ARM).
 
 Python 3.8 and Ubuntu 20.04 are CI observation targets under
 [ADR 0001](../development/adr/0001-ubuntu-lts-python-support.md), outside official support and
-without an ongoing compatibility commitment. The native package minimum remains Python 3.9.
+without an ongoing compatibility commitment. They concern the repository's tools and tests now: since the
+release after 1.10.0 no package needs Python.
 Container checks do not establish native OS, systemd or hardware support. See the
 [qualification record](../development/ubuntu-lts-qualification.md) for commit-specific CI evidence
 and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
@@ -39,8 +42,8 @@ and remaining qualification work for Ubuntu 22.04, 24.04 and 26.04.
 The `VERSION` file (one line, `MAJOR.MINOR.PATCH`) is the single source of the application version.
 The server reads it at build time (`platmon-server --version`; `native/build.sh` and the Dockerfile put it
 beside the crate), and the builder also writes it into the package's unit (`--app-version`, which overrides
-it); the server shows it on its web page and logs it at start. `frontends/cli.py` keeps a copy so the CLI stays one independent file; `tests/frontends/test_cli.py`
-fails until they say the same, so a release changes both. Check versions with:
+it); the server shows it on its web page and logs it at start. The `platmon` command reads it at build time
+too (`native/frontend/`), so a release changes `VERSION` alone. Check versions with:
 
 ```sh
 platmon --version
@@ -65,8 +68,8 @@ changing the application version. Never replace an already released version's fi
 ## Build
 
 Build on Linux with Python 3.9+, the installed `dpkg-deb` tool (dpkg 1.19+) and Docker.
-`native/build.sh` builds the server for both architectures in a throwaway `rust:1.88-slim`
-container (Cargo.lock as committed, the Rust tests first, then each binary checked for the
+`native/build.sh` builds the server and the `platmon` command for both architectures in a throwaway
+`rust:1.88-slim` container (Cargo.lock as committed, the Rust tests first, then each server checked for the
 system allocator's mark). No Python build dependency, Rust toolchain on the host or root access
 is needed:
 
@@ -82,12 +85,13 @@ lintian --no-cfg --info --pedantic --fail-on error,warning "$platmon_dist"/*.deb
 ```
 
 The fresh output directory contains `platmon_<version>-1_amd64.deb`, `platmon_<version>-1_arm64.deb`,
-`platmon_<version>-1_armhf.deb`, `platmon-cli_<version>-1_all.deb`,
-`platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the servers' SHA-256 and versions; `package_windows.py` adds the
-Windows server's) and
-`SHA256SUMS`. The builder takes the servers from `native/target/` by default, or one per
-`--binary ARCH=PATH`; it refuses a file that is not an ELF for that architecture or lacks the
-system allocator's mark. `check_package.py` runs the extracted server, so it needs a host of the
+`platmon_<version>-1_armhf.deb`, `platmon-cli_<version>-1_amd64.deb`, `platmon-cli_<version>-1_arm64.deb`,
+`platmon-cli_<version>-1_armhf.deb`, `platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the
+servers' and the commands' SHA-256 (`server_sha256`, `command_sha256`) and versions; `package_windows.py` adds
+the Windows server's and command's) and `SHA256SUMS`. The builder takes the servers from `native/target/` by
+default, or one per `--binary ARCH=PATH`, and the `platmon` command beside each (`platmon` in the same
+directory, where the build leaves it); it refuses a file that is not an ELF for that architecture, a server
+without the system allocator's mark and a command that is a server. `check_package.py` runs the extracted server, so it needs a host of the
 package's architecture. The source archive includes `native/` (without `native/target/`),
 runtime, tests, installation/build scripts and documentation, excluding caches and
 private validation artifacts. With the same servers it can rebuild the packages without `.git`.
@@ -106,8 +110,8 @@ the source archive is an upstream distribution, not a Debian source package with
 `debian/rules` or a `.dsc` file.
 Revision 1 includes a scoped Lintian override for `initial-upload-closes-no-bugs`:
 this upstream distribution is not an upload to the Debian archive and has no Debian
-Intent To Package bug. Every revision overrides the tags of the deliberately static server,
-per architecture (`statically-linked-binary` on arm64 and armhf; `shared-library-lacks-prerequisites`
+Intent To Package bug. Every revision overrides the tags of the deliberately static server and
+command, per architecture (`statically-linked-binary` on arm64 and armhf; `shared-library-lacks-prerequisites`
 on amd64, whose static PIE looks like a shared object). Other policy errors and warnings
 remain checked.
 
@@ -232,8 +236,9 @@ installations; source install/uninstall scripts refuse an installed dpkg package
 `scripts/packaging/package_rpm.py` builds `.rpm` packages of the same files as the `.deb` ones, from the
 same servers (`native/build.sh`): `platmon-<version>-1.x86_64.rpm`, `platmon-<version>-1.aarch64.rpm`
 (the server, its unit, `/etc/platmon/platmon.ini` as `%config(noreplace)`, the web page; `Requires:
-systemd`, `Recommends: platmon-cli`) and `platmon-cli-<version>-1.noarch.rpm` (`Requires: python3 >= 3.9`),
-with `SHA256SUMS`. There is no 32-bit ARM package: the armhf server is ARMv6, and the RPM distributions
+systemd`, `Recommends: platmon-cli`), `platmon-cli-<version>-1.x86_64.rpm` and
+`platmon-cli-<version>-1.aarch64.rpm` (the `platmon` command, no requirements; `noarch` with Python up to
+1.10.0), with `SHA256SUMS`. There is no 32-bit ARM package: the armhf server is ARMv6, and the RPM distributions
 that still have 32-bit ARM have armv7hl. Nothing is compiled: `packaging/rpm/*.spec` copy the staged files.
 The builder needs `rpmbuild` (Fedora: `sudo dnf install rpm-build`; Debian and Ubuntu: `sudo apt install
 rpm`); the same `SOURCE_DATE_EPOCH` and inputs give the same files with the same rpm version. The
@@ -244,7 +249,7 @@ native/build.sh
 python3 scripts/packaging/package_rpm.py --output dist/rpm     # --release 2 for a packaging-only rebuild
 (cd dist/rpm && sha256sum -c SHA256SUMS)
 rpmlint -c packaging/rpm/rpmlint.toml dist/rpm                 # on Fedora: sudo dnf install rpmlint
-sudo dnf install ./dist/rpm/platmon-*.$(uname -m).rpm ./dist/rpm/platmon-cli-*.noarch.rpm
+sudo dnf install ./dist/rpm/platmon-*.$(uname -m).rpm   # platmon and platmon-cli
 ```
 
 The scriptlets do what the `.deb`'s maintainer scripts do, within what rpm allows:
@@ -344,7 +349,7 @@ directories are never automatically deleted by subsequent updates or uninstall.
 
 ## Release procedure
 
-1. Update `VERSION` (and its copy in `frontends/cli.py`), the changelog and the
+1. Update `VERSION`, the changelog and the
    [platmon-hub compatibility](hub-compatibility.md) table (the new release's row, with what checked it: CI's
    `hub_contract.py` at least). Review the scoped change and run
    `git diff --check`, `pytest -v`, `native/build.sh`, `native/build-armhf.sh`, the build, package checker and Lintian.
@@ -371,7 +376,9 @@ directories are never automatically deleted by subsequent updates or uninstall.
 5. After the release is published, add it to the APT repository: run the `apt` workflow of
    [platmon.github.io](https://github.com/platmon/platmon.github.io) with the tag
    (`gh workflow run apt -R platmon/platmon.github.io -f tags=v<version>`) and approve the
-   `apt` environment. It re-checks the published files before signing the new index.
+   `apt` environment. It re-checks the published files before signing the new index. The first release
+   with `platmon-cli` per architecture needs that repository's `apt/tools/update.sh` to take
+   `platmon-cli_<version>_<arch>.deb` as well as the older `_all.deb` first.
 
 The repository's active `release-tags` tag ruleset targets `refs/tags/v*`: new tags
 are allowed, but existing tags cannot be updated or deleted, with no bypass actors.

@@ -13,8 +13,9 @@
 >   further device unless asked, an unsigned MSI, the switch in the next release): Windows 11 x86_64 is
 >   supported from the release after 1.9.0; the evidence is [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16).
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
-> - Decided, not started (2026-11-22): the frontends in one package `platmon-frontend`, the `platmon` command
->   in Rust, then a tray on Linux and Windows; macOS planned ([below](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22)).
+> - Decided (2026-11-22): the `platmon` command in Rust (step 1, done: the binary is `platmon-cli` and
+>   `cli.py` is removed, #239 and this change), then the frontends in one package `platmon-frontend`, then a
+>   tray on Linux and Windows; macOS planned ([below](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22)).
 > - Also recorded, not started: a separate network process (deferred; no Unix socket).
 
 Merging, production rollout and releases always wait for the owner's approval. The staged plan of
@@ -339,8 +340,9 @@ the API without the page, this host only), on Linux and Windows alike; they are 
 
 ## Decided: the frontend package, the CLI in Rust and the tray (2026-11-22)
 
-Not started. Decided with the owner on 2026-11-22, replacing the tray plan of 2026-10-18; each step is its
-own change and release, and starting each is the owner's decision.
+Step 1 done (#239 and this change); steps 2 and 3 not started. Decided with the owner on 2026-11-22,
+replacing the tray plan of 2026-10-18; each step is its own change and release, and starting each is the
+owner's decision.
 
 **The goal:** the core, `platmon`, collects and serves the API and nothing else; everything that shows the
 data (the web page, the `platmon` command, the tray) is a frontend, in one package beside it.
@@ -400,7 +402,12 @@ or Jetson GNOME, the Windows laptop and desktop.
 
 ### Order
 
-1. The command in Rust, still as `platmon-cli`.
+1. The command in Rust, still as `platmon-cli`. **Done:** the binary (#239: compared with `cli.py` byte for
+   byte on 12 `--once` snapshots, 23 failures, 4552 screens, 350 key presses, a pipe and two terminal
+   sessions), then this change: `native/` a Cargo workspace, `platmon-cli` per architecture without Python
+   (`.deb` amd64, arm64, armhf; `.rpm` x86_64, aarch64), `platmon.exe` in the zip and the MSI, `cli.py`
+   removed and its tests moved to Rust tests and the binary. Accepted differences: no proxy, no NSS (mDNS
+   `.local` names), one line where `cli.py` printed a traceback.
 2. The packages: `platmon-frontend` and the 404 for a missing page.
 3. The tray.
 
@@ -419,3 +426,14 @@ files it serves are listed in `http.rs` (`WEB`), it fills `@VERSION@` and `@LEVE
 holds both. Revisit when the frontends get their own contributors or release cadence, after: the core
 serving its web directory without a list and the page reading its version and levels from `/api/status`,
 `/text`'s owner decided, a compatibility table and CI pairing as with platmon-hub, and where the MSI is built.
+
+Kept for such a split (step 1):
+
+- `native/` is a Cargo workspace: the server (`platmon-server`), `shared/` and `frontend/` (the command, later
+  the tray). Each depends on `shared/` only, so the frontend cannot use the server's modules, nor the server
+  the frontend's: the compiler enforces the boundary a split would cut along.
+- `shared/` owns `/text`'s renderer (`render.rs`) and the JSON code both sides use; the server's `/text` and
+  the command's `--once` are the same function, so `/text`'s owner is decided as that crate's.
+- Planned for step 2: the server serving its web directory without the `WEB` list in `http.rs`, and the page
+  reading its version and levels from `/api/status` instead of `@VERSION@` and `@LEVELS@` filled in by the
+  server.

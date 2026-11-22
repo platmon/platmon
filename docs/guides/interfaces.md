@@ -55,8 +55,13 @@ matching `/text`; `--view` is intended for the interactive UI.
 
 The device's `platmon` command is installed automatically by the package
 (`/usr/bin`), source-systemd installer (`/usr/local/bin`) or Docker
-start script (`~/.local/bin`). For a monitoring-only PC, install
-`frontends/cli.py` via [the CLI-only instructions](getting-started.md#view-a-running-device).
+start script (`~/.local/bin`, when the host has run `native/build.sh`). For a monitoring-only PC,
+install the `platmon-cli` package alone or the built binary via
+[the CLI-only instructions](getting-started.md#view-a-running-device). The command is one static native
+binary (`native/frontend/`); up to 1.10.0 it was a Python file. Compared with that file it ignores
+`http_proxy` and the other proxy variables (it connects to the device directly), resolves host names
+without the system's NSS modules (so mDNS `.local` names need an address instead), and reports a failure it
+does not explain, such as an invalid port, in one line where Python printed a traceback.
 
 ## Web dashboard
 
@@ -134,7 +139,7 @@ curl -s http://<device>:9797/text
 
 On systems with `watch`, `watch -n1 curl -s http://<device>:9797/text`
 provides a repeating plain-text view. `/text` is useful without installing
-the Python terminal client.
+the terminal client.
 
 | Path | Purpose |
 | --- | --- |

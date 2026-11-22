@@ -95,8 +95,9 @@ reads a changed answer.
 Collection (`src/collect/`) ← runtime (`src/runtime.rs`, `slow.rs`, `history.rs`, `replay.rs`) ← HTTP
 (`src/http.rs`) ← `frontends/` (clients of that API). Readers do not depend on the runtime; the runtime
 consumes collection records and metadata; the HTTP server consumes published snapshots, observations and
-history. `/text` is `shared/src/render.rs`, a port of `frontends/cli.py`'s `render`, so the two stay identical
-(`native/tools/equivalence/live_http.py` checks the sections). The web page is a client too, although the
+history. `/text` is `shared/src/render.rs`, the `platmon` command's `--once` screen (both use the shared
+crate; `native/tools/equivalence/live_http.py` checks the sections, and the runtime fixture's recorded answers
+the bytes). The web page is a client too, although the
 server serves its files.
 
 ## Frontends
@@ -105,19 +106,20 @@ server serves its files.
 `frontends/web/index.html` owns markup and server-injected version/threshold values; `styles.css` owns
 styling and `app.js` owns polling, navigation and rendering. No JavaScript build step is required.
 
-`frontends/cli.py` remains one standard-library Python file so `scripts/install-cli.sh` can install it
-on a client machine without the server; it imports nothing from the project. The server's `/text` is a
-port of its plain renderer. The CLI keeps a copy of `VERSION`, checked by `tests/frontends/test_cli.py`.
+The `platmon` command is `native/frontend/` (the `platmon-frontend` crate): a static binary that
+`platmon-cli` and `scripts/install-cli.sh` install on a client machine without the server. It depends on
+`native/shared/` only, never on the server's modules, and reads `VERSION` at build time. It replaced
+`frontends/cli.py` (a standard-library Python file, in the git history) after 1.10.0.
 
 `frontends/ui-spec.json` holds the design tokens both clients share: the views and their labels, the
 system fields, the status levels with their fallback thresholds, the bar scales, the connection states
 and the color roles. Each client
 adapts them to its medium: the web page as `styles.css` custom properties (light and dark), `app.js`
-levels and the `index.html` tabs; the terminal as ANSI codes and views built from a copy in `cli.py`
-(`UI_SPEC`), so it stays one file. There is no generation step: `tests/frontends/test_ui_spec.py`
+levels and the `index.html` tabs; the terminal as ANSI codes and views built from a copy in
+`native/frontend/src/bin/platmon/screen.rs` (`UI_SPEC`), as its build has only `native/`. There is no generation step: `tests/frontends/test_ui_spec.py`
 checks every adapter, the server's `[thresholds]` defaults in `src/config.rs` and the brand roles in
 `assets/brand/brand-colors.json` against the spec. It also feeds one snapshot to both clients and
-compares their Needs attention entries, and rejects a reading written without a space before its unit.
+compares their Needs attention entries (the terminal's through the binary's `--screen-script`), and rejects a reading written without a space before its unit.
 A design change starts in the spec.
 
 Clients request these routes from the same HTTP server. The requests below illustrate each client's
@@ -155,7 +157,7 @@ build context and default INI file back to that root.
 `packaging/debian/` contains package metadata, the package's unit and lifecycle hooks. `scripts/packaging/`
 contains the builder, extracted-package smoke check and disposable-container lifecycle and systemd service
 checks. The Debian package contains the static server built from `native/` (`native/build.sh`, one package
-per architecture), the web files of `frontends/web/` and the `platmon` command (`frontends/cli.py`). The
+per architecture), the web files of `frontends/web/`, and `platmon-cli` the `platmon` command built beside it. The
 source installation and the container install the same server and web files; `native/tools/` compares the
 server with the Python server's recorded answers. The source archive additionally includes `native/`,
 deployment files, build tools, tests and documentation.
