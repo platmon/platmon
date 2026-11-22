@@ -58,11 +58,38 @@ fn screen(stats: &str) -> String {
     render(&parse(stats).unwrap(), None).unwrap()
 }
 
+/// What the command writes to a pipe for text: UTF-8 on Unix; on Windows lines end in "\r\n" and, unless
+/// the ANSI code page is UTF-8, the bars are "#" and the text is in that code page (as cli.py wrote it).
+fn piped(text: &str) -> Vec<u8> {
+    #[cfg(unix)]
+    return text.as_bytes().to_vec();
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Globalization::{GetACP, WideCharToMultiByte, CP_ACP, WC_NO_BEST_FIT_CHARS};
+        let text = text.replace('\n', "\r\n");
+        // SAFETY: GetACP takes nothing and returns the ANSI code page.
+        if unsafe { GetACP() } == 65001 {
+            return text.into_bytes();
+        }
+        let wide: Vec<u16> = text.replace('\u{2588}', "#").encode_utf16().collect();
+        // SAFETY: lengths given explicitly; the second call writes at most n bytes into a buffer of n.
+        unsafe {
+            let n = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, wide.as_ptr(), wide.len() as i32, std::ptr::null_mut(), 0,
+                                        std::ptr::null(), std::ptr::null_mut());
+            let mut out = vec![0u8; n.max(0) as usize];
+            WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, wide.as_ptr(), wide.len() as i32, out.as_mut_ptr(), n,
+                                std::ptr::null(), std::ptr::null_mut());
+            out
+        }
+    }
+}
+
 #[test]
 fn once_prints_one_snapshot() {
     let r = platmon(&["--once", &serve(Some(FULL))]);
     assert!(r.status.success(), "{}", text(&r.stderr));
-    assert_eq!(text(&r.stdout), screen(FULL) + "\n"); // no screen clearing
+    assert_eq!(text(&r.stdout), text(&piped(&(screen(FULL) + "\n")))); // no screen clearing
+    assert_eq!(r.stdout, piped(&(screen(FULL) + "\n")));
 }
 
 /// A stdout that does not take UTF-8: the bars are "#". On Unix the rest stays UTF-8 (the locale only
@@ -93,13 +120,13 @@ fn pipe_gets_snapshots_without_escapes() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_platmon")).args([&serve(Some(FULL)), "0.05"]).stdout(Stdio::piped()).spawn().unwrap();
     let one = screen(FULL);
     let mut out = BufReader::new(child.stdout.take().unwrap());
-    let mut got = String::new();
+    let mut got = Vec::new();
     for _ in 0..2 * one.split('\n').count() + 1 {
-        out.read_line(&mut got).unwrap();
+        out.read_until(b'\n', &mut got).unwrap();
     }
     let _ = child.kill();
     let _ = child.wait();
-    assert_eq!(got.replace("\r\n", "\n"), format!("{one}\n\n{one}\n"));
+    assert_eq!(got, piped(&format!("{one}\n\n{one}\n")));
 }
 
 #[test]
