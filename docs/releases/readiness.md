@@ -4,8 +4,10 @@
 > - Release gates and evidence per version, newest first (1.10.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.10.0, Windows 11 supported with an installer, IPv6, a per-address connection limit, query strings
->   ignored on fixed paths and a Prometheus exporter: being prepared (2026-11-21). Its CI packages passed the
->   Orin's package smoke and live HTTP (2026-11-21); the rest of the evidence and what is open are in its gate.
+>   ignored on fixed paths and a Prometheus exporter: merged as #235 (2026-11-22), the tag waiting for the owner.
+>   Its CI packages passed the Orin's package smoke, live HTTP, the user unit's checks and a 24 h soak, and the
+>   desktop's installer upgrade, checks and 24 h soak (one growth reading accepted as the reading's timing,
+>   2026-11-22); armhf on a real device skipped until one is ready.
 > - 1.9.0, the experimental Windows service's failures, shutdown and memory and two fixes on every platform:
 >   published 2026-11-18 and in the APT repository. Its Windows service passed `windows_check.py checks` and an
 >   accelerated soak on the test laptop; the release workflow ran the Linux checks. The Windows 24 h soak and
@@ -58,9 +60,23 @@ Verified for this release so far:
 | the Windows promotion evidence (#228; remaining-work.md) | the desktop's checks 9/9, `hub_check.py`, S3, hibernation, Windows restarts, 24 h soak PASS (1.9.0's server) |
 | on the Jetson Orin Nano (L4T R36.5.2, Ubuntu 22.04.5, Python 3.10), in a temporary directory beside the production 1.8.2 service, 2026-11-21 15:30 KST | the CI packages of `b7466cc` (checksums matched): `check_package.py` on `platmon_1.10.0-1_arm64.deb` and platmon-cli: smoke passed (server, CLI, API, web and SVG); the deb's aarch64 server (`9a245c44896afc39`, the same as CI's artifact): `live_http.py` no differences, the connection limit (8 from one address, another answered, 32 in all, then refused), `/api/stats?x=1` 200, 320 of 320 concurrent answers verified, a burst of 200: threads 5 → 13 → 5; the production service untouched (active, `NRestarts=0`) |
 
-Not verified, and therefore open: a 24 h soak of this release's server on Linux or Windows (the last ones ran
-1.8.1 on the Orin and 1.9.0 on the desktop), the release's own zip and installer on a real PC (CI ran them on
-its runner), armhf on a real device. The tag waits for the owner.
+| the Orin, the deb's aarch64 server as a user unit (`install_user.sh`), beside the production 1.8.2 service, 2026-11-21/22 | `deploy_check.py checks` 9 of 9 (ready, start, restart, crash, failed start, stop while collecting, stop during replay, stop with the `nvidia-smi` probe, end); `soak --hours 24` PASS: no restart, 107,982 requests without an error, a lost record or a problem, settled PSS 10.7 to 11.4 MiB (growth 36 and 48 KiB per round against 64), 5 threads and 4 descriptors throughout, CPU 0.7 to 0.9 %, collection steps at most 1.001 s; the production service untouched |
+| the desktop (Core i5-13600KF, Windows 11 25H2), the CI packages of `b7466cc` (the code of `main` at `4764c32`: the two differ in this file only), 2026-11-21 | the installer upgraded the MSI 1.9.0 service to 1.10.0 (exit 0): running and automatic, recovery 5/5/60 s and the failure flag, event source, the machine PATH and an edited `platmon.ini` kept, `platmon-server 1.10.0` answering; `platmon --once` through the machine PATH; the zip's `start.cmd` (a copy on port 9799) served; the 1.9.0 package over it refused (1603), 1.10.0 still running |
+| the desktop, the zip's server (`38b7f1be697d11b7`) as the candidate service, 2026-11-21/22 | `windows_check.py checks --previous` 1.9.0: 9 of 9; `soak --hours 24`: no restart, 108,030 requests without an error, a lost record or a problem, 9 to 10 threads and 167 to 169 handles, CPU 1.3 to 1.8 %, collection steps at most 1.011 s; the report's one failure, hours 12 to 23 growing 75 KiB per round against 64, accepted by the owner (2026-11-22) as the reading's timing, below |
+
+The Windows soak's failure: the settled private bytes are read right after the tool's own `/api/status`,
+`/api/observations` and `/api/history` requests, and hour 23's reading (27,212 KiB, 1.3 MiB above the hours
+before) alone made the slope (13 to 22 alone: 11 KiB per round). The same counter read just before those
+requests, recorded beside it, stayed at 21.1 to 22.6 MiB in both segments (slope -59 and -12 KiB per round).
+Reproduced on the desktop with the same server as a plain process, its history full (58 series, a 358 KB
+answer): 40 readings around `/api/status` alone moved by a median of 16 KiB; around the settled reading's three
+requests, 2.1 to 3.6 MiB higher just after (median 3.0) and back before the next; `/api/status` alone again,
+the before readings as at first. The hour-23 reading is that transient; the memory the server keeps did not
+grow. (A Hyper-V adapter appearing at 13:55 on 2026-11-22 added 6 history series in hour 22; within the 64
+series and 3,602 points a series that `/api/history` holds.)
+
+Skipped by the owner (2026-11-21) until a device is ready: armhf on a real device (the package is checked under
+QEMU in CI only). The tag waits for the owner.
 
 ## 1.9.0 release gate (2026-11-18)
 

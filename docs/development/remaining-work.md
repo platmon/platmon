@@ -52,7 +52,9 @@ Published 2026-11-18, in the APT repository.
 
 1.10.0 (owner, 2026-11-21) releases what `main` gained after 1.9.0: Windows 11 supported with the installer,
 and the HTTP issues #196 to #199; its gate is in
-[release readiness](../releases/readiness.md#1100-release-gate-2026-11-21). The tag waits for the owner.
+[release readiness](../releases/readiness.md#1100-release-gate-2026-11-21). Merged as #235 (2026-11-22); its
+24 h soaks on the Orin and the desktop and the installer on the desktop are done, armhf on a real device is
+skipped until one is ready. The tag waits for the owner.
 
 ## Windows build (2026-10-26)
 
