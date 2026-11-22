@@ -13,8 +13,9 @@
 >   further device unless asked, an unsigned MSI, the switch in the next release): Windows 11 x86_64 is
 >   supported from the release after 1.9.0; the evidence is [below](#windows-promotion-to-a-supported-platform-proposed-2026-11-16).
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
-> - Also recorded, not started: a desktop tray frontend and a separate network process (deferred; no
->   Unix socket).
+> - Decided, not started (2026-11-22): the frontends in one package `platmon-frontend`, the `platmon` command
+>   in Rust, then a tray on Linux and Windows; macOS planned ([below](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22)).
+> - Also recorded, not started: a separate network process (deferred; no Unix socket).
 
 Merging, production rollout and releases always wait for the owner's approval. The staged plan of
 2026-10-09 to 2026-10-11 (Disk I/O → UI → storage → PSI → Wi-Fi → probe → history → release readiness)
@@ -334,25 +335,85 @@ the API without the page, this host only), on Linux and Windows alike; they are 
 | A Unix socket for local clients | Not added | Loopback TCP (`bind = 127.0.0.1`) already keeps the API on the host, with the same code on Windows; a socket would add a second transport per OS (AF_UNIX or named pipes) for file-permission access control the read-only API does not need. Revisit if per-user access is required |
 | A separate network process (a gateway on 9797 relaying a loopback core API, with the page) | Deferred | It would isolate a network-side failure from collection and keep `/proc` and `/sys` out of the process that accepts connections; it costs a second process and unit, two port settings, and a relay for `/api/replay`'s large answers. Today the server builds with `panic = "abort"`, so a panic while answering a request would end collection too; none is known. Measure its memory and latency against [budget.md](../performance/budget.md) before starting |
 
-## Planned: desktop tray (2026-10-18)
+## Decided: the frontend package, the CLI in Rust and the tray (2026-11-22)
 
-Not started. Recorded so the shape agreed with the owner does not have to be rediscovered; starting it is
-the owner's decision.
+Not started. Decided with the owner on 2026-11-22, replacing the tray plan of 2026-10-18; each step is its
+own change and release, and starting each is the owner's decision.
 
-A tray icon on a Linux desktop showing the state of this host's platmon service. It is one more frontend,
-like `frontends/cli.py`: a separate process that reads the local service's HTTP API, never part of the
-service itself.
+**The goal:** the core, `platmon`, collects and serves the API and nothing else; everything that shows the
+data (the web page, the `platmon` command, the tray) is a frontend, in one package beside it.
+
+### Packages
+
+| Package | Contents | Depends |
+| --- | --- | --- |
+| `platmon` (core) | the server, its service and `platmon.ini` | systemd; `Recommends: platmon-frontend` |
+| `platmon-frontend` | the web page (`/usr/share/platmon`), the `platmon` command, the tray | nothing once the command is in Rust |
+
+- `platmon-cli` is renamed `platmon-frontend` and takes the web page from `platmon`. platmon has no users
+  outside the maintainer's devices yet (#181), so there is no transitional package: `platmon-frontend` only
+  carries `Breaks`/`Replaces: platmon-cli` and `Replaces: platmon (<< that release)` (`Obsoletes`/`Provides` in
+  the `.rpm`), enough for the maintainer's devices to upgrade.
+- With `web = yes` and no page installed (`--no-install-recommends`), the server answers `/` with a 404 that
+  names `platmon-frontend`; today `native/src/http.rs` fails reading `index.html`.
+- Windows: unchanged, one MSI and one zip with everything. Docker: unchanged, built from the source.
+- A core-only host is still read by platmon-hub, a `platmon` command elsewhere, the Prometheus exporter
+  and `curl`: the API is the core's.
+- Considered and not chosen: three packages (`platmon`, `platmon-web`, `platmon-cli`). Its one advantage,
+  the web page without Python, goes away once the command is in Rust; JetPack 5 (Python 3.8) is not a
+  supported target ([ADR 0001](adr/0001-ubuntu-lts-python-support.md)) either way.
+
+### The `platmon` command in Rust
+
+`frontends/cli.py` (1446 lines) becomes a second binary of `native/`, sharing `json.rs` and `render.rs`
+(`render.rs` is already its `--once` screen, for `/text`); not part of `platmon-server`.
+
+- Its options, exit codes and messages are under the versioning contract and stay as they are.
+- During the port `cli.py` is the reference: the same snapshots give the same `--once` output and screens.
+  Then `test_cli.py` moves to Rust tests, `test_cli_screen.py` runs the binary, and `runtime_fixture.py`
+  compares `/text` with recorded answers instead of `cli.py` ([ADR 0002](adr/0002-api-contract-not-python-answers.md)).
+- New code: a minimal HTTP/1.0 GET client on `TcpStream`, the live view (termios through `libc`, the
+  console through `windows-sys`), `attention()`, `ui-spec.json` through `include_str!`. No new crate.
+- Windows: the MSI and the zip ship `platmon.exe` instead of `cli.py` and `platmon.cmd`; no Python needed.
+- Terminal code is written for `cfg(unix)`, not Linux only, for macOS below.
+
+### Tray
 
 | Decision | Choice | Why |
 | --- | --- | --- |
-| Process | Separate, started in the user's desktop session (`/etc/xdg/autostart/`) | The service runs with `DynamicUser=yes` and has no access to the session bus a tray registers on |
-| Source | This repository, `frontends/tray` | It reads the same `/api/status` and `/api/observations` the CLI reads and changes with them |
-| Package | A second binary package `platmon-tray` (`Depends: platmon`) built from the same source | Headless boards keep installing `platmon` alone: no desktop files, no extra dependencies, no change to the measured budget |
-| Protocol | StatusNotifierItem plus `com.canonical.dbusmenu` over D-Bus; no XEmbed | XEmbed trays do not work on Wayland |
-| D-Bus library | jeepney (MIT, pure Python) or a standard-library implementation | GTK, libappindicator / Ayatana, pystray and Qt are LGPL or GPL |
-| Scope | Read-only: a state icon, a few key readings, "open the web view" | The HTTP frontend is read-only GET; the tray does not control the service |
-| Poll rate | Low (5–10 s), measured against [budget.md](../performance/budget.md) before release | Every client request is CPU on the host being monitored |
+| Shows | A state icon (ok, warning, critical, not reachable), a tooltip, a click opens the web page | The web page's attention list in one icon; no menu (dbusmenu is most of the D-Bus work) |
+| State | Not reachable when the service does not answer or is `stale`/`starting`; critical or warning from `attention()`, warning also when `degraded` | The same levels as the web page and the command |
+| Tooltip | When ok `CPU 23% · RAM 41% · 52°C`; otherwise up to three attention entries, critical first | Fits Windows's 128 characters |
+| Language | Rust, a third binary of `native/` sharing the command's code | No Python on Windows; a few MiB resident instead of about 18–20 MiB (Python measured, Rust not yet) |
+| Linux | StatusNotifierItem over D-Bus written on `UnixStream`, `IconName` (theme icons), exits quietly without a `StatusNotifierWatcher` | No D-Bus crate or jeepney; GTK, libappindicator, pystray and Qt are LGPL or GPL |
+| Windows | `Shell_NotifyIcon` through `windows-sys`, the system's stock icons | Only two more `windows-sys` features |
+| Start | Linux: off, `platmon-tray --autostart` writes `~/.config/autostart`; Windows: on, the MSI's `Registry` table under HKLM `Run` | `platmon-frontend` is recommended by `platmon`, so Jetson's and Pi OS's desktops would start it unasked; the MSI has no dialogs and no custom actions |
+| Poll rate | `/api/status` and `/api/stats` every 10 s, `/api/observations` every 60 s | About 0.03 percentage points of a core on the server (0.6–1.5 ms per request); measured on the Orin's desktop before release |
+| Scope | Read-only, this host | The HTTP frontend is read-only GET; several hosts belong with platmon-hub |
 
 Desktop support: KDE, XFCE and Cinnamon show StatusNotifierItem icons as installed; Ubuntu's GNOME ships the
-AppIndicator extension; plain GNOME (Debian) needs the user to install that extension. A tray showing several
-hosts would read `platmon-hub` instead and belongs with Hub or in its own repository, not here.
+AppIndicator extension; plain GNOME (Debian) needs the user to install that extension. Whether a click
+without a menu reaches `Activate` under GNOME's extension is unchecked. Checked before release: KDE, Ubuntu
+or Jetson GNOME, the Windows laptop and desktop.
+
+### Order
+
+1. The command in Rust, still as `platmon-cli`.
+2. The packages: `platmon-frontend` and the 404 for a missing page.
+3. The tray.
+
+### macOS: planned
+
+The Rust command only, as a release file (`platmon-cli-VERSION-macos.tar.gz`, a universal binary built on
+a macOS runner; Linux cannot cross-build it), experimental until checked on a real Mac. Unsigned unless
+the owner decides otherwise (Gatekeeper asks users to allow it; a Homebrew tap building from source would
+not). No tray (the menu bar needs the Objective-C runtime) and no server on macOS.
+
+### One repository
+
+The frontends stay in this repository; the boundary is the package. The core is tied to them: the web
+files it serves are listed in `http.rs` (`WEB`), it fills `@VERSION@` and `@LEVELS@` into `index.html`,
+`/text` is the command's `render()`, the equivalence and packaging tools read `frontends/`, and the MSI
+holds both. Revisit when the frontends get their own contributors or release cadence, after: the core
+serving its web directory without a list and the page reading its version and levels from `/api/status`,
+`/text`'s owner decided, a compatibility table and CI pairing as with platmon-hub, and where the MSI is built.
