@@ -4,7 +4,7 @@
 > - Release gates and evidence per version, newest first (1.10.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.10.0, Windows 11 supported with an installer, IPv6, a per-address connection limit, query strings
->   ignored on fixed paths and a Prometheus exporter: merged as #235 (2026-11-22), the tag waiting for the owner.
+>   ignored on fixed paths and a Prometheus exporter: published 2026-11-22 and in the APT repository.
 >   Its CI packages passed the Orin's package smoke, live HTTP, the user unit's checks and a 24 h soak, and the
 >   desktop's installer upgrade, checks and 24 h soak (one growth reading accepted as the reading's timing,
 >   2026-11-22); armhf on a real device skipped until one is ready.
@@ -61,7 +61,7 @@ Verified for this release so far:
 | on the Jetson Orin Nano (L4T R36.5.2, Ubuntu 22.04.5, Python 3.10), in a temporary directory beside the production 1.8.2 service, 2026-11-21 15:30 KST | the CI packages of `b7466cc` (checksums matched): `check_package.py` on `platmon_1.10.0-1_arm64.deb` and platmon-cli: smoke passed (server, CLI, API, web and SVG); the deb's aarch64 server (`9a245c44896afc39`, the same as CI's artifact): `live_http.py` no differences, the connection limit (8 from one address, another answered, 32 in all, then refused), `/api/stats?x=1` 200, 320 of 320 concurrent answers verified, a burst of 200: threads 5 → 13 → 5; the production service untouched (active, `NRestarts=0`) |
 
 | the Orin, the deb's aarch64 server as a user unit (`install_user.sh`), beside the production 1.8.2 service, 2026-11-21/22 | `deploy_check.py checks` 9 of 9 (ready, start, restart, crash, failed start, stop while collecting, stop during replay, stop with the `nvidia-smi` probe, end); `soak --hours 24` PASS: no restart, 107,982 requests without an error, a lost record or a problem, settled PSS 10.7 to 11.4 MiB (growth 36 and 48 KiB per round against 64), 5 threads and 4 descriptors throughout, CPU 0.7 to 0.9 %, collection steps at most 1.001 s; the production service untouched |
-| the desktop (Core i5-13600KF, Windows 11 25H2), the CI packages of `b7466cc` (the code of `main` at `4764c32`: the two differ in this file only), 2026-11-21 | the installer upgraded the MSI 1.9.0 service to 1.10.0 (exit 0): running and automatic, recovery 5/5/60 s and the failure flag, event source, the machine PATH and an edited `platmon.ini` kept, `platmon-server 1.10.0` answering; `platmon --once` through the machine PATH; the zip's `start.cmd` (a copy on port 9799) served; the 1.9.0 package over it refused (1603), 1.10.0 still running |
+| the desktop (Core i5-13600KF, Windows 11 25H2), the CI packages of `b7466cc` (the code of the tag's `73ab4ef`: the two differ in documentation only), 2026-11-21 | the installer upgraded the MSI 1.9.0 service to 1.10.0 (exit 0): running and automatic, recovery 5/5/60 s and the failure flag, event source, the machine PATH and an edited `platmon.ini` kept, `platmon-server 1.10.0` answering; `platmon --once` through the machine PATH; the zip's `start.cmd` (a copy on port 9799) served; the 1.9.0 package over it refused (1603), 1.10.0 still running |
 | the desktop, the zip's server (`38b7f1be697d11b7`) as the candidate service, 2026-11-21/22 | `windows_check.py checks --previous` 1.9.0: 9 of 9; `soak --hours 24`: no restart, 108,030 requests without an error, a lost record or a problem, 9 to 10 threads and 167 to 169 handles, CPU 1.3 to 1.8 %, collection steps at most 1.011 s; the report's one failure, hours 12 to 23 growing 75 KiB per round against 64, accepted by the owner (2026-11-22) as the reading's timing, below |
 
 The Windows soak's failure: the settled private bytes are read right after the tool's own `/api/status`,
@@ -75,8 +75,17 @@ the before readings as at first. The hour-23 reading is that transient; the memo
 grow. (A Hyper-V adapter appearing at 13:55 on 2026-11-22 added 6 history series in hour 22; within the 64
 series and 3,602 points a series that `/api/history` holds.)
 
+The release (2026-11-22, the owner's go-ahead the same day):
+
+| check | result |
+| --- | --- |
+| CI on #237's head `55a1cc9` and `main` at `73ab4ef` (the same tree) | all passed |
+| the published release: release run 45000482383 from the tag `v1.10.0` (`73ab4ef`), 12 files; `SHA256SUMS` of the downloaded draft; `gh attestation verify` (the release workflow, `refs/tags/v1.10.0`) of the 10 package files; the notes; the assets' digests just before publishing and after | all jobs passed at the first attempt; `sha256sum -c` OK; attestations verified; the CHANGELOG section; the published files the verified ones |
+| the released servers against the ones checked above | aarch64 `9a245c44896afc39`, the Orin's: the same bytes; the zip's `platmon-server.exe` (`ac0bb1ac61b97eef`, `platmon-server 1.10.0`) differs from the desktop's `38b7f1be697d11b7` in 28 bytes, the link time in the PE header and its debug directory and the PDB's identifier, which MSVC's linker writes anew for each build: the same code. The installer differs with the server it holds |
+| the APT repository (platmon.github.io run 45001411621, approved by the owner), read with a private apt state under WSL Ubuntu 24.04 (nothing installed) and the guide's source stanza | the key's fingerprint as documented; `platmon` and `platmon-cli` candidates 1.10.0-1 (amd64), 1.9.0-1 and older still listed; both `.deb` files `apt-get download`ed byte for byte the released ones |
+
 Skipped by the owner (2026-11-21) until a device is ready: armhf on a real device (the package is checked under
-QEMU in CI only). The tag waits for the owner.
+QEMU in CI only). Not verified: an `apt install` or upgrade of 1.10.0 on a host.
 
 ## 1.9.0 release gate (2026-11-18)
 

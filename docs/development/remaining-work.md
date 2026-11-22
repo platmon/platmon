@@ -1,7 +1,7 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-11-21 (1.9.0 released, 1.10.0 being prepared); the evidence for
+> - What is still open, checked against the repository on 2026-11-22 (1.10.0 released); the evidence for
 >   each release is in [release readiness](../releases/readiness.md).
 > - 1.8.0 (owner, 2026-11-03 and 2026-11-12), released 2026-11-12: the experimental Windows zip together with
 >   `.rpm` release files and battery follow-ups; 1.8.1, the frontends' design on its server, released
@@ -54,7 +54,7 @@ Published 2026-11-18, in the APT repository.
 and the HTTP issues #196 to #199; its gate is in
 [release readiness](../releases/readiness.md#1100-release-gate-2026-11-21). Merged as #235 (2026-11-22); its
 24 h soaks on the Orin and the desktop and the installer on the desktop are done, armhf on a real device is
-skipped until one is ready. The tag waits for the owner.
+skipped until one is ready. Published 2026-11-22, in the APT repository.
 
 ## Windows build (2026-10-26)
 
