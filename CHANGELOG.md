@@ -4,9 +4,13 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION` (the standalone CLI keeps a checked copy); Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.10.0 — 2026-11-21
 
-Draft for the next release; the version and date replace this heading when it is tagged.
+Windows 11 supported, with an installer; three changes to the HTTP server on every platform; a Prometheus
+exporter beside it (`scripts/prometheus_exporter.py`). The HTTP API's schema versions and the `platmon.ini`
+keys and defaults are unchanged from 1.9.0; `[http] bind` now also takes an IPv6 address, a query string on
+a path without parameters is ignored instead of answering 404, and one client address may hold at most 8 of
+the 32 connections.
 
 - **Windows is supported** on Windows 11 x86_64, after the promotion plan's checks on a laptop and a desktop
   (failures and recovery, the deployment checks and an upgrade, a 24 h soak, `hub_check.py`, Windows restarts,
