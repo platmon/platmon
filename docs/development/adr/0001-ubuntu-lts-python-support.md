@@ -9,6 +9,12 @@
 - Status: Accepted; CI evidence and official support are separate
 - Scope: platmon service, web viewer, terminal client and distribution artifacts
 
+> **Note (2026-11-22):** the runtime no longer contains Python. The server became a native binary in 1.4.0
+> (the Python service was removed after 1.6.0), and after 1.10.0 the `platmon` command, `platmon-cli`, is a
+> native binary per architecture too, without the `python3 (>= 3.9)` dependency. The Python versions below
+> now concern the repository's tools and tests (`pytest`, the packaging scripts), which CI still runs on 3.8
+> to 3.14. The decision stands as recorded.
+
 ## Context
 
 platmon uses the Python standard library and reads Linux and vendor-specific device interfaces.

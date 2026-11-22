@@ -1,6 +1,6 @@
 """The Windows build's smoke test (CI, native-windows).
 
-  windows_smoke.py BINARY
+  windows_smoke.py BINARY   (platmon-server.exe; the platmon command, platmon.exe, beside it)
 
 - build-info: the system allocator's mark; the imports: no Visual C++ runtime DLL (the C runtime linked
   statically, so the zip needs no Redistributable);
@@ -15,7 +15,8 @@
 - serve on a free local port: /api/status ready with the clock {"source": "boottime"}, /api/stats 200 with a
   snapshot, and /api/observations with the probe connecting to the server itself, the storage group
   listing the system volume, the Wi-Fi group (unavailable without a WLAN service) and the battery group
-  with the AC line, then stopped by its own handle;
+  with the AC line, then stopped by its own handle; meanwhile the platmon command (platmon.exe, also without
+  a Visual C++ runtime DLL) prints its version and --once reads that server;
 - service: outside the service control manager it exits 2; as a service (sc.exe create, start) it serves
   /api/status ready; with the guide's recovery actions (sc.exe failure) a crash (the process killed)
   restarts it, ready as a new instance; sc.exe stop leaves it stopped with exit code 0 and the port free;
@@ -46,7 +47,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from scripts.packaging.package import version  # noqa: E402
-from scripts.packaging.package_windows import CRT_DLL, imported_dlls, members  # noqa: E402
+from scripts.packaging.package_windows import CRT_DLL, command_beside, imported_dlls, members  # noqa: E402
 from scripts.packaging.package_msi import build_msi, tables  # noqa: E402
 
 TIMEOUT = 30
@@ -204,6 +205,15 @@ def main(binary):
         check("serve /api/observations wifi", wifi.get("state") in ("ok", "unavailable") and wireless.get("provider") == "wlanapi"
               and all((i.get("connected") is True) or i.get("signal_dbm") is None for i in wireless.get("interfaces", [])),
               json.dumps(wifi))
+        command = str(command_beside(binary))
+        dlls = imported_dlls(Path(command).read_bytes()) or []
+        check("platmon.exe: static C runtime", dlls and not any(CRT_DLL.match(d) for d in dlls), json.dumps(dlls))
+        r = run(command, ["--version"])
+        check("platmon.exe --version", r.returncode == 0 and r.stdout.strip() == "platmon " + version(ROOT), repr(r))
+        # piped, it writes the ANSI code page, not UTF-8
+        r = subprocess.run([command, f"127.0.0.1:{port}", "--once"], capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=TIMEOUT)
+        check("platmon.exe --once", r.returncode == 0 and "CPU" in r.stdout, repr(r))
     finally:
         server.kill()
         output = server.communicate(timeout=TIMEOUT)[0]
@@ -303,7 +313,7 @@ def zip_scripts(binary, check, sc):
         print(f"skip  the zip's scripts: port {port}, a platmon service or {dest} is already there")
         return
     folder = Path(tempfile.mkdtemp(prefix="platmon-zip-"))
-    for name, body in members(ROOT, Path(binary).read_bytes(), version(ROOT)):
+    for name, body in members(ROOT, Path(binary).read_bytes(), command_beside(binary).read_bytes(), version(ROOT)):
         (folder / name).parent.mkdir(parents=True, exist_ok=True)
         (folder / name).write_bytes(body)
 
@@ -334,8 +344,8 @@ def zip_scripts(binary, check, sc):
         check("install-service.cmd", r.returncode == 0 and "AUTO_START" in config
               and f'"{dest}\\platmon-server.exe" service "{dest}\\platmon.ini" --web "{dest}\\web"' in config
               and bool(status) and status.get("ready") is True
-              and all((dest / n).is_file() for n in ("platmon-server.exe", "platmon.ini", "web/index.html",
-                                                       "uninstall-service.cmd")),
+              and all((dest / n).is_file() for n in ("platmon-server.exe", "platmon.exe", "platmon.ini",
+                                                       "web/index.html", "uninstall-service.cmd")),
               r.stdout + config + json.dumps(status))
         with open(dest / "platmon.ini", "a") as f:
             f.write("; edited\n")
@@ -367,10 +377,10 @@ def msi_installer(binary, check, sc):
     release = version(ROOT)
     major, minor, patch = release.split(".")
     newer = f"{major}.{minor}.{int(patch) + 1}"
-    server = Path(binary).read_bytes()
+    server, command = Path(binary).read_bytes(), command_beside(binary).read_bytes()
     folder = Path(tempfile.mkdtemp(prefix="platmon-msi-"))
     packages = {r: folder / f"platmon-{r}.msi" for r in (release, newer)}
-    codes = {r: dict(tables(members(ROOT, server, r), r)["Property"])["ProductCode"] for r in packages}
+    codes = {r: dict(tables(members(ROOT, server, command, r), r)["Property"])["ProductCode"] for r in packages}
     key = r"SYSTEM\CurrentControlSet\Services\EventLog\Application\platmon"
 
     def msiexec(*args):
@@ -390,7 +400,7 @@ def msi_installer(binary, check, sc):
 
     try:
         for r, path in packages.items():
-            build_msi(path, members(ROOT, server, r), r, "0" * 64)
+            build_msi(path, members(ROOT, server, command, r), r, "0" * 64)
         code = msiexec("/i", str(packages[release]))
         config, failure = sc("qc", "platmon").stdout, sc("qfailure", "platmon").stdout
         status = ready(port)
@@ -400,7 +410,7 @@ def msi_installer(binary, check, sc):
               and re.findall(r"Delay = (\d+)", failure) == ["5000", "5000", "60000"]
               and "TRUE" in sc("qfailureflag", "platmon").stdout
               and event_source() == (r"%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll", winreg.REG_EXPAND_SZ)
-              and on_path() and (dest / "platmon.cmd").is_file() and (dest / "cli.py").is_file()
+              and on_path() and (dest / "platmon.exe").is_file() and not (dest / "cli.py").exists()
               and not (dest / "install-service.cmd").exists(), f"exit {code}\n" + config + failure + json.dumps(status))
         with open(dest / "platmon.ini", "a") as f:
             f.write("; edited\n")

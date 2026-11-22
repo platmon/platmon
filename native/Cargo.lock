@@ -43,13 +43,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "platmon-frontend"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "platmon-shared",
+ "windows-sys",
+]
+
+[[package]]
 name = "platmon-server"
 version = "0.0.0"
 dependencies = [
  "libc",
  "mimalloc",
+ "platmon-shared",
  "windows-sys",
 ]
+
+[[package]]
+name = "platmon-shared"
+version = "0.0.0"
 
 [[package]]
 name = "shlex"

@@ -1,0 +1,18 @@
+[package]
+name = "platmon-frontend"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "The platmon command (native/README.md); not part of platmon-server"
+
+[dependencies]
+platmon-shared = { path = "../shared" }
+
+[target.'cfg(unix)'.dependencies]
+# the terminal (termios, the window size, signals); see ../Cargo.toml for the crate
+libc = "=0.2.172"
+
+[target.'cfg(windows)'.dependencies]
+# the console's code page and Ctrl+C handler; see ../Cargo.toml for the crate
+windows-sys = { version = "=0.61.2", features = ["Win32_Globalization", "Win32_System_Console"] }

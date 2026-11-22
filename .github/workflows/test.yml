@@ -22,9 +22,9 @@ jobs:
       - run: python -m pip install -r tests/requirements.txt
       - run: pytest -v
 
-  # The server: Rust tests and both static targets (native/build.sh), then the Python service's recorded
-  # answers (native/tools/equivalence/golden) on fake trees, configurations and the runtime, a live HTTP check, and
-  # the Rust platmon command against frontends/cli.py.
+  # The server and the platmon command: Rust tests and both static targets (native/build.sh), then the Python
+  # service's recorded answers (native/tools/equivalence/golden) on fake trees, configurations and the runtime, a
+  # live HTTP check, and the command's live screens (tests/frontends, through its --screen-script).
   native:
     runs-on: ubuntu-latest
     steps:
@@ -45,7 +45,11 @@ jobs:
           python3 native/tools/equivalence/runtime_fixture.py "$SERVER"
           native/tools/equivalence/fixture.sh
           python3 native/tools/equivalence/live_http.py "$SERVER"
-          python3 native/tools/equivalence/cli_fixture.py native/target/x86_64-unknown-linux-musl/release/platmon
+      # the tests that run the binary (skipped in the test job, which has none)
+      - name: Check the platmon command's screens
+        run: |
+          python3 -m pip install -r tests/requirements.txt
+          python3 -m pytest tests/frontends/test_cli_screen.py tests/frontends/test_ui_spec.py
       # The released fleet server, pinned by hash, reads this server's answers (native/README.md)
       - name: Check the fleet server's contract (platmon-hub from PyPI)
         env:
@@ -54,13 +58,16 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/hub"
           "$RUNNER_TEMP/hub/bin/pip" install --quiet --require-hashes -r native/tools/equivalence/hub-requirements.txt
           "$RUNNER_TEMP/hub/bin/python" -I native/tools/equivalence/hub_contract.py "$SERVER"
+      # the servers and the platmon commands beside them (platmon-cli's)
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server
-          path: native/target/*-unknown-linux-musl*/release/platmon-server
+          path: |
+            native/target/*-unknown-linux-musl*/release/platmon-server
+            native/target/*-unknown-linux-musl*/release/platmon
           if-no-files-found: error
 
-  # Windows: the server builds with the MSVC toolchain, the C runtime linked statically (no Visual C++
+  # Windows: the server and the platmon command build with the MSVC toolchain, the C runtime linked statically (no Visual C++
   # Redistributable to install), and its tests pass; the smoke test (tools/windows_smoke.py) runs collect, serve
   # with its observations, the server as a Windows service, and the zip's scripts, on the runner.
   native-windows:
@@ -81,15 +88,17 @@ jobs:
         run: cargo build --release --locked --no-default-features
       - name: Smoke test
         run: python tools/windows_smoke.py target/release/platmon-server.exe
-      # The installer of this binary, with Windows Installer itself (scripts/packaging/package_msi.py); the smoke
+      # The installer of these binaries (platmon.exe beside the server), with Windows Installer itself (scripts/packaging/package_msi.py); the smoke
       # test installed, upgraded and removed packages built the same way.
       - name: Installer
         run: python ../scripts/packaging/package_msi.py --binary target/release/platmon-server.exe --output target/msi
-      # The zip packages this binary (scripts/packaging/package_windows.py), the installer beside it.
+      # The zip packages these binaries (scripts/packaging/package_windows.py), the installer beside it.
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server-windows
-          path: native/target/release/platmon-server.exe
+          path: |
+            native/target/release/platmon-server.exe
+            native/target/release/platmon.exe
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
@@ -168,13 +177,12 @@ jobs:
             --mount "type=bind,src=$PWD,dst=/checkout,readonly" \
             platmon-package-test:local sh -ec '
               python3 --version
-              python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/*_${{ matrix.arch }}.deb
+              python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/platmon_*_${{ matrix.arch }}.deb
             '
-      # Ubuntu 20.04 is an observation target, outside official native support.
-      # The package requires Python >= 3.9; never force dependencies.
+      # Ubuntu 20.04 is an observation target, outside official native support; never force dependencies.
       - name: Check package lifecycle
         if: matrix.ubuntu != '20.04'
-        run: python3 scripts/packaging/check_package_install.py dist/first/*_${{ matrix.arch }}.deb dist/second/*_${{ matrix.arch }}.deb --image platmon-package-test:local
+        run: python3 scripts/packaging/check_package_install.py dist/first/platmon_*_${{ matrix.arch }}.deb dist/second/platmon_*_${{ matrix.arch }}.deb --image platmon-package-test:local
       # The last release with the Python server: the package users upgrade from.
       - name: Fetch the previous release
         if: matrix.ubuntu != '20.04'
@@ -186,7 +194,7 @@ jobs:
           (cd previous && grep ' platmon_1.3.0-1_all.deb$' SHA256SUMS | sha256sum -c)
       - name: Check the service under systemd (upgrade, failed start, recovery, boot)
         if: matrix.ubuntu != '20.04'
-        run: python3 scripts/packaging/check_package_service.py previous/platmon_1.3.0-1_all.deb dist/second/*_${{ matrix.arch }}.deb --image platmon-package-test:local
+        run: python3 scripts/packaging/check_package_service.py previous/platmon_1.3.0-1_all.deb dist/second/platmon_*_${{ matrix.arch }}.deb --image platmon-package-test:local
 
   # armhf has no GitHub runner (the arm64 ones are AArch64 only): its package in a 32-bit ARM userspace
   # under QEMU, on Debian 13 (Raspberry Pi OS's base) and Ubuntu 24.04: the smoke check and the dpkg
@@ -222,10 +230,10 @@ jobs:
             platmon-package-test:local sh -ec '
               python3 --version
               dpkg --print-architecture
-              python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/*_armhf.deb
+              python3 /checkout/scripts/packaging/check_package.py /checkout/dist/first/platmon_*_armhf.deb
             '
       - name: Check package lifecycle
-        run: python3 scripts/packaging/check_package_install.py dist/first/*_armhf.deb dist/second/*_armhf.deb --image platmon-package-test:local
+        run: python3 scripts/packaging/check_package_install.py dist/first/platmon_*_armhf.deb dist/second/platmon_*_armhf.deb --image platmon-package-test:local
 
   # The .rpm packages (scripts/packaging/package_rpm.py), from the same server builds, with Ubuntu's rpmbuild:
   # their tests, two releases for the upgrade and rpmlint in a Fedora container.
@@ -269,7 +277,7 @@ jobs:
           if-no-files-found: error
 
   # Each architecture's .rpm on a runner of that architecture, under a booted systemd in Fedora, in
-  # Enterprise Linux 9 (the oldest Python the CLI takes, 3.9) and in CentOS Stream 10 (Enterprise Linux 10).
+  # Enterprise Linux 9 and in CentOS Stream 10 (Enterprise Linux 10).
   rpm-userspace:
     needs: rpm
     strategy:
@@ -315,4 +323,4 @@ jobs:
           path: rpm-test-image.tar
           key: ${{ steps.image-cache.outputs.key }}
       - name: Check the packages under systemd (install, upgrade, invalid INI, failed start, downgrade, erase)
-        run: python3 scripts/packaging/check_rpm.py dist/rpm-first/platmon-*.${{ matrix.arch }}.rpm dist/rpm-second/platmon-*.${{ matrix.arch }}.rpm --image platmon-rpm-test:local
+        run: python3 scripts/packaging/check_rpm.py dist/rpm-first/platmon-[0-9]*.${{ matrix.arch }}.rpm dist/rpm-second/platmon-[0-9]*.${{ matrix.arch }}.rpm --image platmon-rpm-test:local

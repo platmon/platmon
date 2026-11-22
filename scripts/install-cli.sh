@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Install the `platmon` command: the terminal client (frontends/cli.py, standard library only).
-# Works on any machine with Python 3.9+, the device itself or a PC that watches it remotely.
+# Install the `platmon` command: the terminal client, the static binary native/build.sh (amd64, arm64) or
+# native/build-armhf.sh (32-bit ARM) built for this machine. No Python needed; the device itself or a Linux PC
+# that watches it remotely.
 #   scripts/install-cli.sh                    /usr/local/bin/platmon (asks for sudo)
 #   scripts/install-cli.sh --user             ~/.local/bin/platmon (no sudo)
 #   scripts/install-cli.sh --uninstall [--user]
@@ -19,14 +20,22 @@ for arg in "$@"; do
     esac
 done
 target=$dir/platmon
-src=$(cd "$(dirname "$0")/.." && pwd)/frontends/cli.py
+repo=$(cd "$(dirname "$0")/.." && pwd)
+# the build for this machine (as deploy/systemd/install.sh finds the server's)
+case "$(uname -m)" in
+    x86_64) src=x86_64-unknown-linux-musl build=native/build.sh ;;
+    aarch64 | arm64) src=aarch64-unknown-linux-musl build=native/build.sh ;;
+    armv6l | armv7l | armv8l) src=arm-unknown-linux-musleabihf build=native/build-armhf.sh ;;
+    *) src= build= ;;
+esac
+src=$repo/native/target/$src/release/platmon
 
 if [ "$dir" = /usr/local/bin ] && [ "$(id -u)" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 
-# only ever replace or remove our own command
-if [ -e "$target" ] && ! grep -q '^# platmon-cli:' "$target"; then
+# only ever replace or remove our own command: the binary (its usage line) or the Python one before it (its marker)
+if [ -e "$target" ] && ! grep -aq -e '^# platmon-cli:' -e 'usage: platmon \[-h\] \[--once\]' "$target"; then
     echo "$target exists and is not the platmon client; leaving it alone" >&2
     exit 1
 fi
@@ -37,6 +46,14 @@ if $uninstall; then
     exit 0
 fi
 
+if [ -z "$build" ]; then
+    echo "no platmon command for $(uname -m)" >&2
+    exit 1
+fi
+if [ ! -f "$src" ]; then
+    echo "$src not found: run $build first" >&2
+    exit 1
+fi
 mkdir -p "$dir"
 install -m 755 "$src" "$target"
 echo "installed $target"

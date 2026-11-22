@@ -6,7 +6,16 @@ publish = false
 license = "Apache-2.0"
 description = "The platmon server the Debian package runs (native/README.md)"
 
+# One workspace, one Cargo.lock and one target/: this package (the server, at native/ so its paths stay),
+# shared/ (what both sides use: json.rs, render.rs) and frontend/ (the platmon command). The frontend cannot
+# use the server's modules nor the server the frontend's (native/README.md, "Workspace"). A plain cargo build
+# or cargo test covers all three; -p platmon-server only the server.
+[workspace]
+members = [".", "shared", "frontend"]
+default-members = [".", "shared", "frontend"]
+
 [dependencies]
+platmon-shared = { path = "shared" }
 # MIT OR Apache-2.0, no dependencies of its own: system call numbers, flags and struct layouts per target,
 # instead of hand-written ones (statvfs, utsname, rusage, O_PATH, errno)
 libc = "=0.2.172"
@@ -19,9 +28,9 @@ mimalloc = { version = "=0.1.52", optional = true, default-features = false }
 # platform/windows.rs and collect/windows call (WinSock, BCryptGenRandom, the interrupt time, the console,
 # the system information calls, the registry, the volume's free space, the interface table, the disks'
 # performance counters and temperatures, the service control manager, the processors' performance counter,
-# the display adapters' performance data, the event log; the platmon command's code page and Ctrl+C handler)
+# the display adapters' performance data, the event log)
 windows-sys = { version = "=0.61.2", features = ["Wdk_Graphics_Direct3D", "Wdk_System_SystemInformation",
-                                                 "Win32_Devices_DeviceAndDriverInstallation", "Win32_Foundation", "Win32_Globalization",
+                                                 "Win32_Devices_DeviceAndDriverInstallation", "Win32_Foundation",
                                                  "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis",
                                                  "Win32_NetworkManagement_WiFi", "Win32_Networking_WinSock",
                                                  "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem",

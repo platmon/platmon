@@ -31,15 +31,16 @@ mod config;
 mod harness;
 mod history;
 mod http;
-mod json;
 mod metadata;
 mod platform;
 mod pystr;
-mod render;
 mod replay;
 mod runtime;
 mod sha256;
 mod slow;
+
+// shared/: the JSON writer and parser, and /text's screen, which the platmon command prints too
+use platmon_shared::{json, render};
 
 use collect::{observe, Collected, Collector};
 use json::Value;

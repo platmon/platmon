@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import socket
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.error
@@ -18,11 +17,11 @@ def check(package, cli_package=None):
     package = Path(package).resolve()
     full = subprocess.check_output(["dpkg-deb", "-f", str(package), "Version"], text=True).strip()
     release = full.split("-")[0]
-    # platmon-cli of the same version, beside it, as package.py writes them
-    cli_package = Path(cli_package).resolve() if cli_package else package.parent / f"platmon-cli_{full}_all.deb"
+    arch = subprocess.check_output(["dpkg-deb", "-f", str(package), "Architecture"], text=True).strip()
+    # platmon-cli of the same version and architecture, beside it, as package.py writes them
+    cli_package = Path(cli_package).resolve() if cli_package else package.parent / f"platmon-cli_{full}_{arch}.deb"
     if not cli_package.is_file():
         raise ValueError(f"no {cli_package.name} beside {package.name}")
-    arch = subprocess.check_output(["dpkg-deb", "-f", str(package), "Architecture"], text=True).strip()
     host = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
     if arch != host:
         raise ValueError(f"a {arch} package needs a {arch} host to run its server (this is {host})")
@@ -32,10 +31,8 @@ def check(package, cli_package=None):
         subprocess.run(["dpkg-deb", "-R", str(package), str(root)], check=True)
         subprocess.run(["dpkg-deb", "-x", str(cli_package), str(root)], check=True)  # the platmon command
         server, cli = root / "usr/lib/platmon/platmon-server", root / "usr/bin/platmon"
-        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-        # PYTHONPATH must not accidentally make the source checkout available.
-        env.pop("PYTHONPATH", None)
-        result = subprocess.check_output([sys.executable, str(cli), "--version"], cwd=work, env=env, text=True).strip()
+        env = dict(os.environ)  # the server and the command, both static: nothing from the checkout
+        result = subprocess.check_output([str(cli), "--version"], cwd=work, env=env, text=True).strip()
         if result != f"platmon {release}":
             raise ValueError(f"version mismatch: {result!r} != 'platmon {release}'")
         # The server's arguments are the packaged unit's, with the extracted paths and a test config.
@@ -81,7 +78,7 @@ def check(package, cli_package=None):
                             raise ValueError("empty packaged response: " + route)
                         if route == "/" and release.encode() not in body:
                             raise ValueError("the web page does not show version " + release)
-                output = subprocess.check_output([sys.executable, str(cli), f"127.0.0.1:{port}", "--once"],
+                output = subprocess.check_output([str(cli), f"127.0.0.1:{port}", "--once"],
                                                  cwd=work, env=env, text=True, timeout=15)
                 if "CPU" not in output:
                     raise ValueError("packaged CLI did not display stats")

@@ -2,8 +2,9 @@
 # The 32-bit ARM build, released as armhf (native/README.md, 32-bit ARM). Same image, flags and system
 # allocator as build.sh, for arm-unknown-linux-musleabihf (ARMv6 with VFP, so Raspberry Pi OS's armhf and
 # Debian's ARMv7 armhf both run it):
-#   native/build-armhf.sh   -> native/target/arm-unknown-linux-musleabihf/release/platmon-server
-#                              and platmon-server-tests next to it (the server's unit tests, not run here)
+#   native/build-armhf.sh   -> native/target/arm-unknown-linux-musleabihf/release/platmon-server, the
+#                              platmon command (platmon) and platmon-server-tests next to it (the server's
+#                              unit tests, not run here)
 # An x86 machine cannot run either; a 32-bit ARM host or a 64-bit ARM kernel with 32-bit support can (the
 # Raspberry Pi 4's Debian 13 runs them as they are; GitHub's arm64 runners, Neoverse N2, are AArch64 only):
 # copy both there, run platmon-server-tests, then the server through the native/tools checks.
@@ -22,4 +23,4 @@ if [ "$marks" != "platmon-server-allocator=system; " ]; then
   echo "target/$t/release/platmon-server: allocator mark '$marks', not the system allocator's" >&2
   exit 1
 fi
-sha256sum "target/$t/release/platmon-server"
+sha256sum "target/$t/release/platmon-server" "target/$t/release/platmon"

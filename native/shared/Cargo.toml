@@ -1,0 +1,9 @@
+[package]
+name = "platmon-shared"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "What platmon-server and the platmon command share: JSON as Python wrote it and /text's plain screen (native/README.md)"
+
+[dependencies]

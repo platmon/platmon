@@ -18,7 +18,7 @@ RUN set -eu; \
     rustup target add "$target"; \
     cd native; \
     RUSTFLAGS="-C linker=rust-lld -C target-feature=+crt-static" \
-      cargo build --release --locked --no-default-features --target "$target"; \
+      cargo build --release --locked --no-default-features --target "$target" -p platmon-server; \
     mkdir /out; \
     cp "target/$target/release/platmon-server" /out/
 

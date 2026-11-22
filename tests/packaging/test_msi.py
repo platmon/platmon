@@ -13,11 +13,11 @@ from scripts.packaging.package_msi import COMPONENT_64, LEFT_OUT, NEVER_OVERWRIT
 from scripts.packaging.package_windows import members
 
 ROOT = Path(__file__).resolve().parents[2]
-SERVER = b"MZ fake server"
+SERVER, COMMAND = b"MZ fake server", b"MZ fake command"
 
 
 def files():
-    return members(ROOT, SERVER, "1.2.3")
+    return members(ROOT, SERVER, COMMAND, "1.2.3")
 
 
 def test_every_table_fits_its_schema_and_its_references_resolve():
@@ -43,7 +43,8 @@ def test_the_files_and_their_names():
     t = tables(files(), "1.2.3")
     installed = [p for p, _ in files() if p not in LEFT_OUT]
     assert [r[2].split("|")[1] for r in t["File"]] == [p.rpartition("/")[2] for p in installed]
-    assert {"platmon-server.exe", "platmon.ini", "cli.py", "platmon.cmd", "LICENSE", "LICENSE-MIT", "web/index.html"} <= set(installed)
+    assert {"platmon-server.exe", "platmon.ini", "platmon.exe", "LICENSE", "LICENSE-MIT", "web/index.html"} <= set(installed)
+    assert not any(p.endswith((".py", ".cmd")) for p in installed)  # no Python command any more
     assert not set(installed) & LEFT_OUT  # the zip's own scripts and README are not installed
     shorts = [r[2].split("|")[0] for r in t["File"]]
     assert len(set(shorts)) == len(shorts) and all(re.fullmatch(r"[A-Z0-9]{1,8}(\.[A-Za-z0-9]{1,3})?", s) for s in shorts)

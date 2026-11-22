@@ -16,8 +16,8 @@ dashboard and an HTTP API.
 - **Small enough to leave running.** One static binary of about 1.5 MB. On a Jetson Orin Nano over 24 h:
   0.80 to 0.89 % of one core and 10.6 to 11.4 MiB of memory at 1.8.1, while a Hub-like client polled it
   ([release evidence](docs/releases/readiness.md), [budget](docs/performance/budget.md)).
-- **Nothing to install beside it.** The server depends on nothing on the device; the `platmon` command
-  needs only Python 3.9+ and its standard library. No pip, no Node, no database.
+- **Nothing to install beside it.** The server and the `platmon` command are static binaries that depend
+  on nothing on the device. No Python, no pip, no Node, no database.
 - **Reads the board, not just the CPU.** CPU, GPU/NPU, memory and pressure (PSI), network, disk I/O,
   storage, temperatures, power rails, fans, power mode, battery, Wi-Fi signal and TCP connect probes.
 - **Says what it does not know.** A reading the device does not have is `unavailable` with a reason, never
@@ -59,8 +59,8 @@ The service starts with the install. Other ways in, all running the same server:
 | Fedora or Enterprise Linux 9+ | the `.rpm` packages ([RPM packages](docs/reference/packaging.md#rpm-packages)) |
 | Another Linux, or a change to try | a [source installation or a locally built container](docs/guides/deployment.md) |
 | Windows 11 (x86_64) | the installer `platmon-<version>-windows-x86_64.msi` from [GitHub Releases](https://github.com/platmon/platmon/releases) ([Windows](docs/guides/getting-started.md#windows)) |
-| A headless device without Python | `sudo apt install --no-install-recommends platmon`, then the web page or the API |
-| A PC that only watches other devices | the terminal client alone: `scripts/install-cli.sh --user` from a checkout |
+| A headless device without the terminal client | `sudo apt install --no-install-recommends platmon`, then the web page or the API |
+| A PC that only watches other devices | the terminal client alone: the `platmon-cli` package of its architecture, or `scripts/install-cli.sh --user` after `native/build.sh` |
 | Windows 11 (x86_64), to try it | the zip from [GitHub Releases](https://github.com/platmon/platmon/releases): unzip, double-click `start.cmd` ([Windows](docs/guides/getting-started.md#windows)) |
 
 ## Use

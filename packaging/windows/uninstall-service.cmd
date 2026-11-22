@@ -13,7 +13,7 @@ if errorlevel 1 (echo No platmon service is installed.) else (
   echo The platmon service is removed.
 )
 if exist "%DEST%\web" rmdir /s /q "%DEST%\web"
-for %%f in (platmon-server.exe README.txt LICENSE LICENSE-MIT cli.py platmon.cmd) do if exist "%DEST%\%%f" del /q "%DEST%\%%f"
+for %%f in (platmon-server.exe platmon.exe README.txt LICENSE LICENSE-MIT cli.py platmon.cmd) do if exist "%DEST%\%%f" del /q "%DEST%\%%f"
 reg delete HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\platmon /f >nul 2>&1
 rem this script may run from that folder: it stays then, with platmon.ini
 if /i not "%~dp0"=="%DEST%\" if exist "%DEST%\uninstall-service.cmd" del /q "%DEST%\uninstall-service.cmd"

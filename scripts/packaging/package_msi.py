@@ -4,10 +4,10 @@
 dependency rules; docs/development/remaining-work.md, "Windows: promotion"). Windows only, after the server
 is built; tables() is plain data and is tested on any platform.
 
-  package_msi.py --binary platmon-server.exe --output DIR [--version X.Y.Z]
+  package_msi.py --binary platmon-server.exe --output DIR [--version X.Y.Z]   (platmon.exe beside it)
 
 What it installs, with MSI's own tables and no custom action DLL: the zip's server, platmon.ini (listening on
-127.0.0.1), the web page, the licenses and the platmon command (cli.py, platmon.cmd) in
+127.0.0.1), the web page, the licenses and the platmon command (platmon.exe) in
 C:\\Program Files\\platmon; the service platmon (LocalSystem, automatic) with the guide's recovery actions,
 started at the end; the event log source (Registry); the folder on the system PATH (Environment). The
 failure-actions flag is MsiServiceConfig's; the restart actions are the guide's sc.exe failure line, run by
@@ -28,10 +28,10 @@ import uuid
 
 if __package__:
     from .package import ROOT, version as release_version
-    from .package_windows import check_binary, members
+    from .package_windows import check_binary, command_beside, members
 else:  # run as a script, from its own directory
     from package import ROOT, version as release_version
-    from package_windows import check_binary, members
+    from package_windows import check_binary, command_beside, members
 
 UPGRADE_CODE = "{7C4C5D2B-6F1E-4F5A-9E0D-3B1A2C8D9E4F}"  # never changes: it ties every version together
 NAMESPACE = uuid.UUID(UPGRADE_CODE.strip("{}"))
@@ -252,17 +252,17 @@ def build(output, binary, root=ROOT, release=None):
     if os.name != "nt":
         raise SystemExit("package_msi.py builds with Windows Installer: run it on Windows")
     release = release or release_version(root)
-    server = check_binary(binary)
+    server, command = check_binary(binary), check_binary(command_beside(binary), server=False)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"platmon-{release}-windows-x86_64.msi"
-    build_msi(target, members(root, server, release), release, hashlib.sha256(server).hexdigest())
+    build_msi(target, members(root, server, command, release), release, hashlib.sha256(server + command).hexdigest())
     return target
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--binary", required=True, help="platmon-server.exe, built with the C runtime static")
+    p.add_argument("--binary", required=True, help="platmon-server.exe, built with the C runtime static, platmon.exe beside it")
     p.add_argument("--output", required=True)
     p.add_argument("--version", help="the ProductVersion, instead of VERSION's (a test of an upgrade)")
     a = p.parse_args()

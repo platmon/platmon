@@ -23,8 +23,9 @@ def invoke(*args, success=True):
 
 
 def cli_beside(package):
-    """platmon-cli's .deb of the same version, beside package (package.py writes them together)."""
-    path = package.parent / ("platmon-cli_" + invoke("dpkg-deb", "-f", str(package), "Version") + "_all.deb")
+    """platmon-cli's .deb of the same version and architecture, beside package (package.py writes them together)."""
+    path = package.parent / ("platmon-cli_" + invoke("dpkg-deb", "-f", str(package), "Version") + "_"
+                             + invoke("dpkg-deb", "-f", str(package), "Architecture") + ".deb")
     if not path.is_file():
         raise RuntimeError(f"no {path.name} beside {package.name}")
     return path

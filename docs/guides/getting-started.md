@@ -2,7 +2,8 @@
 
 > **TL;DR**
 > - Install the `.deb` from the signed APT repository (check the key fingerprint first) on an Ubuntu or
->   Debian-derived host with systemd; the `platmon` command (`platmon-cli`, installed with it) needs Python 3.9+.
+>   Debian-derived host with systemd; the `platmon` command (`platmon-cli`, installed with it) is native too, no
+>   Python needed.
 > - Then run `platmon`, open `http://<device>:9797`, or `curl` `/api/status`.
 > - Settings live in `/etc/platmon/platmon.ini`; the API has no authentication.
 > - Windows 11 (x86_64): the installer `platmon-<version>-windows-x86_64.msi`, or the zip to try it
@@ -17,8 +18,9 @@ published data. Collection is not triggered by requests.
 The primary distribution is a `.deb` package for Ubuntu and Debian-derived Linux hosts
 (including suitable Jetson and Raspberry Pi systems), built for **amd64**, **arm64** and **armhf** (32-bit ARM).
 It requires **systemd**. The service is one static native binary without Python. The `platmon` command is
-the separate package `platmon-cli`, which `platmon` recommends, so apt installs it by default; it needs
-**Python 3.9+** on the host and uses only the Python standard library. A headless device can leave it out
+the separate package `platmon-cli`, which `platmon` recommends, so apt installs it by default; it is a static
+native binary for the same architectures, without dependencies (up to 1.10.0 it was one Python file that needed
+Python 3.9+). A headless device can leave it out
 with `sudo apt install --no-install-recommends platmon` and read the API or the web page instead.
 A package for an architecture does not imply that every OS or kernel on it has been validated.
 
@@ -65,7 +67,7 @@ containing all of the release files, verify checksums before installing the chos
 
 ```sh
 sha256sum -c SHA256SUMS
-sudo apt install ./platmon_<version>-<revision>_<arch>.deb ./platmon-cli_<version>-<revision>_all.deb
+sudo apt install ./platmon_<version>-<revision>_<arch>.deb ./platmon-cli_<version>-<revision>_<arch>.deb
 systemctl status platmon --no-pager
 platmon --version
 platmon --once
@@ -73,11 +75,12 @@ platmon --once
 
 Replace the angle-bracket placeholders with the actual version and revision from
 the release filenames and the host's architecture (`dpkg --print-architecture`); do not
-run the placeholder command literally. Releases up to 1.3.0 have one `_all.deb` instead.
+run the placeholder command literally. Releases up to 1.10.0 have `platmon-cli_<version>-<revision>_all.deb`,
+and releases up to 1.3.0 one `_all.deb` instead of both.
 
 To build the package from a source checkout instead, use a Linux host with Python 3.9+,
-`dpkg-deb` (dpkg 1.19+) and Docker, which builds the server in a throwaway Rust container
-(`native/build.sh`, both architectures):
+`dpkg-deb` (dpkg 1.19+) and Docker, which builds the server and the `platmon` command in a throwaway Rust
+container (`native/build.sh`, both architectures):
 
 ```sh
 native/build.sh
@@ -87,7 +90,7 @@ platmon_dist="dist/${platmon_version}-1"
 python3 scripts/packaging/package.py --output "$platmon_dist"
 python3 scripts/packaging/check_package.py "$platmon_dist/platmon_${platmon_version}-1_${platmon_arch}.deb"
 sudo apt install "./${platmon_dist}/platmon_${platmon_version}-1_${platmon_arch}.deb" \
-  "./${platmon_dist}/platmon-cli_${platmon_version}-1_all.deb"
+  "./${platmon_dist}/platmon-cli_${platmon_version}-1_${platmon_arch}.deb"
 ```
 
 The `platmon` package installs the server in `/usr/lib/platmon/platmon-server`, the web files in
@@ -205,10 +208,10 @@ clocks, drive and GPU temperatures, storage, Wi-Fi and battery. It has no CPU te
 power mode or pressure: those groups are `unavailable` (`unsupported_platform`) and pressure is left out
 ([native/README.md, "Windows"](../../native/README.md#windows)).
 
-The `platmon` command needs Python 3.9 or later on `PATH` as `python`, as `platmon-cli` needs it on Linux.
-From the release after 1.8.2 the zip has it: `cli.py`, one standard-library file, and `platmon.cmd`, which
-runs it. To type `platmon` anywhere, add the folder to your user `PATH` once (no administrator needed; a new
-terminal then finds it):
+The `platmon` command is `platmon.exe`, in the installer's folder (on the system `PATH`) and in the zip; it
+needs nothing else. From 1.9.0 to 1.10.0 it was `cli.py` with `platmon.cmd`, which needed Python 3.9 or later on
+`PATH`. To type `platmon` anywhere with the zip, add the folder to your user `PATH` once (no administrator
+needed; a new terminal then finds it):
 
 ```powershell
 [Environment]::SetEnvironmentVariable('Path',
@@ -216,7 +219,8 @@ terminal then finds it):
 ```
 
 Then `platmon --once`, `platmon` or `platmon 192.168.55.53` work as on Linux. On Windows it shows the plain
-screen with every section, redrawn in place, instead of the live view. Up to 1.8.2 the zip has no client:
+screen with every section, redrawn in place, instead of the live view; piped or redirected, it writes the code
+page, a character the code page lacks as `?`. Up to 1.8.2 the zip has no client:
 take `frontends/cli.py` from the release source archive (`platmon-<version>.tar.gz`) and run
 `python cli.py --once`; piping or redirecting its output there fails with `UnicodeEncodeError` on a code page
 without block characters (cp949, for example), so run it as `python -X utf8 cli.py --once`.
@@ -246,10 +250,12 @@ endpoints are `/api/stats` (readings) and `/api/status` (collector state).
 See [CLI and web interfaces](interfaces.md) for views, keyboard shortcuts
 and the remaining endpoints.
 
-To install **only the terminal client** on a machine watching other devices,
-run `scripts/install-cli.sh` from a checkout (`/usr/local/bin/platmon`, asks
-for sudo), or `scripts/install-cli.sh --user` (`~/.local/bin/platmon`,
-no sudo). The client is one standard-library file, `frontends/cli.py`.
+To install **only the terminal client** on a Linux machine watching other devices,
+install the `platmon-cli` package of its architecture alone (`.deb` or `.rpm`; it depends
+on nothing, not even `platmon`), or from a checkout build it with `native/build.sh`
+(`native/build-armhf.sh` on 32-bit ARM) and run `scripts/install-cli.sh`
+(`/usr/local/bin/platmon`, asks for sudo) or `scripts/install-cli.sh --user`
+(`~/.local/bin/platmon`, no sudo). The client is one static binary.
 An interactive Unix terminal provides the live view; the plain `--once`
 view also works with pipes and on Windows. Make sure the chosen install
 directory is on `PATH`.

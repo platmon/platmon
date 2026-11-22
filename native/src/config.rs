@@ -22,7 +22,7 @@ const DEFAULTS: &[(&str, &[(&str, &str, Kind)])] = &[
                      ("filesystem", "80, 90", Kind::Str), ("temperature", "", Kind::Str), ("battery", "20, 10", Kind::Str),
                      ("wifi", "-70, -80", Kind::Str)]),
 ];
-const REMOVED: &[(&str, &str)] = &[("terminal", "the terminal view is now the `platmon` command (frontends/cli.py); delete this section")];
+const REMOVED: &[(&str, &str)] = &[("terminal", "the terminal view is now the `platmon` command; delete this section")];
 const RANGES: &[((&str, &str), (f64, f64))] = &[
     (("core", "interval"), (0.1, 3600.0)), (("storage", "interval"), (5.0, 3600.0)), (("wifi", "interval"), (1.0, 3600.0)),
     (("probe", "interval"), (1.0, 3600.0)), (("battery", "interval"), (10.0, 3600.0)), (("replay", "retention"), (1.0, 3600.0)),

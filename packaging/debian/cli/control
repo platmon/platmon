@@ -3,8 +3,7 @@ Source: platmon
 Version: @VERSION@
 Section: admin
 Priority: optional
-Architecture: all
-Depends: python3 (>= 3.9)
+Architecture: @ARCH@
 Breaks: platmon (<< 1.7.0)
 Replaces: platmon (<< 1.7.0)
 Maintainer: platmon maintainers <jwsung91@users.noreply.github.com>
@@ -12,5 +11,5 @@ Homepage: https://github.com/platmon/platmon
 Installed-Size: @SIZE@
 Description: terminal client for the platmon platform monitor
  The platmon command: a live view of a platmon service's HTTP API, this
- device's by default, in the terminal. One Python file that uses the host's
- Python standard library only.
+ device's by default, in the terminal. One static native binary, without
+ Python.

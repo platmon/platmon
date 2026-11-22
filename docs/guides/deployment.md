@@ -54,8 +54,8 @@ and the authoritative
 
 ## Source installation with systemd
 
-From a checkout, on a Linux device with systemd, Docker (to build the server) and Python 3.9+ (for the
-`platmon` command). Build the server for this machine first, then install it:
+From a checkout, on a Linux device with systemd and Docker (to build the server and the `platmon` command).
+Build them for this machine first, then install them:
 
 ```sh
 native/build.sh                        # amd64 and arm64 (native/build-armhf.sh on 32-bit ARM)
@@ -94,7 +94,8 @@ deploy/docker/stop.sh     # stop/remove the container; keep the local image
 ```
 
 `start.sh` builds `platmon:local` and also installs/updates the
-`platmon` terminal client in `~/.local/bin`; `stop.sh` leaves the
+`platmon` terminal client in `~/.local/bin` when `native/build.sh` has built it on the host
+(the image's build does not leave it there; without it the script says so and goes on); `stop.sh` leaves the
 client installed. To remove it explicitly, run
 `scripts/install-cli.sh --user --uninstall`.
 
