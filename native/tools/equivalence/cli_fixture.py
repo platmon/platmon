@@ -1,4 +1,4 @@
-"""Equivalence of the platmon command (native/src/bin/platmon) with frontends/cli.py, its reference until
+"""Equivalence of the platmon command (native/frontend/src/bin/platmon) with frontends/cli.py, its reference until
 cli.py is removed (docs/development/remaining-work.md, "The platmon command in Rust"). Both are run on the
 same snapshots and must agree, byte for byte, on:
 

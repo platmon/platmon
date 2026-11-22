@@ -83,7 +83,7 @@ effect on clients ([ADR 0002](docs/development/adr/0002-api-contract-not-python-
 
 The terminal client and the web page share their views, levels and colors through
 `frontends/ui-spec.json`. Start a design change there; `tests/frontends/test_ui_spec.py` checks both
-clients against it. `/text` (`native/src/render.rs`) is a port of the terminal client's plain screen, so a
+clients against it. `/text` (`native/shared/src/render.rs`) is a port of the terminal client's plain screen, so a
 change to that screen is made in both.
 
 ## Pull requests

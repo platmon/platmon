@@ -31,9 +31,9 @@ def test_cli_copy_matches_the_spec():
 
 
 def test_rust_command_copy_matches_the_spec():
-    """The Rust platmon command's copy (native/src/bin/platmon/screen.rs UI_SPEC: its build has only native/
-    and VERSION, so the file cannot be included)."""
-    source = (ROOT / "native/src/bin/platmon/screen.rs").read_text(encoding="utf-8")
+    """The Rust platmon command's copy (native/frontend/src/bin/platmon/screen.rs UI_SPEC: its build has only
+    native/ and VERSION, so the file cannot be included)."""
+    source = (ROOT / "native/frontend/src/bin/platmon/screen.rs").read_text(encoding="utf-8")
     copy = re.search(r'const UI_SPEC: &str = r##"(.*?)"##;', source, re.S).group(1)
     assert json.loads(copy) == {key: value for key, value in SPEC.items() if key != "about"}
 
@@ -138,7 +138,7 @@ def test_units_follow_a_space_everywhere():
     read = lambda path: (ROOT / path).read_text(encoding="utf-8")
     assert not re.findall(r".{20}\}(?:%|°C)", read("frontends/cli.py"))  # f"{v}%"
     assert not re.findall(r".{20}(?:\+ '(?:%|°C)'|\}(?:%(?![\";)])|°C))", read("frontends/web/app.js"))  # not CSS lengths
-    assert not re.findall(r".{20}\{\}(?:%|°C)", read("native/src/render.rs"))  # format!("{}%")
+    assert not re.findall(r".{20}\{\}(?:%|°C)", read("native/shared/src/render.rs"))  # format!("{}%")
 
 
 def observation(data, stale=False):

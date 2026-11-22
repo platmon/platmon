@@ -13,16 +13,13 @@
 //! {"lines": screen(), "scroll": [offset, page]} ({"keys", "view", "offset", "page"}: {"view", "offset"} after
 //! those keys), so tools/equivalence/cli_fixture.py can compare frames
 //! with cli.py's screen() without a terminal.
-#[allow(dead_code)]
-#[path = "../../json.rs"]
-mod json;
 mod net;
-#[allow(dead_code)]
-#[path = "../../render.rs"]
-mod render;
 mod screen;
 #[cfg(unix)]
 mod term;
+
+// ../../../shared: the JSON parser and render(), the plain screen the server's /text answers with
+use platmon_shared::{json, render};
 
 use json::Value;
 use net::Error;
@@ -34,7 +31,7 @@ const PORT: u16 = 9797;
 
 /// The application version: the repository's VERSION file, read at build time, as platmon-server's.
 pub fn version() -> &'static str {
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../VERSION")).trim()
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../VERSION")).trim()
 }
 
 const USAGE: &str = "usage: platmon [-h] [--once]

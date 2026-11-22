@@ -40,11 +40,20 @@ The whole default service, with the output the Python one gave:
   and `--frontends` ([Runtime](#runtime))
 
 The `platmon` command (`frontends/cli.py`) is still the packaged client; the package installs it, so it
-needs the host's Python 3.9+. Its Rust port is the crate's second binary, `platmon` (`src/bin/platmon/`,
-sharing `src/json.rs` and `src/render.rs`; not part of `platmon-server`): the same options, exit codes,
+needs the host's Python 3.9+. Its Rust port is the workspace's second binary, `platmon`
+(`frontend/src/bin/platmon/`, sharing `shared/`; not part of `platmon-server`): the same options, exit codes,
 messages, `--once` output and live screens, checked against `cli.py` by `tools/equivalence/cli_fixture.py`.
 The packages switch to it in a later change (docs/development/remaining-work.md, "The `platmon` command in
 Rust").
+
+**Workspace.** `native/` is one Cargo workspace with one `Cargo.lock` and one `target/`: the server
+(`platmon-server`, the package at `native/` itself, so its sources and build paths stay where they were),
+`shared/` (`platmon-shared`: `json.rs` and `render.rs`, `/text`'s plain screen, which the command's
+`--once` prints too) and `frontend/` (`platmon-frontend`: the `platmon` command). Each side depends on
+`shared/` only, so the frontend cannot use the server's modules, nor the server the frontend's; that keeps
+a later split of the frontends into their own repository possible. A plain `cargo build` or `cargo test`
+covers all three; `-p platmon-server` the server alone (the container). Both binaries land in
+`target/<triple>/release/`.
 
 Behaviour kept from Python where bypassing std made it explicit:
 
@@ -119,7 +128,7 @@ Service features:
   requests take references to the payloads under the lock and decode them outside it; ages and `stale` per
   answer; cursors, missing ranges, 409s and the byte, record and response bounds as `runtime/replay.py`.
 - `/api/history`, `/api/samples`, `/api/observation-samples` with `server.py`'s query parsing
-  (`parse_qs`, its limits and messages); `/text` (`src/render.rs`, the `platmon` command's `render()`).
+  (`parse_qs`, its limits and messages); `/text` (`shared/src/render.rs`, the `platmon` command's `render()`).
 - `platmon.ini` (`src/config.rs`): configparser's syntax (sections, `=`/`:`, comments, continuation lines,
   DEFAULT, duplicate and parsing errors with its messages), `check()`, `levels()`, the probe targets, the
   same refusals; groups, history, replay and the web page on and off as configured.

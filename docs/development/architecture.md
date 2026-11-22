@@ -54,7 +54,10 @@ Slow groups retain their own observation state and age, so a blocked group does 
 See the [live API](../reference/api.md), [observations](../reference/observations.md),
 [numeric history](../reference/history.md) and [full-sample replay](../reference/replay.md) contracts.
 
-`native/` is one Rust crate, depending only on `libc` (and `windows-sys` on Windows).
+`native/` is one Cargo workspace, depending only on `libc` (and `windows-sys` on Windows): the server
+(`platmon-server`, the package at `native/`), `shared/` (what the server and the frontends both use) and
+`frontend/` (the `platmon` command). The frontend cannot use the server's modules, nor the server the
+frontend's; the compiler enforces it.
 
 | Location | Responsibility |
 | --- | --- |
@@ -68,9 +71,10 @@ See the [live API](../reference/api.md), [observations](../reference/observation
 | `src/runtime.rs` | Sampler: cadence, publication, freshness and status |
 | `src/slow.rs` | Low-frequency groups on their own threads |
 | `src/history.rs`, `src/replay.rs` | Bounded in-memory history and full-publication replay |
-| `src/http.rs`, `src/render.rs` | HTTP API, `/text` (the terminal client's plain screen) and the web page's files; reads published state only |
-| `src/json.rs`, `src/pystr.rs` | JSON written as Python's `json` wrote it; the `str` methods the ports need |
+| `src/http.rs`, `shared/src/render.rs` | HTTP API, `/text` (the terminal client's plain screen) and the web page's files; reads published state only |
+| `shared/src/json.rs`, `src/pystr.rs` | JSON written as Python's `json` wrote it; the `str` methods the ports need |
 | `src/platform/` | Clocks, random bytes, the listening socket and the stop request, per OS |
+| `frontend/src/bin/platmon/` | The `platmon` command: HTTP client, live view, terminal; `--once` prints `shared/src/render.rs` |
 | `src/harness.rs`, `tools/` | Commands and scripts for the equivalence checks, measurements and candidate deployments |
 
 Equivalence checks run in CI (`native` job), with the fleet server's contract below; the Windows collector is checked by its unit tests and
@@ -91,7 +95,7 @@ reads a changed answer.
 Collection (`src/collect/`) ← runtime (`src/runtime.rs`, `slow.rs`, `history.rs`, `replay.rs`) ← HTTP
 (`src/http.rs`) ← `frontends/` (clients of that API). Readers do not depend on the runtime; the runtime
 consumes collection records and metadata; the HTTP server consumes published snapshots, observations and
-history. `/text` is `src/render.rs`, a port of `frontends/cli.py`'s `render`, so the two stay identical
+history. `/text` is `shared/src/render.rs`, a port of `frontends/cli.py`'s `render`, so the two stay identical
 (`native/tools/equivalence/live_http.py` checks the sections). The web page is a client too, although the
 server serves its files.
 

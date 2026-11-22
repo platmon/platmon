@@ -9,7 +9,7 @@ deploy/systemd/install.sh or deploy/docker/start.sh).
 On an interactive terminal the live view is screen(): colored levels, a layout fitted to the terminal size,
 redrawn in place on the alternate screen. It shows one view at a time, as the web page's tabs do (VIEWS);
 1-7, Tab and the arrow keys switch them. --once and pipes keep render(), plain text as before; the
-server's /text answers with the same screen (native/src/render.rs).
+server's /text answers with the same screen (native/shared/src/render.rs).
 """
 # platmon-cli: marker that lets scripts/install-cli.sh recognise (and only replace) its own command
 import argparse
