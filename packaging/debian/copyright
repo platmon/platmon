@@ -18,13 +18,13 @@ License: Apache-2.0
  On Debian systems, the complete text of the Apache License, Version 2.0
  can be found in /usr/share/common-licenses/Apache-2.0.
 
-Files: usr/lib/platmon/platmon-server usr/bin/platmon
+Files: usr/lib/platmon/platmon-server usr/bin/platmon usr/bin/platmon-tray
 Copyright: 2026 Jinwoo Sung
  The Rust Project Developers (Rust standard library)
  The libc crate developers
  Rich Felker et al. (musl libc)
 License: Apache-2.0 and (MIT or Apache-2.0) and MIT
-Comment: The server and the platmon command are statically linked. Their own code
+Comment: The server, the platmon command and the tray are statically linked. Their own code
  is Apache-2.0; each includes the Rust standard library and the libc crate (MIT or
  Apache-2.0) and musl libc (MIT).
 

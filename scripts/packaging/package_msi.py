@@ -4,12 +4,13 @@
 dependency rules; docs/development/remaining-work.md, "Windows: promotion"). Windows only, after the server
 is built; tables() is plain data and is tested on any platform.
 
-  package_msi.py --binary platmon-server.exe --output DIR [--version X.Y.Z]   (platmon.exe beside it)
+  package_msi.py --binary platmon-server.exe --output DIR [--version X.Y.Z]   (platmon.exe, platmon-tray.exe beside)
 
 What it installs, with MSI's own tables and no custom action DLL: the zip's server, platmon.ini (listening on
-127.0.0.1), the web page, the licenses and the platmon command (platmon.exe) in
+127.0.0.1), the web page, the licenses, the platmon command (platmon.exe) and the tray (platmon-tray.exe) in
 C:\\Program Files\\platmon; the service platmon (LocalSystem, automatic) with the guide's recovery actions,
-started at the end; the event log source (Registry); the folder on the system PATH (Environment). The
+started at the end; the event log source and the tray at every user's login (HKLM Run, Registry); the folder on
+the system PATH (Environment). The
 failure-actions flag is MsiServiceConfig's; the restart actions are the guide's sc.exe failure line, run by
 one deferred action from System32 (MsiServiceConfigFailureActions fails with access denied for restart
 actions: Windows Installer opens the service without SERVICE_START, which ChangeServiceConfig2 needs for them). An edited platmon.ini is kept on upgrade and
@@ -28,16 +29,17 @@ import uuid
 
 if __package__:
     from .package import ROOT, version as release_version
-    from .package_windows import check_binary, command_beside, members
+    from .package_windows import check_binary, command_beside, members, tray_beside
 else:  # run as a script, from its own directory
     from package import ROOT, version as release_version
-    from package_windows import check_binary, command_beside, members
+    from package_windows import check_binary, command_beside, members, tray_beside
 
 UPGRADE_CODE = "{7C4C5D2B-6F1E-4F5A-9E0D-3B1A2C8D9E4F}"  # never changes: it ties every version together
 NAMESPACE = uuid.UUID(UPGRADE_CODE.strip("{}"))
 LEFT_OUT = {"README.txt", "start.cmd", "install-service.cmd", "uninstall-service.cmd"}  # the zip's own
 EVENT_LOG_KEY = r"SYSTEM\CurrentControlSet\Services\EventLog\Application\platmon"
 MESSAGE_FILE = r"%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll"
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"  # every user's login; a user's own is under HKCU
 # component attributes: 64-bit; platmon.ini also permanent (left on removal) and never overwritten
 COMPONENT_64, PERMANENT, NEVER_OVERWRITE = 256, 16, 128
 SCHEMA = {  # table: (columns as IDT types, primary key columns); the Windows Installer SDK's standard tables
@@ -149,6 +151,9 @@ def tables(files, release):
     t["MsiServiceConfig"].append(("platmon_failureflag", "platmon", 1, 4, "1", server))
     # HKLM (2); "#%": REG_EXPAND_SZ, so %SystemRoot% stays for Windows to expand
     t["Registry"].append(("platmon_eventlog", 2, EVENT_LOG_KEY, "EventMessageFile", "#%" + MESSAGE_FILE, server))
+    # the tray at every login (HKLM, 64-bit view), with its file's component: written on install, removed with it
+    t["Registry"].append(("platmon_tray_run", 2, RUN_KEY, "platmon-tray", '"[INSTALLDIR]platmon-tray.exe"',
+                          ident("C", "platmon-tray.exe")))
     # the system PATH (*), set on install (=), the part added removed on removal (-), appended ([~];...)
     t["Environment"].append(("platmon_path", "=-*PATH", "[~];[INSTALLDIR]", server))
     # older and the same versions are removed first (min and max inclusive); a newer one is only detected
@@ -253,16 +258,19 @@ def build(output, binary, root=ROOT, release=None):
         raise SystemExit("package_msi.py builds with Windows Installer: run it on Windows")
     release = release or release_version(root)
     server, command = check_binary(binary), check_binary(command_beside(binary), server=False)
+    tray = check_binary(tray_beside(binary), server=False, what="tray")
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"platmon-{release}-windows-x86_64.msi"
-    build_msi(target, members(root, server, command, release), release, hashlib.sha256(server + command).hexdigest())
+    build_msi(target, members(root, server, command, tray, release), release,
+              hashlib.sha256(server + command + tray).hexdigest())
     return target
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--binary", required=True, help="platmon-server.exe, built with the C runtime static, platmon.exe beside it")
+    p.add_argument("--binary", required=True,
+                   help="platmon-server.exe, built with the C runtime static, platmon.exe and platmon-tray.exe beside it")
     p.add_argument("--output", required=True)
     p.add_argument("--version", help="the ProductVersion, instead of VERSION's (a test of an upgrade)")
     a = p.parse_args()

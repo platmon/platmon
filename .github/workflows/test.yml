@@ -99,11 +99,12 @@ jobs:
         run: cargo build --release --locked --no-default-features
       - name: Smoke test
         run: python tools/windows_smoke.py target/release/platmon-server.exe
-      # The installer of these binaries (platmon.exe beside the server), with Windows Installer itself (scripts/packaging/package_msi.py); the smoke
+      # The installer of these binaries (platmon.exe and platmon-tray.exe beside the server), with Windows Installer itself (scripts/packaging/package_msi.py); the smoke
       # test installed, upgraded and removed packages built the same way.
       - name: Installer
         run: python ../scripts/packaging/package_msi.py --binary target/release/platmon-server.exe --output target/msi
-      # The zip packages these binaries (scripts/packaging/package_windows.py), the installer beside it.
+      # The zip packages these binaries (scripts/packaging/package_windows.py), the installer beside it; the smoke test
+      # ran the tray's --version and checked its HKLM Run value from the installer.
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server-windows

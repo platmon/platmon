@@ -3,9 +3,11 @@ Filters = [
     # The server is one static musl binary, for every distribution of its architecture.
     "statically-linked-binary /usr/lib/platmon/platmon-server",
     "position-independent-executable-suggested /usr/lib/platmon/platmon-server",
-    # The platmon command, platmon-frontend's, is one static musl binary too.
+    # The platmon command and the tray, platmon-frontend's, are static musl binaries too.
     "statically-linked-binary /usr/bin/platmon",
     "position-independent-executable-suggested /usr/bin/platmon",
+    "statically-linked-binary /usr/bin/platmon-tray",
+    "position-independent-executable-suggested /usr/bin/platmon-tray",
     # platmon-frontend, the other package's name, in platmon's description.
     "spelling-error \\('frontend'",
 ]

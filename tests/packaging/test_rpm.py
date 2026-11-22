@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from scripts.packaging.package import (command_beside, default_binary, packaging_epoch, stage_frontend, stage_server,
-                                     version)
+                                     tray_beside, version)
 from scripts.packaging.package_rpm import ARCHES, build
 from tests.packaging.test_packaging import fake_build, fake_server
 
@@ -31,7 +31,8 @@ def query(rpm, fmt):
 def binaries(tmp_path):
     """The binaries native/build.sh left, else fakes (enough to package, not to run)."""
     real = {arch: default_binary(arch) for arch in ARCHES}
-    if all(path.is_file() and command_beside(path).is_file() for path in real.values()):
+    if all(path.is_file() and command_beside(path).is_file() and tray_beside(path).is_file()
+           for path in real.values()):
         return real
     return {arch: fake_build(tmp_path / "bin" / arch, arch) for arch in ARCHES}
 
@@ -83,7 +84,8 @@ def test_spec_files_are_the_staged_ones(tmp_path, binaries, name):
         stage_server(ROOT, stage, binaries["amd64"].read_bytes(), version())
         docs(ROOT, stage, "platmon", (ROOT / "docs/reference/packaging.md",))
     else:
-        stage_frontend(ROOT, stage, command_beside(binaries["amd64"]).read_bytes(), packaging_epoch())
+        server = binaries["amd64"]
+        stage_frontend(ROOT, stage, command_beside(server).read_bytes(), tray_beside(server).read_bytes(), packaging_epoch())
         docs(ROOT, stage, name)
     spec = (ROOT / f"packaging/rpm/{name}.spec").read_text(encoding="utf-8")
     listed = [line.split()[-1] for line in spec.split("%files\n", 1)[1].split("\n%changelog", 1)[0].splitlines()
@@ -133,15 +135,16 @@ def test_package_metadata_and_contents(rpms, binaries):
         assert "python" not in run("rpm", "-qpR", str(cli))  # one static binary
         listed = sorted(run("rpm", "-qpl", str(cli)).split())
         assert [p for p in listed if not p.startswith("/usr/share/platmon")] == [
-            "/usr/bin/platmon", "/usr/share/doc/platmon-frontend", "/usr/share/doc/platmon-frontend/CHANGELOG.md",
+            "/usr/bin/platmon", "/usr/bin/platmon-tray", "/usr/share/doc/platmon-frontend",
+            "/usr/share/doc/platmon-frontend/CHANGELOG.md",
             "/usr/share/doc/platmon-frontend/README.md", "/usr/share/licenses/platmon-frontend",
             "/usr/share/licenses/platmon-frontend/LICENSE", "/usr/share/licenses/platmon-frontend/copyright",
-            "/usr/share/man/man1/platmon.1.gz"]
+            "/usr/share/man/man1/platmon-tray.1.gz", "/usr/share/man/man1/platmon.1.gz"]
         assert {"/usr/share/platmon/frontends/web/index.html", "/usr/share/platmon/frontends/web/app.js",
                 "/usr/share/platmon/frontends/web/assets/brand/favicon.svg"} <= set(listed)
         command = [line for line in query(cli, "[%{FILENAMES} %{FILEMODES:perms}\n]").splitlines()
-                   if line.startswith("/usr/bin/platmon ")]
-        assert command == ["/usr/bin/platmon -rwxr-xr-x"]
+                   if line.startswith("/usr/bin/platmon")]
+        assert command == ["/usr/bin/platmon -rwxr-xr-x", "/usr/bin/platmon-tray -rwxr-xr-x"]
 
 
 def test_checksums_and_repeated_builds_match(rpms, binaries, tmp_path):

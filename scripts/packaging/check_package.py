@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Extract and smoke-test platmon's .deb and platmon-frontend's outside the checkout, without installing them, on
 a host of the server's architecture: the server alone first (the API, and / naming platmon-frontend), then with
-platmon-frontend's files beside it (the web page, the platmon command)."""
+platmon-frontend's files beside it (the web page, the platmon command, the tray's --version)."""
 import argparse
 import json
 import os
@@ -75,10 +75,16 @@ def check(package, frontend_package=None):
                 except urllib.error.HTTPError as e:
                     if e.code != 404 or b"platmon-frontend" not in e.read():
                         raise ValueError(f"/ without the page: {e.code}, not a 404 naming platmon-frontend")
-                subprocess.run(["dpkg-deb", "-x", str(frontend_package), str(root)], check=True)  # the page and command
+                subprocess.run(["dpkg-deb", "-x", str(frontend_package), str(root)], check=True)  # the page, command, tray
                 result = subprocess.check_output([str(cli), "--version"], cwd=work, env=env, text=True).strip()
                 if result != f"platmon {release}":
                     raise ValueError(f"version mismatch: {result!r} != 'platmon {release}'")
+                tray = root / "usr/bin/platmon-tray"
+                result = subprocess.check_output([str(tray), "--version"], cwd=work, env=env, text=True).strip()
+                if result != f"platmon-tray {release}":
+                    raise ValueError(f"version mismatch: {result!r} != 'platmon-tray {release}'")
+                if (root / "etc/xdg/autostart").exists():  # the tray starts only for users who ask (--autostart)
+                    raise ValueError("platmon-frontend starts the tray for every user (/etc/xdg/autostart)")
                 for route in ("/api/status", "/api/observations", "/api/history", "/api/samples",
                               "/api/observation-samples?group=battery", "/text", "/", "/app.js", "/styles.css",
                               "/assets/brand/platmon-logo-light.svg", "/assets/brand/platmon-logo-dark.svg",
@@ -103,7 +109,7 @@ def check(package, frontend_package=None):
                     process.kill()
                     process.wait(timeout=5)
     print(f"package smoke passed: {package.name} alone (API, / naming platmon-frontend), then with "
-          f"{frontend_package.name} (CLI, web and SVG)")
+          f"{frontend_package.name} (CLI, tray, web and SVG)")
 
 
 def main():

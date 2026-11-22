@@ -2,8 +2,9 @@
 """Build .rpm packages with stdlib + the host's rpmbuild, from the same files as the .deb packages.
 
 platmon, one package per architecture (x86_64, aarch64): the static Rust server from native/build.sh, its
-unit and configuration, without Python. platmon-frontend, per architecture too: the web page and the `platmon`
-command, the static Rust binary built beside the server; platmon recommends it. Nothing is compiled: packaging/rpm/*.spec copy the staged files (package.py's). No
+unit and configuration, without Python. platmon-frontend, per architecture too: the web page, the `platmon`
+command and the tray, static Rust binaries built beside the server; platmon recommends it. Nothing is compiled:
+packaging/rpm/*.spec copy the staged files (package.py's). No
 interpreter, OS software, build tools or hardware binaries are bundled; the packages are not signed.
 rpmbuild comes with the host's rpm (Fedora: rpm-build; Debian and Ubuntu: rpm).
 """
@@ -18,10 +19,10 @@ import time
 
 if __package__:
     from .package import (ROOT, check_binary, command_beside, copy_file, default_binary, packaging_epoch, stage_frontend,
-                          stage_server, version)
+                          stage_server, tray_beside, version)
 else:  # run as a script, from its own directory
     from package import (ROOT, check_binary, command_beside, copy_file, default_binary, packaging_epoch, stage_frontend,
-                         stage_server, version)
+                         stage_server, tray_beside, version)
 
 # Debian architecture (package.py's, for the binaries): the RPM one. armhf is not built: its binary is
 # ARMv6 and the RPM distributions that still have 32-bit ARM have armv7hl.
@@ -30,8 +31,8 @@ ARCHES = {"amd64": "x86_64", "arm64": "aarch64"}
 
 def build(output, release="1", root=ROOT, epoch=None, binaries=None):
     """Build one platmon package per architecture in `binaries` ({Debian arch: server path}; default: amd64 and
-    arm64, from native/target), then one platmon-frontend per architecture from the platmon command beside each
-    server, and SHA256SUMS; returns their paths, platmon's first."""
+    arm64, from native/target), then one platmon-frontend per architecture from the platmon command and the tray
+    beside each server, and SHA256SUMS; returns their paths, platmon's first."""
     upstream = version(root)
     if not re.fullmatch(r"[1-9][0-9]*", release):
         raise ValueError("release must be a positive integer")
@@ -47,6 +48,7 @@ def build(output, release="1", root=ROOT, epoch=None, binaries=None):
         raise ValueError("architectures must be among: " + ", ".join(ARCHES))
     bodies = {arch: check_binary(arch, binaries[arch]) for arch in sorted(binaries)}
     commands = {arch: check_binary(arch, command_beside(binaries[arch]), server=False) for arch in bodies}
+    trays = {arch: check_binary(arch, tray_beside(binaries[arch]), server=False, what="tray") for arch in bodies}
     rpms = [output / f"platmon-{upstream}-{release}.{ARCHES[arch]}.rpm" for arch in bodies]
     frontend_rpms = [output / f"platmon-frontend-{upstream}-{release}.{ARCHES[arch]}.rpm" for arch in commands]
     if any(path.exists() for path in (*rpms, *frontend_rpms, output / "SHA256SUMS")):
@@ -60,7 +62,7 @@ def build(output, release="1", root=ROOT, epoch=None, binaries=None):
     for (arch, body), rpm in zip(commands.items(), frontend_rpms):
         with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
             stage = Path(directory)
-            stage_frontend(root, stage, body, epoch)
+            stage_frontend(root, stage, body, trays[arch], epoch)
             docs(root, stage, "platmon-frontend")
             rpmbuild(root, "platmon-frontend", stage, rpm, ARCHES[arch], upstream, release, epoch)
     rpms += frontend_rpms
@@ -110,8 +112,8 @@ def main():
     parser.add_argument("--output", default=str(ROOT / "dist/rpm"), help="fresh output directory (default dist/rpm)")
     parser.add_argument("--release", default="1", help="RPM release, the packaging revision (default 1)")
     parser.add_argument("--binary", action="append", metavar="ARCH=PATH",
-                        help="a server binary for one architecture, amd64 or arm64, the platmon command beside "
-                             "it (repeat; default: both from native/target, built by native/build.sh)")
+                        help="a server binary for one architecture, amd64 or arm64, the platmon command and the tray "
+                             "beside it (repeat; default: both from native/target, built by native/build.sh)")
     args = parser.parse_args()
     try:
         value = os.environ.get("SOURCE_DATE_EPOCH")

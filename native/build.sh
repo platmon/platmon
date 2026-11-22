@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The candidate's build, in a throwaway container (no Rust toolchain on the host needed):
 #   native/build.sh   -> native/target/{x86_64,aarch64}-unknown-linux-musl/release/platmon-server
-#                        and platmon (the platmon command, the workspace's frontend) beside it
+#                        and platmon and platmon-tray (the command and the tray, the workspace's frontend) beside it
 # The system allocator only: no features (cache-alloc and mimalloc are records, built by their own scripts,
 # never here and never with --all-features), Cargo.lock as committed (--locked), both static musl targets.
 # Each server binary must carry the system allocator's mark (src/main.rs, ALLOCATOR_MARK); then the SHA-256
@@ -23,4 +23,5 @@ for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
     exit 1
   fi
 done
-sha256sum target/*-unknown-linux-musl/release/platmon-server target/*-unknown-linux-musl/release/platmon
+sha256sum target/*-unknown-linux-musl/release/platmon-server target/*-unknown-linux-musl/release/platmon \
+  target/*-unknown-linux-musl/release/platmon-tray

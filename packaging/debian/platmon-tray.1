@@ -1,0 +1,83 @@
+.TH PLATMON-TRAY 1 "November 2026" "platmon" "User Commands"
+.SH NAME
+platmon-tray \- show the state of a platmon service as a tray icon
+.SH SYNOPSIS
+.B platmon-tray
+.RI [ host[:port] ]
+.br
+.B platmon-tray
+.RB [ --autostart " | " --no-autostart ]
+.RI [ host[:port] ]
+.br
+.B platmon-tray
+.RB [ --help " | " --version ]
+.SH DESCRIPTION
+platmon-tray shows the state of a running platmon service as an icon in the
+desktop's tray: ok, warning, critical or not reachable, with the same levels
+as the web page and the platmon command.
+The default host is localhost and the default port is 9797.
+.PP
+The tooltip names the host and the state. When all is well it shows the CPU
+and memory use and the hottest temperature; otherwise up to three readings
+that need attention, critical ones first.
+Not reachable means the service does not answer, or has no current data
+(starting or stale).
+Clicking the icon opens the web page in the default browser (xdg-open).
+.PP
+platmon-tray only reads the HTTP API: /api/status and /api/stats every
+10 seconds and /api/observations every 60 seconds.
+It never controls the service.
+.PP
+The icon is a StatusNotifierItem on the D-Bus session bus.
+KDE Plasma, XFCE and Cinnamon show such icons as installed; Ubuntu's GNOME
+shows them through its AppIndicator extension; other GNOME desktops need
+that extension installed.
+.SH OPTIONS
+.TP
+.B --autostart
+Write
+.I ~/.config/autostart/platmon-tray.desktop
+so that the tray starts at the user's next login, with the host given, then
+exit. The package starts nothing by itself.
+.TP
+.B --no-autostart
+Remove that file, then exit.
+.TP
+.B --help
+Display usage and exit.
+.TP
+.B --version
+Display the version and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+A failure: no session bus, the session bus lost, or the autostart file not
+written.
+.TP
+.B 2
+A usage error.
+.TP
+.B 3
+No StatusNotifierWatcher on the session bus: this desktop shows no tray
+icons.
+.SH ENVIRONMENT
+.TP
+.B DBUS_SESSION_BUS_ADDRESS
+The session bus (unix:path= or unix:abstract=); without it,
+.IR $XDG_RUNTIME_DIR/bus .
+.TP
+.B XDG_CONFIG_HOME
+Where the autostart file goes, instead of
+.IR ~/.config .
+.SH EXAMPLES
+.B platmon-tray
+.br
+.B platmon-tray 192.168.1.10:9797
+.br
+.B platmon-tray --autostart
+.SH SEE ALSO
+.BR platmon (1),
+.BR xdg-open (1)

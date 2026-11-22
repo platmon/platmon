@@ -3,7 +3,7 @@
 Name: platmon-frontend
 Version: @VERSION@
 Release: @RELEASE@
-Summary: Web page and terminal client for the platmon platform monitor
+Summary: Web page, terminal client and tray icon for the platmon platform monitor
 License: Apache-2.0 AND (MIT OR Apache-2.0) AND MIT
 URL: https://github.com/platmon/platmon
 # platmon-cli up to this release: dnf replaces it with this package. The web page came from platmon before
@@ -17,9 +17,10 @@ AutoReqProv: no
 
 %description
 The frontends of a platmon service: the web page the platmon server sends
-from /usr/share/platmon, and the platmon command, a live view of the HTTP
-API in the terminal, this device's by default. The command is one static
-native binary, without Python.
+from /usr/share/platmon, the platmon command, a live view of the HTTP API
+in the terminal, this device's by default, and platmon-tray, its state as
+a tray icon (StatusNotifierItem; started at login only for the users who
+ask for it). They are static native binaries, without Python.
 
 %install
 cp -a @STAGE@/. %{buildroot}/
@@ -31,7 +32,9 @@ fi
 
 %files
 /usr/bin/platmon
+/usr/bin/platmon-tray
 /usr/share/man/man1/platmon.1.gz
+/usr/share/man/man1/platmon-tray.1.gz
 /usr/share/platmon
 %doc /usr/share/doc/platmon-frontend
 %license /usr/share/licenses/platmon-frontend
