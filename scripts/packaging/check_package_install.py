@@ -22,9 +22,12 @@ def invoke(*args, success=True):
     return result.stdout.strip()
 
 
-def cli_beside(package):
-    """platmon-cli's .deb of the same version and architecture, beside package (package.py writes them together)."""
-    path = package.parent / ("platmon-cli_" + invoke("dpkg-deb", "-f", str(package), "Version") + "_"
+PAGE = "/usr/share/platmon/frontends/web/index.html"
+
+
+def frontend_beside(package):
+    """platmon-frontend's .deb of the same version and architecture, beside package (package.py writes them together)."""
+    path = package.parent / ("platmon-frontend_" + invoke("dpkg-deb", "-f", str(package), "Version") + "_"
                              + invoke("dpkg-deb", "-f", str(package), "Architecture") + ".deb")
     if not path.is_file():
         raise RuntimeError(f"no {path.name} beside {package.name}")
@@ -42,34 +45,38 @@ def inside(first, second):
     first_version = invoke("dpkg-deb", "-f", str(first), "Version")
     second_version = invoke("dpkg-deb", "-f", str(second), "Version")
     invoke("dpkg", "--compare-versions", first_version, "lt", second_version)
-    first_cli, second_cli = cli_beside(first), cli_beside(second)
-    # The server installs and runs without platmon-cli (only recommended), then the command comes with it.
+    first_frontend, second_frontend = frontend_beside(first), frontend_beside(second)
+    # The server installs and runs without platmon-frontend (only recommended), then the command and the web
+    # page come with it.
     out = invoke("dpkg", "-i", str(first))
     assert NOTICE in out, out  # the first installation says where it listens, once
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == first_version
-    assert not Path("/usr/bin/platmon").exists()
+    assert not Path("/usr/bin/platmon").exists() and not Path("/usr/share/platmon").exists()
     # the server's name up to 1.6.0 still runs it
     assert invoke("/usr/lib/platmon/platmon-native", "--version") == "platmon-server " + first_version.split("-")[0]
-    invoke("dpkg", "-i", str(first_cli))
+    invoke("dpkg", "-i", str(first_frontend))
     assert invoke("/usr/bin/platmon", "--version") == "platmon " + first_version.split("-")[0]
-    assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-cli: /usr/bin/platmon"
+    assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-frontend: /usr/bin/platmon"
+    assert invoke("dpkg", "-S", PAGE) == "platmon-frontend: " + PAGE
     invoke("systemctl", "is-enabled", "platmon.service")
     custom = "[http]\nbind = 127.0.0.1\nport = 19797\n[history]\nenabled = no\n"
     ini.write_text(custom)
     invoke("systemctl", "disable", "platmon.service")
-    out = invoke("dpkg", "--force-confold", "-i", str(second), str(second_cli))
+    out = invoke("dpkg", "--force-confold", "-i", str(second), str(second_frontend))
     assert "without authentication" not in out, out  # an upgrade does not repeat it
     assert ini.read_text() == custom
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == second_version
-    assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon-cli") == second_version
+    assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon-frontend") == second_version
     assert invoke("systemctl", "is-enabled", "platmon.service", success=False) == "disabled"
-    # The documented rollback moves platmon alone; the newer platmon-cli stays and keeps the command.
+    # Within one release, rolling platmon back moves it alone; the newer platmon-frontend stays and keeps the
+    # command and the page.
     invoke("dpkg", "--force-confold", "-i", str(first))
     assert invoke("dpkg-query", "-W", "-f=${Version}", "platmon") == first_version
-    assert invoke("dpkg-query", "-W", "-f=${Version} ${Status}", "platmon-cli") == second_version + " install ok installed"
-    assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-cli: /usr/bin/platmon"
+    assert invoke("dpkg-query", "-W", "-f=${Version} ${Status}", "platmon-frontend") == second_version + " install ok installed"
+    assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-frontend: /usr/bin/platmon"
+    assert invoke("dpkg", "-S", PAGE) == "platmon-frontend: " + PAGE
     invoke("systemctl", "mask", "platmon.service")
-    invoke("dpkg", "--force-confold", "-i", str(first), str(first_cli))
+    invoke("dpkg", "--force-confold", "-i", str(first), str(first_frontend))
     assert unit.is_symlink() and os.readlink(unit) == "/dev/null"
     assert ini.read_text() == custom
     invoke("systemctl", "unmask", "platmon.service")
@@ -77,9 +84,9 @@ def inside(first, second):
     assert ini.read_text() == custom
     assert not Path("/usr/lib/platmon/platmon-server").exists()
     assert not os.path.lexists("/usr/lib/platmon/platmon-native")
-    assert Path("/usr/bin/platmon").exists()  # its own package
-    invoke("dpkg", "--remove", "platmon-cli")
-    assert not Path("/usr/bin/platmon").exists()
+    assert Path("/usr/bin/platmon").exists() and Path(PAGE).exists()  # their own package
+    invoke("dpkg", "--remove", "platmon-frontend")
+    assert not Path("/usr/bin/platmon").exists() and not Path(PAGE).exists()
     invoke("dpkg", "--purge", "platmon")
     assert not ini.exists()
     # A source unit must be refused before it or any source-installed code is lost.
@@ -95,7 +102,7 @@ def inside(first, second):
     local = Path("/usr/local/bin/platmon")
     local.parent.mkdir(parents=True, exist_ok=True)
     local.write_text("retained local command\n")
-    out = invoke("dpkg", "--force-confold", "-i", str(first), str(first_cli))
+    out = invoke("dpkg", "--force-confold", "-i", str(first), str(first_frontend))
     assert ini.read_text() == custom and local.read_text() == "retained local command\n"
     # a first installation again, of the kept INI: its address, and no advice for a loopback bind
     assert "platmon serves http://127.0.0.1:19797 without authentication." in out and "To restrict" not in out, out
@@ -107,11 +114,11 @@ def inside(first, second):
     invoke("dpkg", "--configure", "platmon")
     extra = ini.parent / "retained-backup.ini"
     extra.write_text("local backup\n")
-    invoke("dpkg", "--purge", "platmon", "platmon-cli")
+    invoke("dpkg", "--purge", "platmon", "platmon-frontend")
     assert not ini.exists() and extra.read_text() == "local backup\n"
     assert local.read_text() == "retained local command\n"
-    print("dpkg lifecycle passed: the server without platmon-cli, then with it, config-preserving "
-          "upgrade/downgrade, platmon rolled back alone beside platmon-cli, disabled/masked state, the listen notice on first installs only, remove/purge, migration refusal and invalid config recovery")
+    print("dpkg lifecycle passed: the server without platmon-frontend, then with it, config-preserving "
+          "upgrade/downgrade, platmon rolled back alone beside platmon-frontend, disabled/masked state, the listen notice on first installs only, remove/purge, migration refusal and invalid config recovery")
 
 
 def check(first, second, image):

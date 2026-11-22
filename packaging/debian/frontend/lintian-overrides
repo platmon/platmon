@@ -1,5 +1,5 @@
 # The platmon command is built static on purpose (musl, no shared libraries), as the server is, so one
 # package runs on every supported distribution release; copyright lists what it includes.
-platmon-cli [arm64 armhf]: statically-linked-binary [usr/bin/platmon]
+platmon-frontend [arm64 armhf]: statically-linked-binary [usr/bin/platmon]
 # The amd64 build is a static PIE: an ELF of type DYN without shared libraries, not a shared library.
-platmon-cli [amd64]: shared-library-lacks-prerequisites [usr/bin/platmon]
+platmon-frontend [amd64]: shared-library-lacks-prerequisites [usr/bin/platmon]

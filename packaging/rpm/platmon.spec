@@ -7,16 +7,16 @@ Summary: Lightweight read-only Linux platform monitor
 License: Apache-2.0 AND (MIT OR Apache-2.0) AND MIT
 URL: https://github.com/platmon/platmon
 Requires: systemd
-Recommends: platmon-cli
+Recommends: platmon-frontend
 # The server is one static binary: no dependencies to find, no debug package, nothing to strip.
 AutoReqProv: no
 %global debug_package %{nil}
 %global __os_install_post %{nil}
 
 %description
-Collects platform metrics with a static native server and exposes an HTTP
-API and web viewer. The terminal client, the platmon command, is in
-platmon-cli.
+Collects platform metrics with a static native server and exposes them in
+an HTTP API. The web page it serves and the terminal client, the platmon
+command, are in platmon-frontend.
 
 %install
 cp -a @STAGE@/. %{buildroot}/
@@ -118,7 +118,6 @@ fi
 /usr/lib/systemd/system/platmon.service
 %dir /etc/platmon
 %config(noreplace) /etc/platmon/platmon.ini
-/usr/share/platmon
 %doc /usr/share/doc/platmon
 %license /usr/share/licenses/platmon
 

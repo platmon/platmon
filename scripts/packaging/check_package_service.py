@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Check the packaged service under a booted systemd, inside a disposable container.
 
-From a previous package (the released Python one) to this one and platmon-cli (beside it, of the same
-version): the upgrade keeps an edited INI and swaps the server in the same unit, and platmon-cli takes over
-the platmon command; a failed start fails configuration and installing the previous package
+From a previous package (the released Python one, which had the platmon command and the web page) to this one
+and platmon-frontend (beside it, of the same version): the upgrade keeps an edited INI and swaps the server in
+the same unit, and platmon-frontend takes over the platmon command and the web page, which the service sends; a failed start fails configuration and installing the previous package
 recovers; a disabled service is not started; an invalid INI stops the upgrade before the restart; after
 the container restarts (systemd boots again) the enabled service is back. The container gets
 CAP_SYS_ADMIN without seccomp/AppArmor confinement for systemd's sandboxing, never --privileged;
@@ -79,8 +79,8 @@ def python_server(exe):
 def upgrade(old, new):
     old_version = invoke("dpkg-deb", "-f", str(old), "Version")
     new_version = invoke("dpkg-deb", "-f", str(new), "Version")
-    cli = new.parent / f"platmon-cli_{new_version}_{invoke('dpkg-deb', '-f', str(new), 'Architecture')}.deb"
-    assert cli.is_file(), f"no {cli.name} beside {new.name}"
+    frontend = new.parent / f"platmon-frontend_{new_version}_{invoke('dpkg-deb', '-f', str(new), 'Architecture')}.deb"
+    assert frontend.is_file(), f"no {frontend.name} beside {new.name}"
     invoke("dpkg", "--compare-versions", old_version, "lt", new_version)
     # The previous package, then an administrator's INI.
     dpkg("-i", str(old))
@@ -91,16 +91,20 @@ def upgrade(old, new):
     before, exe = ready()
     assert python_server(exe), exe
     # The upgrade: the INI kept, the same unit now runs the native server, a new instance; the platmon
-    # command moves from the old platmon to platmon-cli (Replaces).
-    out = dpkg("--force-confold", "-i", str(new), str(cli))
+    # command and the web page move from the old platmon to platmon-frontend (Replaces).
+    out = dpkg("--force-confold", "-i", str(new), str(frontend))
     assert "health check skipped" not in out, out
-    assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-cli: /usr/bin/platmon"
+    assert invoke("dpkg", "-S", "/usr/bin/platmon") == "platmon-frontend: /usr/bin/platmon"
+    page = "/usr/share/platmon/frontends/web/index.html"
+    assert invoke("dpkg", "-S", page) == "platmon-frontend: " + page
     assert invoke("/usr/bin/platmon", "--version") == "platmon " + new_version.split("-")[0]
     assert package() == f"{new_version} {invoke('dpkg', '--print-architecture')} install ok installed", package()
     after, exe = ready()
     assert exe == SERVER, exe
     assert after["instance_id"] != before["instance_id"]
     assert INI.read_text() == CUSTOM
+    with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=5) as response:
+        assert b'src="/app.js"' in response.read()  # the page, from platmon-frontend's files
     # A start that fails (the port held by another process) fails configuration.
     invoke("systemctl", "stop", "platmon.service")
     holder = socket.socket()
@@ -113,15 +117,15 @@ def upgrade(old, new):
         assert package().endswith("install ok half-configured"), package()
     finally:
         holder.close()
-    # Installing the previous package recovers from there; it has the platmon command itself, so
-    # platmon-cli, which breaks it, goes first (apt removes it for the same reason).
-    dpkg("--remove", "platmon-cli")
+    # Installing the previous package recovers from there; it has the platmon command and the web page
+    # itself, so platmon-frontend, which breaks it, goes first (apt removes it for the same reason).
+    dpkg("--remove", "platmon-frontend")
     dpkg("--force-confold", "-i", str(old))
     assert package() == f"{old_version} all install ok installed", package()
     status, exe = ready()
     assert python_server(exe), exe
     assert INI.read_text() == CUSTOM
-    dpkg("--force-confold", "-i", str(new), str(cli))
+    dpkg("--force-confold", "-i", str(new), str(frontend))
     status, exe = ready()
     assert exe == SERVER, exe
     # A disabled, stopped service stays stopped; the check says it was skipped.
@@ -141,7 +145,7 @@ def upgrade(old, new):
     dpkg("--configure", "platmon")
     status, exe = ready()
     assert exe == SERVER and package().endswith("install ok installed")
-    print("service upgrade passed: INI kept, server swapped in the unit, the command in platmon-cli, failed start, "
+    print("service upgrade passed: INI kept, server swapped in the unit, the command and the page in platmon-frontend, failed start, "
           "recovery by the previous package, disabled service, invalid INI")
 
 

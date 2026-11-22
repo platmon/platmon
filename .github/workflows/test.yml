@@ -58,7 +58,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/hub"
           "$RUNNER_TEMP/hub/bin/pip" install --quiet --require-hashes -r native/tools/equivalence/hub-requirements.txt
           "$RUNNER_TEMP/hub/bin/python" -I native/tools/equivalence/hub_contract.py "$SERVER"
-      # the servers and the platmon commands beside them (platmon-cli's)
+      # the servers and the platmon commands beside them (platmon-frontend's)
       - uses: actions/upload-artifact@v4
         with:
           name: platmon-server

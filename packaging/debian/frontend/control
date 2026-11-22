@@ -1,0 +1,16 @@
+Package: platmon-frontend
+Source: platmon
+Version: @VERSION@
+Section: admin
+Priority: optional
+Architecture: @ARCH@
+Breaks: platmon (<< @UPSTREAM@), platmon-cli (<< @UPSTREAM@)
+Replaces: platmon (<< @UPSTREAM@), platmon-cli (<< @UPSTREAM@)
+Maintainer: platmon maintainers <jwsung91@users.noreply.github.com>
+Homepage: https://github.com/platmon/platmon
+Installed-Size: @SIZE@
+Description: web page and terminal client for the platmon platform monitor
+ The frontends of a platmon service: the web page the platmon server sends
+ from /usr/share/platmon, and the platmon command, a live view of the HTTP
+ API in the terminal, this device's by default. The command is one static
+ native binary, without Python.

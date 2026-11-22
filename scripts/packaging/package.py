@@ -2,9 +2,9 @@
 """Build .deb packages, source archive and checksums with stdlib + the host's dpkg-deb.
 
 platmon, one package per architecture (amd64, arm64, armhf): the static Rust server from native/build.sh, its
-unit and web page, without Python. platmon-cli, per architecture too: the `platmon` command, the static Rust
-binary built beside the server, which platmon recommends. No interpreter, OS software, build tools or hardware
-binaries are bundled.
+unit and configuration, without Python. platmon-frontend, per architecture too: the web page the server sends
+from /usr/share/platmon and the `platmon` command, the static Rust binary built beside the server; platmon
+recommends it. No interpreter, OS software, build tools or hardware binaries are bundled.
 """
 import argparse
 from email.utils import parsedate_to_datetime
@@ -134,7 +134,7 @@ def source_archive(root, output, release, epoch):
 
 def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
     """Build one platmon package per architecture in `binaries` ({arch: server path}; default: RELEASED, from
-    native/target), then one platmon-cli per architecture from the platmon command beside each server; returns
+    native/target), then one platmon-frontend per architecture from the platmon command beside each server; returns
     their paths, platmon's first."""
     release = version(root)
     if not re.fullmatch(r"[1-9][0-9]*", revision):
@@ -153,15 +153,15 @@ def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
     commands = {arch: check_binary(arch, command_beside(binaries[arch]), server=False) for arch in bodies}
     deb_version = f"{release}-{revision}"
     debs = [output / f"platmon_{deb_version}_{arch}.deb" for arch in bodies]
-    cli_debs = [output / f"platmon-cli_{deb_version}_{arch}.deb" for arch in commands]
+    frontend_debs = [output / f"platmon-frontend_{deb_version}_{arch}.deb" for arch in commands]
     source = output / f"platmon-{release}.tar.gz"
-    outputs = (*debs, *cli_debs, source, output / "BUILD.json", output / "SHA256SUMS")
+    outputs = (*debs, *frontend_debs, source, output / "BUILD.json", output / "SHA256SUMS")
     if any(path.exists() for path in outputs):
         raise ValueError("output files already exist; use a fresh output directory")
     for (arch, body), deb in zip(bodies.items(), debs):
         build_deb(root, deb, arch, body, release, revision, epoch)
-    for (arch, body), deb in zip(commands.items(), cli_debs):
-        build_cli_deb(root, deb, arch, body, release, revision, epoch)
+    for (arch, body), deb in zip(commands.items(), frontend_debs):
+        build_frontend_deb(root, deb, arch, body, release, revision, epoch)
     source_archive(root, source, release, epoch)
     inputs = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in source_files(root)}
@@ -172,18 +172,11 @@ def build(output, revision="1", root=ROOT, epoch=None, binaries=None):
     (output / "BUILD.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     checksums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in outputs[:-1])
     (output / "SHA256SUMS").write_text(checksums, encoding="utf-8")
-    return debs + cli_debs
+    return debs + frontend_debs
 
 
 def stage_server(root, stage, server, release):
-    """The server's files, the same in every package format: the binary, its unit and configuration, the
-    web page."""
-    web = root / "frontends/web"
-    for path in sorted(web.rglob("*")):
-        if path.is_file() and path.suffix in (".html", ".css", ".js", ".svg", ".json"):
-            if path.is_symlink():
-                raise ValueError(f"unexpected web file: {path}")
-            copy_file(path, stage / "usr/share/platmon/frontends/web" / path.relative_to(web))
+    """The server's files, the same in every package format: the binary, its unit and configuration."""
     binary = stage / "usr/lib/platmon/platmon-server"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(server)
@@ -196,8 +189,15 @@ def stage_server(root, stage, server, release):
     copy_file(root / "platmon.ini", stage / "etc/platmon/platmon.ini")
 
 
-def stage_cli(root, stage, command, epoch):
-    """platmon-cli's files, the same in every package format: the platmon command and its manual."""
+def stage_frontend(root, stage, command, epoch):
+    """platmon-frontend's files, the same in every package format: the web page (where the unit's --web points)
+    and the platmon command and its manual."""
+    web = root / "frontends/web"
+    for path in sorted(web.rglob("*")):
+        if path.is_file() and path.suffix in (".html", ".css", ".js", ".svg", ".json"):
+            if path.is_symlink():
+                raise ValueError(f"unexpected web file: {path}")
+            copy_file(path, stage / "usr/share/platmon/frontends/web" / path.relative_to(web))
     cli = stage / "usr/bin/platmon"
     cli.parent.mkdir(parents=True)
     cli.write_bytes(command)
@@ -207,7 +207,7 @@ def stage_cli(root, stage, command, epoch):
 
 
 def build_deb(root, deb, arch, server, release, revision, epoch):
-    """platmon for one architecture: the server, its unit and configuration, the web page."""
+    """platmon for one architecture: the server, its unit and configuration."""
     with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
         stage = Path(directory)
         stage_server(root, stage, server, release)
@@ -218,17 +218,18 @@ def build_deb(root, deb, arch, server, release, revision, epoch):
              overrides, {"@VERSION@": f"{release}-{revision}", "@ARCH@": arch}, revision, epoch)
 
 
-def build_cli_deb(root, deb, arch, command, release, revision, epoch):
-    """platmon-cli for one architecture: the platmon command and its manual. It breaks and replaces the platmon packages that had
-    the command, those before 1.7.0 (a fixed bound in its control file, not this release's version, so that
-    rolling platmon back to a release that has no command keeps the newer platmon-cli)."""
+def build_frontend_deb(root, deb, arch, command, release, revision, epoch):
+    """platmon-frontend for one architecture: the web page, the platmon command and its manual. It breaks and
+    replaces platmon-cli, its name up to this release, and the platmon packages before this release, which had
+    the web page (and before 1.7.0 the command): both bounds are this release's upstream version, so that its
+    later packaging revisions still upgrade from them."""
     with tempfile.TemporaryDirectory(prefix="platmon-package-") as directory:
         stage = Path(directory)
-        stage_cli(root, stage, command, epoch)
-        docs(root, stage, "platmon-cli", release, revision, epoch)
-        overrides = (root / "packaging/debian/cli/lintian-overrides").read_text(encoding="utf-8")
-        pack(root, stage, deb, "platmon-cli", root / "packaging/debian/cli", ("postinst",), overrides,
-             {"@VERSION@": f"{release}-{revision}", "@ARCH@": arch}, revision, epoch)
+        stage_frontend(root, stage, command, epoch)
+        docs(root, stage, "platmon-frontend", release, revision, epoch)
+        overrides = (root / "packaging/debian/frontend/lintian-overrides").read_text(encoding="utf-8")
+        pack(root, stage, deb, "platmon-frontend", root / "packaging/debian/frontend", ("postinst",), overrides,
+             {"@VERSION@": f"{release}-{revision}", "@UPSTREAM@": release, "@ARCH@": arch}, revision, epoch)
 
 
 def docs(root, stage, package, release, revision, epoch, extra=()):

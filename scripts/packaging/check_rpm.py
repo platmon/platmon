@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Check the .rpm packages under a booted systemd, inside a disposable container.
 
-The first install refuses a local unit and then enables and starts the service without platmon-cli (only
-recommended), which then brings the platmon command; an upgrade keeps an edited INI and restarts the
+The first install refuses a local unit and then enables and starts the service without platmon-frontend (only
+recommended: / answers 404 naming it), which then brings the platmon command and the web page; an upgrade keeps an edited INI and restarts the
 service; an invalid INI is reported and the running server left alone; a disabled service is not started;
 a failed start is reported; a downgrade recovers; erasing stops and disables the service and keeps the
-edited INI as .rpmsave. The packages beside each one: platmon-cli of the same version. The container gets
+edited INI as .rpmsave. The packages beside each one: platmon-frontend of the same version. The container gets
 CAP_SYS_ADMIN without seccomp/AppArmor confinement for systemd's sandboxing, never --privileged; no host
 service, rpm database or source checkout is mounted in it.
 
@@ -19,6 +19,7 @@ from pathlib import Path
 import socket
 import subprocess
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -49,8 +50,18 @@ def field(package, tag):
     return invoke("rpm", "-qp", "--qf", f"%{{{tag}}}", str(package))
 
 
-def cli_beside(package):
-    path = package.parent / f"platmon-cli-{field(package, 'VERSION')}-{field(package, 'RELEASE')}.{field(package, 'ARCH')}.rpm"
+def page(port=PORT):
+    """GET / on the service: (status code, body)."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(f"http://127.0.0.1:{port}/", timeout=5) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def frontend_beside(package):
+    path = package.parent / f"platmon-frontend-{field(package, 'VERSION')}-{field(package, 'RELEASE')}.{field(package, 'ARCH')}.rpm"
     if not path.is_file():
         raise RuntimeError(f"no {path.name} beside {package.name}")
     return path
@@ -84,7 +95,7 @@ def ready(port=PORT, timeout=20):
 
 
 def lifecycle(first, second):
-    first_cli, second_cli = cli_beside(first), cli_beside(second)
+    first_frontend, second_frontend = frontend_beside(first), frontend_beside(second)
     first_version = field(first, "VERSION") + "-" + field(first, "RELEASE")
     second_version = field(second, "VERSION") + "-" + field(second, "RELEASE")
     installed = lambda name: invoke("rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", name, success=None)
@@ -94,24 +105,29 @@ def lifecycle(first, second):
     assert "local platmon.service exists" in out, out
     assert not Path(SERVER).exists() and LOCAL_UNIT.read_text().endswith("serve\n")
     LOCAL_UNIT.unlink()  # Only the fixture created above is removed.
-    # The first install enables and starts the service; the command comes with platmon-cli.
+    # The first install enables and starts the service; the command and the page come with platmon-frontend.
     out = rpm("-i", str(first))
     assert NOTICE in out, out  # the first installation says where it listens, once
     assert installed("platmon") == first_version
     assert invoke("systemctl", "is-enabled", "platmon.service") == "enabled"
     status, exe = ready(9797)
     assert exe == SERVER, exe
-    assert not Path("/usr/bin/platmon").exists()
-    rpm("-i", str(first_cli))
+    assert not Path("/usr/bin/platmon").exists() and not Path("/usr/share/platmon").exists()
+    code, body = page(9797)
+    assert code == 404 and b"platmon-frontend" in body, (code, body)
+    rpm("-i", str(first_frontend))
     assert invoke("/usr/bin/platmon", "--version") == "platmon " + field(first, "VERSION")
+    code, body = page(9797)
+    assert code == 200 and b'src="/app.js"' in body, (code, body[:200])
+    assert invoke("rpm", "-qf", "--qf", "%{NAME}", "/usr/share/platmon/frontends/web/index.html") == "platmon-frontend"
     INI.write_text(CUSTOM)
     invoke("systemctl", "restart", "platmon.service")
     before, _ = ready()
     # The upgrade keeps the INI and restarts the service.
-    out = rpm("-U", str(second), str(second_cli))
+    out = rpm("-U", str(second), str(second_frontend))
     assert "health check skipped" not in out and "failed" not in out, out
     assert "without authentication" not in out, out  # an upgrade does not repeat it
-    assert installed("platmon") == second_version and installed("platmon-cli") == second_version
+    assert installed("platmon") == second_version and installed("platmon-frontend") == second_version
     after, exe = ready()
     assert exe == SERVER and after["instance_id"] != before["instance_id"]
     assert INI.read_text() == CUSTOM and not Path(str(INI) + ".rpmnew").exists()
@@ -142,19 +158,20 @@ def lifecycle(first, second):
     finally:
         holder.close()
     # The downgrade recovers, with the INI.
-    rpm("-U", "--oldpackage", str(first), str(first_cli))
-    assert installed("platmon") == first_version and installed("platmon-cli") == first_version
+    rpm("-U", "--oldpackage", str(first), str(first_frontend))
+    assert installed("platmon") == first_version and installed("platmon-frontend") == first_version
     status, exe = ready()
     assert exe == SERVER and INI.read_text() == CUSTOM
-    # Erasing stops and disables the service, keeps the edited INI and leaves the command to platmon-cli.
+    # Erasing stops and disables the service, keeps the edited INI and leaves the command and the page to
+    # platmon-frontend.
     rpm("-e", "platmon")
     assert unit()["ActiveState"] == "inactive" and not Path(SERVER).exists()
     assert not Path("/etc/systemd/system/multi-user.target.wants/platmon.service").exists()
     assert Path(str(INI) + ".rpmsave").read_text() == CUSTOM
-    assert Path("/usr/bin/platmon").exists()
-    rpm("-e", "platmon-cli")
-    assert not Path("/usr/bin/platmon").exists()
-    print("rpm lifecycle passed: local unit refused, first install started (and its listen notice) without platmon-cli, then with it, "
+    assert Path("/usr/bin/platmon").exists() and Path("/usr/share/platmon/frontends/web/index.html").exists()
+    rpm("-e", "platmon-frontend")
+    assert not Path("/usr/bin/platmon").exists() and not Path("/usr/share/platmon").exists()
+    print("rpm lifecycle passed: local unit refused, first install started (and its listen notice) without platmon-frontend, then with it, "
           "upgrade with the INI kept, invalid INI, disabled service, failed start, downgrade, erase")
 
 
@@ -222,7 +239,7 @@ def check(first, second, image):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("package", help="a platmon .rpm, with platmon-cli's beside it")
+    parser.add_argument("package", help="a platmon .rpm, with platmon-frontend's beside it")
     parser.add_argument("upgrade", help="a platmon .rpm with a greater version-release, likewise")
     parser.add_argument("--image", default="fedora:44")
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
