@@ -4,15 +4,19 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 license = "Apache-2.0"
-description = "The platmon command (native/README.md); not part of platmon-server"
+description = "The platmon command and the tray, platmon-tray (native/README.md); not part of platmon-server"
 
 [dependencies]
 platmon-shared = { path = "../shared" }
 
 [target.'cfg(unix)'.dependencies]
-# the terminal (termios, the window size, signals); see ../Cargo.toml for the crate
+# the terminal (termios, the window size, signals) and the tray's getuid; see ../Cargo.toml for the crate
 libc = "=0.2.172"
 
 [target.'cfg(windows)'.dependencies]
-# the console's code page and Ctrl+C handler; see ../Cargo.toml for the crate
-windows-sys = { version = "=0.61.2", features = ["Win32_Globalization", "Win32_System_Console"] }
+# the command: the console's code page and Ctrl+C handler; the tray: its window, the notification-area icon,
+# ShellExecuteW and the Run value (Win32_Foundation, Win32_Graphics_Gdi for WNDCLASSEXW, LibraryLoader, Registry,
+# Shell, WindowsAndMessaging); see ../Cargo.toml for the crate
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi",
+                                                 "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Registry",
+                                                 "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
