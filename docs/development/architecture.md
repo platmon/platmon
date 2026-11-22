@@ -74,7 +74,7 @@ frontend's; the compiler enforces it.
 | `src/http.rs`, `shared/src/render.rs` | HTTP API, `/text` (the terminal client's plain screen) and the web page's files; reads published state only |
 | `shared/src/json.rs`, `src/pystr.rs` | JSON written as Python's `json` wrote it; the `str` methods the ports need |
 | `src/platform/` | Clocks, random bytes, the listening socket and the stop request, per OS |
-| `frontend/src/` | What the frontends share (`lib.rs`: the HTTP client `net.rs`, the screen and attention list `screen.rs`); `bin/platmon/` the `platmon` command (live view, terminal; `--once` prints `shared/src/render.rs`) |
+| `frontend/src/` | What the frontends share (`lib.rs`: the HTTP client `net.rs`, the screen and attention list `screen.rs`); `bin/platmon/` the `platmon` command (live view, terminal; `--once` prints `shared/src/render.rs`); `bin/platmon-tray/` the tray (StatusNotifierItem over D-Bus, `Shell_NotifyIconW`) |
 | `src/harness.rs`, `tools/` | Commands and scripts for the equivalence checks, measurements and candidate deployments |
 
 Equivalence checks run in CI (`native` job), with the fleet server's contract below; the Windows collector is checked by its unit tests and

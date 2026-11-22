@@ -2,8 +2,9 @@
 
 > **TL;DR**
 > - One `platmon` `.deb` per architecture (amd64, arm64, armhf) with the static native server and no Python;
->   the web page and the `platmon` command are `platmon-frontend` (`platmon-cli`, the command alone, up to
->   1.10.0), one per architecture too, which it recommends.
+>   the web page, the `platmon` command and the tray (`platmon-tray`, not started by the package) are
+>   `platmon-frontend` (`platmon-cli`, the command alone, up to 1.10.0), one per architecture too, which it
+>   recommends.
 > - Upgrading from 1.10.0: `sudo apt full-upgrade` or `sudo apt install platmon-frontend`; `apt upgrade` and
 >   `apt-get upgrade` keep `platmon` back while `platmon-cli` is installed ([Packages](#packages)).
 > - `.rpm` packages of the same files (x86_64, aarch64, platmon-frontend included) build too, for Fedora and
@@ -23,9 +24,9 @@ package uses the host's systemd, has no Python dependency and bundles no OS/NVID
 | Package | Contents | Relations |
 | --- | --- | --- |
 | `platmon` | the server (`/usr/lib/platmon/platmon-server`), its unit, `/etc/platmon/platmon.ini` | `Depends: systemd`; `Recommends: platmon-frontend` |
-| `platmon-frontend` | the web page (`/usr/share/platmon/frontends/web`, where the unit's `--web` points) and the `platmon` command (`/usr/bin/platmon`, `man platmon`) | none; `Conflicts`/`Replaces: platmon-cli` (a rename), `Breaks`/`Replaces: platmon` (the moved page), all `<<` its release |
+| `platmon-frontend` | the web page (`/usr/share/platmon/frontends/web`, where the unit's `--web` points), the `platmon` command (`/usr/bin/platmon`, `man platmon`) and the tray (`/usr/bin/platmon-tray`, `man platmon-tray`; nothing in `/etc/xdg/autostart`) | none; `Conflicts`/`Replaces: platmon-cli` (a rename), `Breaks`/`Replaces: platmon` (the moved page), all `<<` its release |
 
-The `platmon` command is the static native binary `native/build.sh` builds beside the server
+The `platmon` command and the tray are the static native binaries `native/build.sh` builds beside the server
 (`native/frontend/`), without dependencies. `platmon` recommends `platmon-frontend`, so apt installs it by
 default; `--no-install-recommends` leaves it out, and the server then answers the API as always and `/`
 with a 404 that names `platmon-frontend`. A package for an architecture does not mean that every OS/kernel
@@ -102,11 +103,12 @@ lintian --no-cfg --info --pedantic --fail-on error,warning "$platmon_dist"/*.deb
 The fresh output directory contains `platmon_<version>-1_amd64.deb`, `platmon_<version>-1_arm64.deb`,
 `platmon_<version>-1_armhf.deb`, `platmon-frontend_<version>-1_amd64.deb`, `platmon-frontend_<version>-1_arm64.deb`,
 `platmon-frontend_<version>-1_armhf.deb`, `platmon-<version>.tar.gz`, `BUILD.json` (input content hashes, the
-servers' and the commands' SHA-256 (`server_sha256`, `command_sha256`) and versions; `package_windows.py` adds
-the Windows server's and command's) and `SHA256SUMS`. The builder takes the servers from `native/target/` by
-default, or one per `--binary ARCH=PATH`, and the `platmon` command beside each (`platmon` in the same
-directory, where the build leaves it); it refuses a file that is not an ELF for that architecture, a server
-without the system allocator's mark and a command that is a server. `check_package.py` runs the extracted server, so it needs a host of the
+servers', the commands' and the trays' SHA-256 (`server_sha256`, `command_sha256`, `tray_sha256`) and versions;
+`package_windows.py` adds the Windows server's, command's and tray's) and `SHA256SUMS`. The builder takes the
+servers from `native/target/` by default, or one per `--binary ARCH=PATH`, and the `platmon` command and the
+tray beside each (`platmon` and `platmon-tray` in the same directory, where the build leaves them); it refuses a
+file that is not an ELF for that architecture, a server without the system allocator's mark and a command or
+tray that is a server. `check_package.py` runs the extracted server, so it needs a host of the
 package's architecture. The source archive includes `native/` (without `native/target/`),
 runtime, tests, installation/build scripts and documentation, excluding caches and
 private validation artifacts. With the same servers it can rebuild the packages without `.git`.
@@ -125,8 +127,8 @@ the source archive is an upstream distribution, not a Debian source package with
 `debian/rules` or a `.dsc` file.
 Revision 1 includes a scoped Lintian override for `initial-upload-closes-no-bugs`:
 this upstream distribution is not an upload to the Debian archive and has no Debian
-Intent To Package bug. Every revision overrides the tags of the deliberately static server and
-command, per architecture (`statically-linked-binary` on arm64 and armhf; `shared-library-lacks-prerequisites`
+Intent To Package bug. Every revision overrides the tags of the deliberately static server,
+command and tray, per architecture (`statically-linked-binary` on arm64 and armhf; `shared-library-lacks-prerequisites`
 on amd64, whose static PIE looks like a shared object). Other policy errors and warnings
 remain checked.
 
@@ -190,8 +192,11 @@ The published packages 1.0.0-1 to 1.3.0-1 have no attestation.
 
 The server goes to `/usr/lib/platmon/platmon-server` (with a `platmon-native` link, its name up to 1.6.0),
 the vendor unit to `/usr/lib/systemd/system/platmon.service`, and config to `/etc/platmon/platmon.ini`;
-`platmon-frontend` puts the web files in `/usr/share/platmon/`, the client in `/usr/bin/platmon` and its
-manual (`man platmon`).
+`platmon-frontend` puts the web files in `/usr/share/platmon/`, the client in `/usr/bin/platmon`, the tray in
+`/usr/bin/platmon-tray` and their manuals (`man platmon`, `man platmon-tray`). The tray is off by default:
+`platmon` recommends `platmon-frontend`, so an entry in `/etc/xdg/autostart` would start it for every user of a
+desktop (Jetson, Raspberry Pi OS) unasked; `platmon-tray --autostart` writes the user's own
+`~/.config/autostart` entry ([Tray](../guides/interfaces.md#tray)).
 
 From 1.10.0 or earlier, `platmon-frontend` takes the page from the old `platmon` and the command from
 `platmon-cli` (or, before 1.7.0, from `platmon`), up to its own release: it conflicts with and replaces
@@ -268,7 +273,7 @@ installations; source install/uninstall scripts refuse an installed dpkg package
 same servers (`native/build.sh`): `platmon-<version>-1.x86_64.rpm`, `platmon-<version>-1.aarch64.rpm`
 (the server, its unit, `/etc/platmon/platmon.ini` as `%config(noreplace)`; `Requires: systemd`,
 `Recommends: platmon-frontend`), `platmon-frontend-<version>-1.x86_64.rpm` and
-`platmon-frontend-<version>-1.aarch64.rpm` (the web page and the `platmon` command, no requirements), with
+`platmon-frontend-<version>-1.aarch64.rpm` (the web page, the `platmon` command and the tray, no requirements), with
 `SHA256SUMS`. `platmon-frontend` obsoletes `platmon-cli` (`noarch` with Python, 1.7.0 to 1.10.0) up to its
 release and provides it, so `dnf upgrade` from 1.10.0 replaces `platmon-cli` with it and moves the page from
 the old `platmon` (checked with the 1.10.0 packages and a local repository). There is no 32-bit ARM package: the armhf server is ARMv6, and the RPM distributions
