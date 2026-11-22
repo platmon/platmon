@@ -1,8 +1,11 @@
 # Release readiness
 
 > **TL;DR**
-> - Release gates and evidence per version, newest first (1.10.0 at the top).
+> - Release gates and evidence per version, newest first (1.11.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
+> - 1.11.0, the frontends in `platmon-frontend` without Python (the web page, the `platmon` command in Rust,
+>   the new tray `platmon-tray`): being prepared (2026-11-23). CI passed on every merged change; the checks
+>   on devices are open.
 > - 1.10.0, Windows 11 supported with an installer, IPv6, a per-address connection limit, query strings
 >   ignored on fixed paths and a Prometheus exporter: published 2026-11-22 and in the APT repository.
 >   Its CI packages passed the Orin's package smoke, live HTTP, the user unit's checks and a 24 h soak, and the
@@ -34,6 +37,34 @@
 >   After publishing, the Orin went from 1.6.0 to 1.7.0 with `apt install platmon` (2026-11-03).
 >   Not verified for 1.7.0: the root unit's soak and its sandbox, `hub_check.py`, armhf on a real device
 >   under systemd, `apt upgrade` to it on a real device.
+
+## 1.11.0 release gate (2026-11-23)
+
+Changes since 1.10.0 (CHANGELOG.md): the `platmon` command ported to Rust (#239) and shipped in place of
+`frontends/cli.py`, with `native/` a Cargo workspace (#240); `platmon-cli` renamed `platmon-frontend` with the
+web page moved into it, the server serving its web directory without a list, `/api/status`'s `version` and
+`/` answering 404 without the page (#241); the tray `platmon-tray` on Linux and Windows (#242). The design is
+in [remaining work](../development/remaining-work.md#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22).
+
+The HTTP API's schema versions and the `platmon.ini` keys and defaults are unchanged from 1.10.0. Answers
+change for `/` without the page (404 where the connection was closed), `/api/status` (an added `version`) and
+files in the web directory other than the page's own (served when their type is known). The packages change:
+`platmon-frontend` per architecture in place of `platmon-cli` (`all`, `noarch`), and the page moves into it.
+
+Verified for this release so far:
+
+| check | result |
+| --- | --- |
+| CI on each merged PR (#239 to #242) and on `main` at `33f9164` | Python tools, `native` (build, equivalence, `live_http.py`, `hub_contract.py` with platmon-hub 1.2.0, the command's tests, the tray on a private `dbus-daemon`), `native-windows` (unit tests, the smoke test with the zip, the installer's install, upgrade, refused downgrade and removal, and its `Run` value for the tray), packages, Lintian, the dpkg, service and rpm checks, userspace containers: all passed |
+| the command against `cli.py` (#239) | byte for byte on 12 `--once` snapshots, 23 failures, 4552 screens and 350 key presses, a pipe and two terminal sessions; the accepted differences are in CHANGELOG.md |
+| upgrades from the 1.10.0 packages, in containers with a local APT and DNF repository (#241) | `apt full-upgrade`, `apt install platmon-frontend`, `dpkg -i` of both files and `dnf upgrade` move the page and replace `platmon-cli`; `apt upgrade` and `apt-get upgrade` keep `platmon` back while `platmon-cli` is installed; rolling `platmon` back to 1.10.0 removes `platmon-frontend` |
+| the tray in a container with GLib's `gdbus` and a watcher stand-in (#242) | registration, `GetAll`, `Introspect`, `Activate` opening the page, the icon and tooltip following the server; 640 KiB resident and 0.011 % of one core over 180 s, 0.216 requests/s, the server's CPU within the noise |
+
+Open: the tray on KDE Plasma and on Ubuntu's or the Jetson's GNOME with the AppIndicator extension (the icon,
+the tooltip, a click, a restarted panel), on the Windows laptop and desktop (the icon and tooltip, a click,
+Explorer restarted, the installer's login start, an upgrade with the tray running, logoff), its cost on the
+Orin's desktop against [budget.md](../performance/budget.md); the release packages on the Orin (package smoke
+and live HTTP) and the upgrade from 1.10.0 there; armhf on a real device.
 
 ## 1.10.0 release gate (2026-11-21)
 

@@ -4,7 +4,13 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `VERSION`; Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## Unreleased
+## 1.11.0 — 2026-11-23
+
+The frontends in one package with no Python: `platmon-cli` is renamed `platmon-frontend` and holds the web
+page, the `platmon` command as a native binary and a new tray, `platmon-tray`, on Linux and Windows. From
+1.10.0 run `sudo apt full-upgrade` or `sudo apt install platmon-frontend` (below). The HTTP API's schema
+versions and the `platmon.ini` keys and defaults are unchanged from 1.10.0; `/api/status` adds `version`, and
+`/` answers 404 when the page is not installed.
 
 - **The tray, `platmon-tray [host[:port]]`**: a service's state as one icon (ok, warning, critical, not
   reachable, from the same levels and attention list as the web page and the command), the host and the state
