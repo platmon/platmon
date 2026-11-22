@@ -457,7 +457,10 @@ pub fn connect() -> Result<(Bus, UnixStream, String), String> {
         };
         match attempt() {
             Ok(c) => return Ok(c),
-            Err(e) => last = format!("{:?}: {}", a, e),
+            Err(e) => last = match a {
+                Address::Path(p) => format!("{}: {}", p, e),
+                Address::Abstract(n) => format!("@{}: {}", n, e), // as ss and netstat write an abstract name
+            },
         }
     }
     Err(last)
