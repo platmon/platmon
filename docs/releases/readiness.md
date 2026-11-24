@@ -5,8 +5,9 @@
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.11.0, the frontends in `platmon-frontend` without Python (the web page, the `platmon` command in Rust,
 >   the new tray `platmon-tray`): being prepared (2026-11-23). CI passed on every merged change; the Orin's
->   user unit passed its checks and a 24 h soak but for one descriptor reading, waiting for the owner
->   (2026-11-25); the tray's checks on desktops are open.
+>   user unit passed its checks and a 24 h soak but for one descriptor reading, and the desktop's candidate
+>   service its checks and a 24 h soak but for one growth reading, both waiting for the owner (2026-11-25);
+>   the tray's checks on desktops are open.
 > - 1.10.0, Windows 11 supported with an installer, IPv6, a per-address connection limit, query strings
 >   ignored on fixed paths and a Prometheus exporter: published 2026-11-22 and in the APT repository.
 >   Its CI packages passed the Orin's package smoke, live HTTP, the user unit's checks and a 24 h soak, and the
@@ -61,6 +62,8 @@ Verified for this release so far:
 | upgrades from the 1.10.0 packages, in containers with a local APT and DNF repository (#241) | `apt full-upgrade`, `apt install platmon-frontend`, `dpkg -i` of both files and `dnf upgrade` move the page and replace `platmon-cli`; `apt upgrade` and `apt-get upgrade` keep `platmon` back while `platmon-cli` is installed; rolling `platmon` back to 1.10.0 removes `platmon-frontend` |
 | the tray in a container with GLib's `gdbus` and a watcher stand-in (#242) | registration, `GetAll`, `Introspect`, `Activate` opening the page, the icon and tooltip following the server; 640 KiB resident and 0.011 % of one core over 180 s, 0.216 requests/s, the server's CPU within the noise |
 | the Orin (L4T R36.5.2), the CI packages of `ddd2ef0` (run 45075697627, checksums matched): the arm64 deb's server (`d3aefd099ff5fd9d`) as a user unit (`install_user.sh`), beside the production 1.8.2 service, 2026-11-24/25 | `deploy_check.py checks` 9 of 9 (ready, start, restart, crash, failed start, stop while collecting, stop during replay, stop with the `nvidia-smi` probe, end); `soak --hours 24`: no restart, no lost record or problem, settled PSS 10.7 to 11.2 MiB (growth 7 and 33 KiB per round against 64), 5 threads, CPU 0.78 to 0.92 %, collection steps at most 1.001 s, the production service untouched (active, `NRestarts=0`); the report's one failure, below |
+| the desktop (Core i5-13600KF, Windows 11 25H2), the CI packages of `ddd2ef0` (run 45075697627): the zip's server (`cc19af824252cd53`) as the candidate service, 2026-11-24 | `windows_check.py checks --previous` 1.10.0's server: 9 of 9 (ready, start, restart, crash, failed start, stop while collecting, stop during replay, upgrade, end); the platmon service (1.10.0) untouched |
+| the same, `soak --hours 24`, 2026-11-24 07:54 to 11-25 07:48 KST, judged by `report` | FAIL on one rule: hours 12 to 23's settled private bytes grew 116 KiB per round against 64 (hours 0 to 11: 17); otherwise no automatic restart (the planned one after hour 11 only), 106,020 Hub-like requests and 2,016 in the concurrent rounds without an error, a lost record or a problem, 84,311 collections, longest step 1.010 s, no gap; settled private bytes 25.2 to 27.1 MiB, segment baselines 26,636 and 26,484 KiB; concurrency peaks up to 75.7 MiB; 9 to 10 threads, 167 to 169 handles; CPU 1.5 to 1.9 %; stopped at the end with exit code 0, the platmon service answering. Below |
 
 The Orin soak's failure: hour 12, the first hour after the soak's restart and so its second segment's
 reference, read 5 descriptors in its settled reading; hours 0 to 11 and 13 to 23 read 4, and the rule wants
@@ -68,11 +71,23 @@ each hour equal to the reference. Its sockets (3) and threads (5) were as in eve
 was a file open at the moment of the reading, not a descriptor kept: the later hours have one fewer, not more.
 Waiting for the owner's acceptance.
 
-Open: the tray on KDE Plasma and on Ubuntu's or the Jetson's GNOME with the AppIndicator extension (the icon,
-the tooltip, a click, a restarted panel), on the Windows laptop and desktop (the icon and tooltip, a click,
-Explorer restarted, the installer's login start, an upgrade with the tray running, logoff), its cost on the
-Orin's desktop against [budget.md](../performance/budget.md); the release packages on the Orin (package smoke
-and live HTTP) and the upgrade from 1.10.0 there; armhf on a real device.
+The Windows soak's failure: as at 1.10.0, `report` judges the private bytes read right after the tool's own
+`/api/status`, `/api/observations` and `/api/history` requests, which that gate found to sit 2 to 4 MiB above
+the memory the server keeps until the next reading. Here that reading's hours 12 to 23 move between 25,792 and
+27,704 KiB, and hour 22's 27,704 (0.8 MiB above its neighbours) with hours 13 and 16's low readings (25,832 and
+25,792) make most of the slope. Unlike 1.10.0, the counter read just before those requests, recorded beside
+it (`rollup_kib.Pss`), is also over the limit in that segment: 68 KiB per round (hours 1 to 11: -3), between
+21,932 and 23,400 KiB against 21,732 to 23,244 in the first segment, so its range rose 156 KiB at the top in
+12 hours. The history held 58 series throughout. Whether this is the reading's noise or growth is not settled:
+the owner decides whether to accept it, as at 1.10.0, or to repeat the soak. Raw: the desktop's
+`E:\Git\platmon\soak-1.11.0\` (`checks-windows.jsonl`, `soak-24h-windows.jsonl`, `run.log`).
+
+Open: the owner's decisions on the Orin soak's descriptor reading and the Windows soak's growth reading
+(above); the tray on KDE Plasma and on Ubuntu's or the Jetson's GNOME with the AppIndicator extension (the
+icon, the tooltip, a click, a restarted panel), on the Windows laptop and desktop (the icon and tooltip, a click, Explorer restarted, the installer's
+login start, an upgrade with the tray running, logoff), its cost on the Orin's desktop against
+[budget.md](../performance/budget.md); the release packages on the Orin (package smoke and live HTTP) and the
+upgrade from 1.10.0 there; armhf on a real device.
 
 ## 1.10.0 release gate (2026-11-21)
 
