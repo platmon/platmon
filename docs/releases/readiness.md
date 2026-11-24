@@ -4,8 +4,9 @@
 > - Release gates and evidence per version, newest first (1.11.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.11.0, the frontends in `platmon-frontend` without Python (the web page, the `platmon` command in Rust,
->   the new tray `platmon-tray`): being prepared (2026-11-23). CI passed on every merged change; the checks
->   on devices are open.
+>   the new tray `platmon-tray`): being prepared (2026-11-23). CI passed on every merged change; the Orin's
+>   user unit passed its checks and a 24 h soak but for one descriptor reading, waiting for the owner
+>   (2026-11-25); the tray's checks on desktops are open.
 > - 1.10.0, Windows 11 supported with an installer, IPv6, a per-address connection limit, query strings
 >   ignored on fixed paths and a Prometheus exporter: published 2026-11-22 and in the APT repository.
 >   Its CI packages passed the Orin's package smoke, live HTTP, the user unit's checks and a 24 h soak, and the
@@ -59,6 +60,13 @@ Verified for this release so far:
 | the command against `cli.py` (#239) | byte for byte on 12 `--once` snapshots, 23 failures, 4552 screens and 350 key presses, a pipe and two terminal sessions; the accepted differences are in CHANGELOG.md |
 | upgrades from the 1.10.0 packages, in containers with a local APT and DNF repository (#241) | `apt full-upgrade`, `apt install platmon-frontend`, `dpkg -i` of both files and `dnf upgrade` move the page and replace `platmon-cli`; `apt upgrade` and `apt-get upgrade` keep `platmon` back while `platmon-cli` is installed; rolling `platmon` back to 1.10.0 removes `platmon-frontend` |
 | the tray in a container with GLib's `gdbus` and a watcher stand-in (#242) | registration, `GetAll`, `Introspect`, `Activate` opening the page, the icon and tooltip following the server; 640 KiB resident and 0.011 % of one core over 180 s, 0.216 requests/s, the server's CPU within the noise |
+| the Orin (L4T R36.5.2), the CI packages of `ddd2ef0` (run 45075697627, checksums matched): the arm64 deb's server (`d3aefd099ff5fd9d`) as a user unit (`install_user.sh`), beside the production 1.8.2 service, 2026-11-24/25 | `deploy_check.py checks` 9 of 9 (ready, start, restart, crash, failed start, stop while collecting, stop during replay, stop with the `nvidia-smi` probe, end); `soak --hours 24`: no restart, no lost record or problem, settled PSS 10.7 to 11.2 MiB (growth 7 and 33 KiB per round against 64), 5 threads, CPU 0.78 to 0.92 %, collection steps at most 1.001 s, the production service untouched (active, `NRestarts=0`); the report's one failure, below |
+
+The Orin soak's failure: hour 12, the first hour after the soak's restart and so its second segment's
+reference, read 5 descriptors in its settled reading; hours 0 to 11 and 13 to 23 read 4, and the rule wants
+each hour equal to the reference. Its sockets (3) and threads (5) were as in every other hour, so the fifth
+was a file open at the moment of the reading, not a descriptor kept: the later hours have one fewer, not more.
+Waiting for the owner's acceptance.
 
 Open: the tray on KDE Plasma and on Ubuntu's or the Jetson's GNOME with the AppIndicator extension (the icon,
 the tooltip, a click, a restarted panel), on the Windows laptop and desktop (the icon and tooltip, a click,
