@@ -15,8 +15,8 @@
 > - Python server: deprecated in 1.5.0, removed in 1.7.0 (below).
 > - Decided (2026-11-22): the `platmon` command in Rust (step 1, done: #239, #240, `cli.py` removed), then
 >   the frontends in one package `platmon-frontend` (step 2, done: #241, the web page moved from
->   `platmon` and `platmon-cli` renamed), then the tray on Linux and Windows (step 3, implemented: this change;
->   desktops and devices still to check); macOS planned ([below](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22)).
+>   `platmon` and `platmon-cli` renamed), then the tray on Linux and Windows (step 3, done: #242;
+>   desktops and devices still to check); macOS planned; one repository, reviewed again 2026-11-25 ([below](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22)).
 > - Also recorded, not started: a separate network process (deferred; no Unix socket).
 
 Merging, production rollout and releases always wait for the owner's approval. The staged plan of
@@ -420,7 +420,7 @@ or Jetson GNOME, the Windows laptop and desktop.
    the API. Upgrades from 1.10.0 checked in containers with a local APT and DNF repository: `apt
    full-upgrade`, `apt install platmon-frontend` and `dnf upgrade` move the page and replace `platmon-cli`;
    `apt upgrade` and `apt-get upgrade` keep `platmon` back while `platmon-cli` is installed.
-3. The tray. **Implemented** (this change): `platmon-tray`, a third binary of `native/frontend/`, sharing the
+3. The tray. **Done** (#242): `platmon-tray`, a third binary of `native/frontend/`, sharing the
    command's HTTP client, `attention()`, levels and `metrics()` through the frontend's library target
    (`frontend/src/lib.rs`, not `shared/`: they are the frontends' code, which the server must not depend
    on); in `platmon-frontend` (`/usr/bin/platmon-tray`, `man platmon-tray`, nothing in
@@ -454,19 +454,57 @@ not). No tray (the menu bar needs the Objective-C runtime) and no server on macO
 
 ### One repository
 
-The frontends stay in this repository; the boundary is the package. The core is tied to them: `/text` is
-the command's `render()`, the equivalence and packaging tools read `frontends/`, and the MSI
-holds both. Revisit when the frontends get their own contributors or release cadence, after: the core
-serving its web directory without a list and the page reading its version and levels from `/api/status`
-(both done in step 2), `/text`'s owner decided, a compatibility table and CI pairing as with platmon-hub, and where the MSI is built.
+The frontends stay in this repository; the boundary is the package. Reviewed again on 2026-11-25 with steps
+1 to 3 merged (the owner, after a three-view deliberation): a separate `platmon-frontend` repository is not
+adopted now.
+
+The sources are apart, but the release files are not:
+
+- `shared/` (`json.rs`, `render.rs`) is used by both sides; `/text` and `platmon --once` are its one renderer.
+- `package.py` and `release.yml` build every file from one `VERSION`, with one `SHA256SUMS` and `BUILD.json`;
+  the APT repository takes both packages from that release.
+- The Windows zip and MSI, the container (`deploy/docker/Dockerfile`) and `deploy/systemd/install.sh` hold
+  the server and the frontends together.
+- The core's tools serve `frontends/web` (`live_http.py`, `service_ab.py`); the frontends' tests need a
+  server (the browser tests, the command's and the tray's integration tests).
+
+A split moves this coupling between two repositories: two versions, release pages and `SHA256SUMS`, the APT
+workflow reading both, the bundles built from a pinned frontend release, a compatibility table, and two
+releases in a row for a change to `shared/`. Nothing asks for that now: the frontends have no release cadence
+or contributors of their own, and the owner's concern, Rust and web or tray code side by side, is met by
+tidying this repository (below). Who uses the releases is not known: 1.4.0 to 1.10.0 show 1 to 7 downloads
+per file, the owner's own checks included (1.3.0's 2,659 on one file excepted); APT installs are not counted
+(platmon.github.io serves the files), and the repository has no stars or forks (2026-11-25).
+
+Where each part belongs, split or not:
+
+- The frontends: the web page (`frontends/web`, `ui-spec.json`), the `platmon` command and the tray (both
+  Rust, `native/frontend/`), the `platmon-frontend` package.
+- The core: the server, its unit and `platmon.ini`, the `platmon` package, `deploy/`, and `shared/`, since
+  `/text` is the server's API; a separate frontend repository would take it as a Cargo dependency on a core
+  tag.
+- The bundles (the zip, the MSI, the container): built by the core.
+
+Revisit when one of these is recorded here:
+
+- a frontend-only change waited for a server release three times;
+- a contributor sends changes to the frontends;
+- after the tidying below, the mixed code is still in the way.
+
+Before a split, a local rehearsal (`git filter-repo` into a frontend repository, the core without it) builds
+both, their tests and the bundles end to end.
+
+After 1.11.0, planned: tidy the repository along the same boundary (top-level directories for the core,
+the frontends and `shared/`, CI path filters), without changing the packages. Not prepared: separate
+`frontend-v*` tags.
 
 Kept for such a split (step 1):
 
-- `native/` is a Cargo workspace: the server (`platmon-server`), `shared/` and `frontend/` (the command, later
+- `native/` is a Cargo workspace: the server (`platmon-server`), `shared/` and `frontend/` (the command and
   the tray). Each depends on `shared/` only, so the frontend cannot use the server's modules, nor the server
   the frontend's: the compiler enforces the boundary a split would cut along.
 - `shared/` owns `/text`'s renderer (`render.rs`) and the JSON code both sides use; the server's `/text` and
   the command's `--once` are the same function, so `/text`'s owner is decided as that crate's.
 - Done in step 2: the server serves its web directory without the `WEB` list in `http.rs` (any regular file
   of a known type), and the page reads its version and levels from `/api/status` instead of `@VERSION@` and
-  `@LEVELS@` filled in by the server: the first two prerequisites above are met.
+  `@LEVELS@` filled in by the server.
