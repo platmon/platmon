@@ -1,7 +1,7 @@
 # Remaining work
 
 > **TL;DR**
-> - What is still open, checked against the repository on 2026-11-23 (1.10.0 released, 1.11.0 being prepared); the evidence for
+> - What is still open, checked against the repository on 2026-11-26 (1.11.0 released); the evidence for
 >   each release is in [release readiness](../releases/readiness.md).
 > - 1.8.0 (owner, 2026-11-03 and 2026-11-12), released 2026-11-12: the experimental Windows zip together with
 >   `.rpm` release files and battery follow-ups; 1.8.1, the frontends' design on its server, released
@@ -62,7 +62,7 @@ skipped until one is ready. Published 2026-11-22, in the APT repository.
 1.11.0 (owner, 2026-11-23) releases what `main` gained after 1.10.0: the steps 1 to 3 of
 [the frontend package, the CLI in Rust and the tray](#decided-the-frontend-package-the-cli-in-rust-and-the-tray-2026-11-22);
 its gate is in [release readiness](../releases/readiness.md#1110-release-gate-2026-11-23), with the tray's
-checks on devices still open. The tag waits for the owner.
+checks on devices still open. Published 2026-11-25, in the APT repository.
 
 ## Windows build (2026-10-26)
 
