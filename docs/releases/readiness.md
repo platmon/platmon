@@ -4,7 +4,7 @@
 > - Release gates and evidence per version, newest first (1.11.0 at the top).
 > - Each gate lists what was verified (tests, native equivalence, packages, devices, soak) and what was not.
 > - 1.11.0, the frontends in `platmon-frontend` without Python (the web page, the `platmon` command in Rust,
->   the new tray `platmon-tray`): being prepared (2026-11-23). CI passed on every merged change; the Orin's
+>   the new tray `platmon-tray`): published 2026-11-25 and in the APT repository. CI passed on every merged change; the Orin's
 >   user unit passed its checks and a 24 h soak but for one descriptor reading, and the desktop's candidate
 >   service its checks and a 24 h soak but for one growth reading, both accepted by the owner (2026-11-25);
 >   the tray's checks on desktops are open.
@@ -88,6 +88,15 @@ login start, an upgrade with the tray running, logoff), its cost on the Orin's d
 [budget.md](../performance/budget.md); the release packages on the Orin (package smoke and live HTTP) and the
 upgrade from 1.10.0 there; armhf on a real device. The owner's go-ahead to release (2026-11-25) does not
 wait for them.
+
+The release (2026-11-25, the owner's go-ahead the same day):
+
+| check | result |
+| --- | --- |
+| CI on #243's head `abe1c49` and `main` at `2026e79` (#243 on top of #244, a documentation change) | all passed; on `main` the armhf userspace job failed once to download an artifact uploaded 7 s before and passed when rerun |
+| the published release: release run 45548698290 from the tag `v1.11.0` (`2026e79`), 15 files; `SHA256SUMS` of the downloaded draft; the attestations of the 13 package files, read from the GitHub API (`gh attestation verify` is not in the `gh` used, 2.45); the notes; the assets' digests just before publishing and after | all jobs passed; `sha256sum -c` OK; each file has an attestation from `.github/workflows/release.yml` at `refs/tags/v1.11.0`, run 45548698290 (its signature not verified locally); the CHANGELOG section; the published files the verified ones |
+| the released servers against the soaked ones | aarch64 `d3aefd099ff5fd9d`, the Orin's: the same bytes; the zip's `platmon-server.exe` (`81c1be5c49cd4853`) differs from the desktop's `cc19af824252cd53` in 24 bytes, the link time in the PE header, its debug directory and the PDB's identifier, as at 1.10.0: the same code |
+| the APT repository (platmon.github.io run 45549958210, approved by the owner), read with a private apt state under WSL Ubuntu 24.04 (nothing installed) and the guide's source stanza, amd64, arm64 and armhf | the key's fingerprint as documented; `platmon` and `platmon-frontend` candidates 1.11.0-1, `platmon-cli` 1.10.0-1 and older still listed; the six `.deb` files `apt-get download`ed byte for byte the released ones |
 
 ## 1.10.0 release gate (2026-11-21)
 
