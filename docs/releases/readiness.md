@@ -6,7 +6,7 @@
 > - 1.11.0, the frontends in `platmon-frontend` without Python (the web page, the `platmon` command in Rust,
 >   the new tray `platmon-tray`): being prepared (2026-11-23). CI passed on every merged change; the Orin's
 >   user unit passed its checks and a 24 h soak but for one descriptor reading, and the desktop's candidate
->   service its checks and a 24 h soak but for one growth reading, both waiting for the owner (2026-11-25);
+>   service its checks and a 24 h soak but for one growth reading, both accepted by the owner (2026-11-25);
 >   the tray's checks on desktops are open.
 > - 1.10.0, Windows 11 supported with an installer, IPv6, a per-address connection limit, query strings
 >   ignored on fixed paths and a Prometheus exporter: published 2026-11-22 and in the APT repository.
@@ -69,7 +69,7 @@ The Orin soak's failure: hour 12, the first hour after the soak's restart and so
 reference, read 5 descriptors in its settled reading; hours 0 to 11 and 13 to 23 read 4, and the rule wants
 each hour equal to the reference. Its sockets (3) and threads (5) were as in every other hour, so the fifth
 was a file open at the moment of the reading, not a descriptor kept: the later hours have one fewer, not more.
-Waiting for the owner's acceptance.
+Accepted by the owner (2026-11-25).
 
 The Windows soak's failure: as at 1.10.0, `report` judges the private bytes read right after the tool's own
 `/api/status`, `/api/observations` and `/api/history` requests, which that gate found to sit 2 to 4 MiB above
@@ -78,16 +78,16 @@ the memory the server keeps until the next reading. Here that reading's hours 12
 25,792) make most of the slope. Unlike 1.10.0, the counter read just before those requests, recorded beside
 it (`rollup_kib.Pss`), is also over the limit in that segment: 68 KiB per round (hours 1 to 11: -3), between
 21,932 and 23,400 KiB against 21,732 to 23,244 in the first segment, so its range rose 156 KiB at the top in
-12 hours. The history held 58 series throughout. Whether this is the reading's noise or growth is not settled:
-the owner decides whether to accept it, as at 1.10.0, or to repeat the soak. Raw: the desktop's
+12 hours. The history held 58 series throughout. Whether this is the reading's noise or growth is not settled;
+the owner accepted it (2026-11-25) without repeating the soak. Raw: the desktop's
 `E:\Git\platmon\soak-1.11.0\` (`checks-windows.jsonl`, `soak-24h-windows.jsonl`, `run.log`).
 
-Open: the owner's decisions on the Orin soak's descriptor reading and the Windows soak's growth reading
-(above); the tray on KDE Plasma and on Ubuntu's or the Jetson's GNOME with the AppIndicator extension (the
+Open: the tray on KDE Plasma and on Ubuntu's or the Jetson's GNOME with the AppIndicator extension (the
 icon, the tooltip, a click, a restarted panel), on the Windows laptop and desktop (the icon and tooltip, a click, Explorer restarted, the installer's
 login start, an upgrade with the tray running, logoff), its cost on the Orin's desktop against
 [budget.md](../performance/budget.md); the release packages on the Orin (package smoke and live HTTP) and the
-upgrade from 1.10.0 there; armhf on a real device.
+upgrade from 1.10.0 there; armhf on a real device. The owner's go-ahead to release (2026-11-25) does not
+wait for them.
 
 ## 1.10.0 release gate (2026-11-21)
 
